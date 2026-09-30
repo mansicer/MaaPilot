@@ -1,0 +1,8 @@
+# maa-cli 自身配置
+[core]
+channel = "stable"
+
+[resource]
+auto_update = true             # 每次运行任务前自动热更新资源
+warn_on_update_failure = true  # 更新失败只警告，不中断任务
+backend = "git"

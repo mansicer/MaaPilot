@@ -1,0 +1,10 @@
+private/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info
+logs/
+data/
+resource/model/
+.DS_Store
+.claude/settings.local.json

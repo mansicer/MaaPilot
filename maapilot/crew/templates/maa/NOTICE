@@ -1,0 +1,16 @@
+这些模板图片复制自 MaaAssistantArknights（MAA，https://github.com/MaaAssistantArknights/MaaAssistantArknights）的
+resource/template/（maa-cli 安装的资源，2026-09-05 的资源更新），原样未改，只用于 maapilot.crew.clears 的只读识别。
+MAA 以 AGPL-3.0 发布；本项目同样以 AGPL-3.0 发布（决策 D44），可以随仓库分发。
+
+文件与 MAA 里的来源、用途：
+- StageTheme.png            template/StageNavigation/Episode/StageTheme.png   终端底栏"主题曲"（任务 StageTheme）
+- 00@EnterEpisodeNew.png …  template/StageNavigation/Episode/                  乐章收录里的章节卡（任务 NN@EnterEpisodeNew）
+  17@EnterEpisodeNew.png
+- UsePrts.png               template/Battle/UsePrts/UsePrts.png               关卡详情的"代理指挥"按钮（任务 UsePrts）
+- UnableToAgent2.png        template/Battle/UsePrts/UnableToAgent2.png        代理指挥未解锁的锁图标（任务 UnableToAgent2）
+- RaidDifficulty.png        template/StageNavigation/RaidDifficulty.png       常规模式下的"突袭"切换按钮（任务 ChangeToRaidDifficulty / NormalConfirm）
+- RaidDifficulty-Chapter15.png  同上，第 15 章起的"险地作战"
+- NormalDifficulty.png      template/StageNavigation/Episode/NormalDifficulty.png   突袭 / 险地模式下切回常规的按钮（任务 ChangeToNormalDifficulty）
+- NormalDifficulty-Chapter15.png  同上，第 15 章起
+
+游戏更新改了界面、识别失败时，先对照 MAA 的新版资源更新这些文件。

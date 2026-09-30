@@ -1,0 +1,39 @@
+# MaaPilot 配置。setup 时复制到 private/config.yaml 并填好；之后用户或 agent 都可以改（改完跑 maapilot doctor 确认）。
+# 字段含义见 docs/cli.md「private/config.yaml」。
+
+# 模拟器连接。address 是 adb 地址（host:port，或 `adb devices` 列出的序列号），setup 时找出来填；不要照抄别人的。
+emulator:
+  address: ""
+  adb: adb                # adb 程序；不在 PATH 上就写绝对路径
+
+# 游戏客户端（MAA 的 client_type）：Official 官服 / Bilibili B 服 / YoStarEN 国际服 / YoStarJP 日服 / YoStarKR 韩服 / txwy 繁中服
+server: Official
+
+# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（`command -v maa` / `command -v claude`）。
+tools:
+  maa: maa
+  claude: claude
+
+# 每天定时跑日常的时间（本机时间，24 小时制）。改完要重新 `maapilot daily schedule` 才生效。
+# 游戏每天 04:00 换日，别把时间点放在 04:00 前后几分钟。
+schedule:
+  - "04:40"
+  - "16:40"
+
+daily:
+  # 按顺序跑的 MAA 日常项（去掉不想做的即可）：
+  #   startup 启动游戏回首页 | recruit 公开招募 | infrast 基建换班收菜 | mall 信用商店与访问好友
+  #   annihilation 剿灭（每次日常打 1 次；本周合成玉拿满后就跳过） | award 领任务奖励与邮件
+  # 刷理智不在这里：有进行中的目标时 agent 刷目标缺的材料，没有就刷下面的 default_stage。award 总在刷理智之后。
+  tasks: [startup, recruit, infrast, mall, annihilation, award]
+  # 没有进行中的目标时，剩余理智刷哪关
+  default_stage: "1-7"
+  # 给某个日常项改 MAA 参数（可选，参数名见 MAA 文档的任务参数，写错会报错）。例如：
+  # params:
+  #   recruit: { times: 4, refresh: true }
+  #   mall: { buy_first: ["招聘许可"], blacklist: ["家具零件"] }
+  params: {}
+  # 定时日常里叫起来的 agent 最长跑多久：做目标部分的、接管失败项的；一个 MAA 日常项最长跑多久（分钟）
+  agent_timeout_min: 90
+  recovery_timeout_min: 30
+  task_timeout_min: 90

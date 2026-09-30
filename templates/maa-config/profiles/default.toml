@@ -1,0 +1,18 @@
+# maa-cli 连接配置。模拟器地址不写在这里：MaaPilot 每次调用 maa-cli 都用 --addr 传入 private/config.yaml 的 emulator.address。
+[connection]
+config = "CompatMac"
+
+[resource]
+user_resource = false
+
+[static_options]
+cpu_ocr = true
+
+[instance_options]
+touch_mode = "MaaTouch"
+deployment_with_pause = false
+adb_lite_enabled = false
+kill_adb_on_exit = false
+
+[behavior]
+auto_reconnect = true
