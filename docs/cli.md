@@ -195,6 +195,19 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
 重登或稍后重试，不用接管）、`not_open`（关卡今天不开）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
 
+**失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
+再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
+（`interface/`、`other/` 等子目录下的 `YYYY.MM.DD-HH.MM.SS.mmm_raw.png`，本地时间，最多 6 张），放进 `data.evidence`：
+
+```json
+{"shot_now": "/…/private/shots/20261002-160918-fail-infrast.png",
+ "maa_shots": [{"path": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "2026-10-02T16:09:17+08:00"}],
+ "window": {"start": "…", "end": "…"}, "missing": ["…"]}
+```
+
+取证尽力而为，自己失败不影响命令的结果：拿不到的写进 `missing`（连不上模拟器、找不到 MAA 的日志目录），都拿到了就没有 `missing`。
+`shot_now` 也记进命令记录（`private/log/<日期>.jsonl` 那一行的 `shot_now`）。`not_open`、参数错这类没跑 maa 的失败不取证。
+
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。
 
 ## state —— 读账号状态，存快照
@@ -402,7 +415,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
    - `--trigger schedule`：当场启动无头 `claude -p`（加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
      再 `guard check`，然后接着跑下一项；
    - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
-     `data.handoff = {task, error, log, rest}`（`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
+     `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
    - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
 3. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
    `manual` 时交回在场的 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
@@ -435,7 +448,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 无头 agent：`<tools.claude> -p "<提示>" --output-format stream-json --verbose --settings <仓库>/.claude/settings.json --permission-mode default --permission-prompts none`，
 工作目录是仓库根目录（运行时由安装位置推出），显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝），
 环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
-agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
+agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
 （程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
@@ -574,7 +587,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 ### log/
 
-`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "error"?, "run_id"?, "depot_change"?}`。
+`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "error"?, "run_id"?, "depot_change"?, "shot_now"?}`（`shot_now`：maa 任务失败时当场截的图）。
 `depot_change` 只在命令本身读过仓库时有（`state depot`）；`run_id` 取环境变量 `MAAPILOT_RUN_ID`（`daily run` 给子进程设）。
 写记录用 `maapilot.tools.common.logged`（包住处理函数）或 `common.record()`。`maa/` 下是每次 maa-cli 调用的完整日志。
 

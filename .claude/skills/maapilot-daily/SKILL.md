@@ -23,8 +23,8 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 1. 先 `maapilot daily status`：有没有正在跑、离下次定时多久。定时点前后 20 分钟内就告诉用户"马上会自动跑"，问还要不要现在跑。
 2. `maapilot daily run`，用 Bash 的后台运行（要 20–60 分钟），告诉用户大概多久。只补几项用 `--only recruit,mall`。
 3. 结束后看 `data`：
-   - 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的）。
-     马上按 `maapilot-recovery` 看屏幕处理（掉线就重新登录，要用户决定的先问用户），处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑，一轮下来直到跑完；
+   - 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的、
+     `evidence` 是失败那一刻的截图和 MAA 自己存的截图）。马上按 `maapilot-recovery`「先看」：先看这几张截图，再看屏幕处理（掉线就重新登录，要用户决定的先问用户），处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑，一轮下来直到跑完；
    - `failed` 里有失败的项（定时运行里 agent 也没救回来的）：同样按 `maapilot-recovery` 处理，处理完 `daily run --only <这几项>` 补跑；
    - `goals_pending: true`：程序把刷理智交回给你，按下面「目标部分」做；`award_pending: true` 时领奖励也留给你（奖励要在刷理智之后领）。
      做完目标部分：`maapilot maa award`（`award_pending` 时）→ `maapilot guard check` → `maapilot report write <run_id> --append "<目标部分做了什么、花了什么>"`，再一起汇报；

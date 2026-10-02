@@ -267,6 +267,42 @@ def go_home() -> bool | None:
         return None
 
 
+EVIDENCE_SHOTS = 6        # 失败时最多带几张 MAA 自己的截图
+
+
+def failure_shot(task: str) -> str:
+    """失败那一刻截一张（同 `screen shot`），返回路径；连不上抛异常。测试里替换掉。"""
+    from maapilot.tools import screen
+    return screen.capture(common.connect(ocr=False), f"fail-{task}")[1]["path"]
+
+
+def collect_evidence(task: str, started, ended) -> dict:
+    """失败时的取证：先截图（趁还没别的东西动屏幕），再找 MAA 这段时间自己存的截图。尽力而为，
+    哪样拿不到写进 `missing`，从不让命令因此失败。"""
+    from datetime import timedelta
+    ev: dict = {"shot_now": None, "maa_shots": [], "window": {"start": common.iso(started), "end": common.iso(ended)},
+                "missing": []}
+    try:
+        ev["shot_now"] = failure_shot(task)
+    except CliError as e:
+        ev["missing"].append(f"失败时的截图：{e.message}")
+    except Exception as e:                             # noqa: BLE001
+        ev["missing"].append(f"失败时的截图：{type(e).__name__}: {e}")
+    try:
+        from maapilot.crew import maalog
+        root = maalog.debug_dir()
+        if root is None:
+            ev["missing"].append("MAA 的截图：找不到 MAA 的日志目录")
+        else:
+            ev["maa_shots"] = maalog.screenshots(started - timedelta(seconds=3), common.now(), root,
+                                                 limit=EVIDENCE_SHOTS)
+    except Exception as e:                             # noqa: BLE001
+        ev["missing"].append(f"MAA 的截图：{type(e).__name__}: {e}")
+    if not ev["missing"]:
+        del ev["missing"]
+    return ev
+
+
 def run(task: str, **opts) -> dict:
     """跑一个 MAA 任务，不拿锁（调用方负责）。成功返回 data；失败抛 CliError（data 里是同样的结构）。
     opts：stage、times、medicine、expiring_medicine、params（JSON 文本或 dict）、uri、formation、loop_times、timeout_s。"""
@@ -282,6 +318,7 @@ def run(task: str, **opts) -> dict:
     if maa.config_missing():
         maa.install_config()
     timeout = opts.get("timeout_s") or TASKS[task][1]
+    started = common.now()
     if task == "copilot":
         mrun = maa.execute(argv, label="copilot", timeout_s=timeout)
     else:
@@ -291,6 +328,9 @@ def run(task: str, **opts) -> dict:
         if task == "startup":
             data["home"] = go_home()
         return data
+    data["evidence"] = collect_evidence(task, started, common.now())
+    if data["evidence"].get("shot_now"):
+        data["_log"] = {"shot_now": data["evidence"]["shot_now"]}   # 命令记录里也留一份
     if mrun.error:
         raise CliError("maa_failed", mrun.error, hint="maapilot doctor", exit=FAILED, data=data)
     data["errors"] = maa.error_lines(mrun)
@@ -299,7 +339,7 @@ def run(task: str, **opts) -> dict:
                        hint="重新登录（maapilot maa startup）后再试；维护中就等维护结束")
     why = "超时，已终止 maa" if mrun.timed_out else f"maa 退出码 {mrun.returncode}"
     raise CliError("maa_failed", f"{task} 没做成（{why}）", exit=FAILED, data=data,
-                   hint="截图看看卡在哪（maapilot screen shot），按 maapilot-recovery 处理")
+                   hint="先看 evidence 里的截图，再截图看现在卡在哪（maapilot screen shot），按 maapilot-recovery 处理")
 
 
 @common.logged

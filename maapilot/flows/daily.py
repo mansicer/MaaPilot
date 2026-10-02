@@ -156,6 +156,21 @@ def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: 
     return info
 
 
+def evidence_lines(ev: dict | None) -> list[str]:
+    """失败取证（maa 命令的 data.evidence）→ 给 agent 的几行提示。"""
+    if not ev:
+        return []
+    out = []
+    if ev.get("shot_now"):
+        out.append(f"失败那一刻的截图：{ev['shot_now']}")
+    shots = ev.get("maa_shots") or []
+    if shots:
+        out.append("MAA 自己在这段时间存的截图（按时间）：" + "；".join(f"{s.get('at', '')[11:19]} {s['path']}" for s in shots))
+    if ev.get("missing"):
+        out.append("没取到：" + "；".join(ev["missing"]))
+    return out
+
+
 def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: list[str] | None = None) -> str:
     log = (data or {}).get("log")
     cmd = " ".join(shlex.quote(a) for a in (argv or [task]))
@@ -163,7 +178,8 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
         f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
         f"日常项「{reportmod.label(task)}」（maapilot maa {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
         f"MAA 日志：{log}。" if log else "",
-        "加载 skill maapilot-recovery，只处理这一项：先截图看停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
+        *evidence_lines((data or {}).get("evidence")),
+        "加载 skill maapilot-recovery，只处理这一项：先看上面的截图，再截图看现在停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",
@@ -364,7 +380,8 @@ def _finish(r: _Run) -> dict:
     if d.get("handoff"):
         h = d["handoff"]
         raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
-                       hint=f"按 maapilot-recovery 看屏幕处理好，再 maapilot daily run --only {','.join(h['rest'])} 接着跑",
+                       hint=f"按 maapilot-recovery 先看 handoff.evidence 的截图，处理好再 "
+                            f"maapilot daily run --only {','.join(h['rest'])} 接着跑",
                        exit=FAILED, data=d)
     if d["failed"]:
         raise CliError("daily_incomplete", f"有 {len(d['failed'])} 项没做成：{'、'.join(map(reportmod.label, d['failed']))}",
@@ -411,6 +428,8 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
     else:
         row.update(error=err.get("message") or err.get("code") or f"退出码 {code}", code=err.get("code"),
                    log=(data or {}).get("log"))
+        if (data or {}).get("evidence"):
+            row["evidence"] = data["evidence"]
     r.event("task", **row)
     r.data["tasks"].append(row)
     if code != 0:
@@ -504,6 +523,7 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
             return
         t = row["task"]
         r.data["handoff"] = {"task": t, "error": row.get("error"), "log": row.get("log"),
+                             "evidence": row.get("evidence"),
                              "rest": order[order.index(t):] if t in order else [t]}
         r.data["status"] = "handed_off"
         raise _Stop()

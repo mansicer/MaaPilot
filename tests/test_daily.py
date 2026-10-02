@@ -87,7 +87,8 @@ def env(tmp_path, monkeypatch):
             return 0, {"ok": True, "data": {}, "error": None}
         task = args[1]
         if task in behavior["fail"]:
-            return 1, {"ok": False, "data": {"log": "private/log/maa/x.log"},
+            return 1, {"ok": False, "data": {"log": "private/log/maa/x.log",
+                                             **({"evidence": behavior["evidence"]} if behavior.get("evidence") else {})},
                        "error": {"code": behavior.get("fail_code", "maa_failed"), "message": f"{task} 卡住了"}}
         if task == "fight":
             return 0, {"ok": True, "data": {"stage": args[2], "times_done": 12, "sanity_used": 72,
@@ -170,6 +171,31 @@ def test_manual_failure_stops_and_hands_over(capsys, env):
     assert "award" not in maa_tasks(env) and "award" in d["handoff"]["rest"]
     assert "--only " + ",".join(d["handoff"]["rest"]) in out["error"]["hint"]
     assert "交给在场的 agent" in read_report(d)
+
+
+EVIDENCE = {"shot_now": "/p/private/shots/20261002-160918-fail-infrast.png",
+            "maa_shots": [{"path": "/maa/debug/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface",
+                           "at": "2026-10-02T16:09:17+08:00"}],
+            "window": {"start": "2026-10-02T16:01:02+08:00", "end": "2026-10-02T16:09:18+08:00"}}
+
+
+def test_manual_handoff_carries_evidence(capsys, env):
+    env["behavior"]["fail"] = {"infrast"}
+    env["behavior"]["evidence"] = EVIDENCE
+    code, out = run(capsys, "daily", "run")
+    assert code == 1 and out["error"]["code"] == "handoff"
+    assert out["data"]["handoff"]["evidence"] == EVIDENCE
+    assert "evidence" in out["error"]["hint"]
+
+
+def test_recovery_prompt_lists_evidence(capsys, env):
+    env["behavior"]["fail"] = {"infrast"}
+    env["behavior"]["evidence"] = {**EVIDENCE, "missing": ["MAA 的截图：找不到 MAA 的日志目录"]}
+    run(capsys, "daily", "run", "--trigger", "schedule")
+    (call,) = claude_calls(env)
+    prompt = call["argv"][1]
+    assert EVIDENCE["shot_now"] in prompt and EVIDENCE["maa_shots"][0]["path"] in prompt
+    assert "找不到 MAA 的日志目录" in prompt
 
 
 def test_schedule_offline_also_wakes_agent(capsys, env, monkeypatch):
