@@ -41,6 +41,7 @@
 | `screen shot / ocr` | 只读 | 放行 | A |
 | `input tap / swipe / back / text` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
+| `maa why` | 否（只读 MAA 的日志） | 放行 | A |
 | `state depot / box / sanity` | 只读（要进页面） | 放行 | A |
 | `state show` | 否 | 放行 | A |
 | `data …` | 否（`sync` 联网） | 放行 | A |
@@ -202,11 +203,43 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 ```json
 {"shot_now": "/…/private/shots/20261002-160918-fail-infrast.png",
  "maa_shots": [{"path": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "2026-10-02T16:09:17+08:00"}],
- "window": {"start": "…", "end": "…"}, "missing": ["…"]}
+ "window": {"start": "…", "end": "…"}, "why": "maapilot maa why --task infrast", "missing": ["…"]}
 ```
 
 取证尽力而为，自己失败不影响命令的结果：拿不到的写进 `missing`（连不上模拟器、找不到 MAA 的日志目录），都拿到了就没有 `missing`。
-`shot_now` 也记进命令记录（`private/log/<日期>.jsonl` 那一行的 `shot_now`）。`not_open`、参数错这类没跑 maa 的失败不取证。
+`shot_now` 也记进命令记录（`private/log/<日期>.jsonl` 那一行的 `shot_now`），`maa why` 会带出来。`not_open`、参数错这类没跑 maa 的失败不取证。
+
+`maapilot maa why [--task <任务>] [--since <时间> [--until <时间>]] [--last]`（只读：不碰模拟器、不拿锁）
+
+查一个 MAA 任务为什么失败。时间段默认取最近 7 天里最近一次失败的 `maapilot maa …`（命令记录的结束时间和时长；定时日常里跑的每一项也在里面），
+`--task` 只看这一项，`--last` 不管成没成取最近一次，`--since`/`--until`（ISO 时间或今天的 `HH:MM`，`--until` 默认现在）自己指定。时间段前后各多读几秒。
+从 maa-cli 的详细日志 `asst.log`（日志目录用 `maa dir log` 找；轮换下来的 `asst.bak.log` 也读）里按时间二分定位，只读这一段（最多 48 MB，超了 `log.truncated`），摘成：
+
+```json
+{"task": "infrast", "window": {"start": "…", "end": "…"},
+ "record": {"at": "…", "command": "maa infrast", "ok": false, "error": "maa_failed", "duration_s": 496.0, "run_id": "…"},
+ "shot_now": "…", "maa_cli_log": "/…/private/log/maa/20261002-160102-infrast.log", "maa_cli_log_tail": ["…"],
+ "log": {"dir": "…/debug", "files": ["…/asst.log"], "bytes_read": 2677065, "truncated": false},
+ "lines": 16279, "start": "16:00:59", "end": "16:09:18",
+ "taskchains": [{"at": "16:01:10", "event": "TaskChainStart", "taskchain": "Infrast"}, …],
+ "steps": [{"at": "16:06:53", "task": "LoadingText", "action": "DoNothing", "matched": "正在提交", "repeat": 39, "last": "16:07:24"}, …],
+ "tried": [{"at": "16:08:56", "cur_task": "InfrastBegin", "first": ["InfrastBegin"]}, …],
+ "errors": [{"at": "16:09:17", "class": "ProcessTask", "first": ["InfrastBegin"], "pre_task": "Stop"}, …], "error_count": 24,
+ "ocr_tail": [{"text": "玩家/ | 187", "first": "16:08:30", "last": "16:08:30", "count": 1}, …],
+ "loading": [{"text": "正在提交", "first": "16:06:53", "last": "16:07:24", "count": 39, "seconds": 31}],
+ "events": [{"kind": "title_screen", "first": "16:08:30", "last": "16:08:30", "count": 1, "detail": "OCR 看到标题页的字：玩家/ 187"}],
+ "error_lines": [], "last_match": {"at": "16:07:24", "task": "LoadingText", "matched": "正在提交"},
+ "screenshots": [{"path": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}],
+ "likely_cause": {"kind": "logged_out", "summary": "最晚 16:08:30 游戏已经回到标题页（开始唤醒）：被登出了；…", "evidence": ["…"]}}
+```
+
+- `steps`：MAA 一步步做的事（`SubTaskStart`：任务、动作、认出的字或模板），连续相同的合成一条（`repeat`、`last`），留最后 30 条；
+  `tried`：它在找哪一页（`cur_task` / `first`）的变化；`errors`：最后 8 个 `SubTaskError`；`ocr_tail`：最后两分钟 OCR 到的字（同样的字合一条）；
+  `loading`：连续 3 次以上的"正在提交"之类等服务器的字；`events`：标题页、掉线弹窗、别的设备登录的字、截图失败、连接异常；`error_lines`：MAA 的 ERR 行（去掉常见噪声）；
+  `screenshots`：时间段内（结束后再宽 30 秒）MAA 存的截图，最多 12 张。
+- `likely_cause.kind`：`other_device`（看到别的设备登录的字）、`logged_out`（认出或 OCR 到标题页）、`offline`（掉线弹窗 / 网络字样）、`emulator`（截图失败 3 次以上）、
+  `stuck_loading`（等服务器 15 秒以上之后认不出页面）、`entry_failed`（从头到尾没认出任何页面）、`unknown`（看不出，不猜）。`evidence` 是依据。
+- 找不到记录退出码 2（`not_found`）；找不到 MAA 的日志目录时照常返回，`log.dir` 为 `null`、`hint` 提示 `doctor`。
 
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。
 
@@ -448,7 +481,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 无头 agent：`<tools.claude> -p "<提示>" --output-format stream-json --verbose --settings <仓库>/.claude/settings.json --permission-mode default --permission-prompts none`，
 工作目录是仓库根目录（运行时由安装位置推出），显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝），
 环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
-agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
+agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
 （程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
@@ -616,6 +649,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot screen:*)",
       "Bash(maapilot input:*)",
       "Bash(maapilot maa:*)",
+      "Bash(maapilot maa why:*)",
       "Bash(maapilot state:*)",
       "Bash(maapilot data:*)",
       "Bash(maapilot calc:*)",
@@ -670,6 +704,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 }
 ```
 
+- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。

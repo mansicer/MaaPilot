@@ -12,8 +12,13 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 1. **先看失败那一刻的截图**：`maa` 任务失败时程序当场截了一张，还找了 MAA 自己在这段时间存的截图，都在 `data.evidence`
    （日常交给你时在 `data.handoff.evidence`，定时运行写在提示里）：`shot_now` 是失败那一刻，`maa_shots` 是 MAA 出错时存的（按时间），`missing` 是没取到的。用读图逐张看。
    提示框常常一闪而过，等你截图时已经没了，所以这几张比现在的屏幕更能说明出了什么事。
-2. 现在停在哪：`maapilot screen shot`，用读图看截图。要找字就 `maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
-3. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件看最后一段）、`data.errors`。
+2. **再查原因**：`maapilot maa why`（默认最近一次失败的 maa 任务；指定哪项用 `--task <项>`，指定时间段用 `--since <时间> --until <时间>`）。
+   它只读 MAA 的详细日志，不碰模拟器：`likely_cause` 是推断的原因和证据（`logged_out` 被登出回到标题页、`other_device` 别的设备登录、`offline` 掉线提示、
+   `entry_failed` 一开始就不在 MAA 认得的页面、`stuck_loading` 一直在等服务器、`emulator` 截图失败、`unknown` 看不出）；
+   `steps` 是 MAA 一步步做了什么、点了什么，`errors` 是最后几次找不到的页面，`ocr_tail` 是最后看到的字，`screenshots` 是这段时间 MAA 存的截图。
+   推断只是参考：跟截图对一对，对不上以截图为准；`unknown` 就别编原因。
+3. 现在停在哪：`maapilot screen shot`，用读图看截图。要找字就 `maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
+4. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件看最后一段）、`data.errors`。
 
 ## 2. 常见情形
 
@@ -64,7 +69,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 
 提示里写着哪次运行、哪一项失败、日志和截图在哪。用户不在场：
 0. 先 `maapilot lock status`：`inherited` 应为 `true`（日常把模拟器锁交给了你）。不是就什么都别点，最后一条回复写明"没拿到模拟器"。
-1. 先看提示里的截图（见「先看」），再按上面看屏幕、处理；处理完可以把这一项重跑一次（提示里写了原来的命令，照抄），重跑还失败就不再试。命令在前台跑，Bash 超时设 600000 毫秒。
+1. 先看提示里的截图、`maapilot maa why` 查原因（见「先看」），再按上面看屏幕、处理；处理完可以把这一项重跑一次（提示里写了原来的命令，照抄），重跑还失败就不再试。命令在前台跑，Bash 超时设 600000 毫秒。
 2. **最后把游戏留在首页**，日常会接着跑下一项。
 3. 要用户决定的、会花钱的一律不做（要确认的命令也会被拒）。
 4. 最后一条回复写两三句给汇报用：卡在哪、怎么处理的、重跑成没成、要不要用户做什么。用玩家的话。

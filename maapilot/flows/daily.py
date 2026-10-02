@@ -156,7 +156,7 @@ def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: 
     return info
 
 
-def evidence_lines(ev: dict | None) -> list[str]:
+def evidence_lines(ev: dict | None, task: str) -> list[str]:
     """失败取证（maa 命令的 data.evidence）→ 给 agent 的几行提示。"""
     if not ev:
         return []
@@ -168,18 +168,20 @@ def evidence_lines(ev: dict | None) -> list[str]:
         out.append("MAA 自己在这段时间存的截图（按时间）：" + "；".join(f"{s.get('at', '')[11:19]} {s['path']}" for s in shots))
     if ev.get("missing"):
         out.append("没取到：" + "；".join(ev["missing"]))
+    out.append(f"查原因：maapilot maa why --task {task}（MAA 详细日志里这段时间的经过、最后的错误、推断的原因）。")
     return out
 
 
 def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: list[str] | None = None) -> str:
     log = (data or {}).get("log")
     cmd = " ".join(shlex.quote(a) for a in (argv or [task]))
+    why_task = (argv or [task])[0]
     return "\n".join([
         f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
         f"日常项「{reportmod.label(task)}」（maapilot maa {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
         f"MAA 日志：{log}。" if log else "",
-        *evidence_lines((data or {}).get("evidence")),
-        "加载 skill maapilot-recovery，只处理这一项：先看上面的截图，再截图看现在停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
+        *evidence_lines((data or {}).get("evidence"), why_task),
+        "加载 skill maapilot-recovery，只处理这一项：先看上面的截图、查原因，再截图看现在停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",
@@ -380,7 +382,7 @@ def _finish(r: _Run) -> dict:
     if d.get("handoff"):
         h = d["handoff"]
         raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
-                       hint=f"按 maapilot-recovery 先看 handoff.evidence 的截图，处理好再 "
+                       hint=f"按 maapilot-recovery 先看 handoff.evidence 的截图、maapilot maa why 查原因，处理好再 "
                             f"maapilot daily run --only {','.join(h['rest'])} 接着跑",
                        exit=FAILED, data=d)
     if d["failed"]:

@@ -176,7 +176,8 @@ def test_manual_failure_stops_and_hands_over(capsys, env):
 EVIDENCE = {"shot_now": "/p/private/shots/20261002-160918-fail-infrast.png",
             "maa_shots": [{"path": "/maa/debug/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface",
                            "at": "2026-10-02T16:09:17+08:00"}],
-            "window": {"start": "2026-10-02T16:01:02+08:00", "end": "2026-10-02T16:09:18+08:00"}}
+            "window": {"start": "2026-10-02T16:01:02+08:00", "end": "2026-10-02T16:09:18+08:00"},
+            "why": "maapilot maa why --task infrast"}
 
 
 def test_manual_handoff_carries_evidence(capsys, env):
@@ -185,7 +186,7 @@ def test_manual_handoff_carries_evidence(capsys, env):
     code, out = run(capsys, "daily", "run")
     assert code == 1 and out["error"]["code"] == "handoff"
     assert out["data"]["handoff"]["evidence"] == EVIDENCE
-    assert "evidence" in out["error"]["hint"]
+    assert "evidence" in out["error"]["hint"] and "maa why" in out["error"]["hint"]
 
 
 def test_recovery_prompt_lists_evidence(capsys, env):
@@ -195,7 +196,7 @@ def test_recovery_prompt_lists_evidence(capsys, env):
     (call,) = claude_calls(env)
     prompt = call["argv"][1]
     assert EVIDENCE["shot_now"] in prompt and EVIDENCE["maa_shots"][0]["path"] in prompt
-    assert "找不到 MAA 的日志目录" in prompt
+    assert "maapilot maa why --task infrast" in prompt and "找不到 MAA 的日志目录" in prompt
 
 
 def test_schedule_offline_also_wakes_agent(capsys, env, monkeypatch):

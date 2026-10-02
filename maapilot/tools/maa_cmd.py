@@ -281,7 +281,7 @@ def collect_evidence(task: str, started, ended) -> dict:
     哪样拿不到写进 `missing`，从不让命令因此失败。"""
     from datetime import timedelta
     ev: dict = {"shot_now": None, "maa_shots": [], "window": {"start": common.iso(started), "end": common.iso(ended)},
-                "missing": []}
+                "why": f"maapilot maa why --task {task}", "missing": []}
     try:
         ev["shot_now"] = failure_shot(task)
     except CliError as e:
@@ -330,7 +330,7 @@ def run(task: str, **opts) -> dict:
         return data
     data["evidence"] = collect_evidence(task, started, common.now())
     if data["evidence"].get("shot_now"):
-        data["_log"] = {"shot_now": data["evidence"]["shot_now"]}   # 命令记录里也留一份
+        data["_log"] = {"shot_now": data["evidence"]["shot_now"]}   # 记进命令记录，maa why 也用
     if mrun.error:
         raise CliError("maa_failed", mrun.error, hint="maapilot doctor", exit=FAILED, data=data)
     data["errors"] = maa.error_lines(mrun)
@@ -339,7 +339,7 @@ def run(task: str, **opts) -> dict:
                        hint="重新登录（maapilot maa startup）后再试；维护中就等维护结束")
     why = "超时，已终止 maa" if mrun.timed_out else f"maa 退出码 {mrun.returncode}"
     raise CliError("maa_failed", f"{task} 没做成（{why}）", exit=FAILED, data=data,
-                   hint="先看 evidence 里的截图，再截图看现在卡在哪（maapilot screen shot），按 maapilot-recovery 处理")
+                   hint="先看 evidence 里的截图、跑 maapilot maa why 查原因，再按 maapilot-recovery 处理")
 
 
 @common.logged
@@ -376,6 +376,8 @@ def register(sub) -> None:
     p.add_argument("--medicine", type=int, default=0, help="最多用几瓶理智液（默认 0）")
     p.add_argument("--expiring-medicine", type=int, nargs="?", const=2, metavar="天")
     _common(p, "annihilation")
+    from maapilot.tools import maa_why
+    maa_why.register(gs)
     p = gs.add_parser("copilot", help="作业（自动战斗）")
     p.add_argument("uri", help="maa://<编号> 或本地 JSON 文件")
     p.add_argument("--formation", action="store_true", help="自动编队")

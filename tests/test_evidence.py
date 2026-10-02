@@ -67,7 +67,7 @@ def test_maa_failure_collects_evidence(cfg, game, maa_dir, capsys, monkeypatch):
     ev = env["data"]["evidence"]
     assert ev["shot_now"].endswith("-fail-infrast.png") and os.path.exists(ev["shot_now"])
     assert [s["path"].rsplit("/", 1)[1] for s in ev["maa_shots"]] == recent
-    assert "missing" not in ev
+    assert "missing" not in ev and ev["why"] == "maapilot maa why --task infrast"
     assert "_log" not in env["data"]
     rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()]
     assert rows[-1]["shot_now"] == ev["shot_now"]
