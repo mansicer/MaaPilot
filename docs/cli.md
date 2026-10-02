@@ -725,7 +725,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/maapilot doctor --hook",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/session-start",
             "timeout": 300
           }
         ]
