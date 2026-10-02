@@ -617,12 +617,9 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(bin/maapilot lock status:*)",
       "Read(private/**)",
       "Edit(private/goals.md)",
-      "Write(private/goals.md)",
       "Edit(private/goals-done.md)",
-      "Write(private/goals-done.md)",
-      "Write(private/setup.json)",
+      "Edit(private/setup.json)",
       "Edit(private/shots/**)",
-      "Write(private/shots/**)",
       "WebFetch(domain:prts.maa.plus)",
       "WebFetch(domain:prts.plus)",
       "WebFetch(domain:maa.plus)"
@@ -632,8 +629,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(bin/maapilot daily schedule:*)",
       "Bash(bin/maapilot daily unschedule:*)",
       "Bash(bin/maapilot lock release:*)",
-      "Edit(private/config.yaml)",
-      "Write(private/config.yaml)"
+      "Edit(private/config.yaml)"
     ],
     "deny": [
       "Bash(maa run:*)",
@@ -641,9 +637,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maa copilot:*)",
       "Bash(adb shell input:*)",
       "Edit(private/guard/**)",
-      "Write(private/guard/**)",
-      "Edit(private/lock.json)",
-      "Write(private/lock.json)"
+      "Edit(private/lock.json)"
     ]
   },
   "hooks": {

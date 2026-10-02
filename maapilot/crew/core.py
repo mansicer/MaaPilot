@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 from maa.controller import AdbController
-from maa.define import MaaAdbInputMethodEnum, MaaAdbScreencapMethodEnum
+from maa.define import LoggingLevelEnum, MaaAdbInputMethodEnum, MaaAdbScreencapMethodEnum
 from maa.pipeline import JOCR, JRecognitionType
 from maa.resource import Resource
 from maa.tasker import Tasker
@@ -50,6 +50,7 @@ class Game:
         conn = conn or device.current()
         paths.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         Toolkit.init_option(str(paths.DEBUG_DIR))
+        Tasker.set_stdout_level(LoggingLevelEnum.Off)   # MaaFramework 的日志只写进 DEBUG_DIR/maa.log，不刷到命令输出里
         self.ctrl = AdbController(
             conn.adb,
             conn.address,

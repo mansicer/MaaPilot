@@ -35,7 +35,9 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 1. 若没有 `private/config.yaml`：读 `templates/config.yaml`，原样写成 `private/config.yaml`（`emulator.address` 先空着）。
 2. 请用户先把模拟器打开。跑 `bin/maapilot doctor`，看 `emulator` 这一项的 `candidates`（它会列 `adb devices` 和常见端口的探测结果）。
    - 只有一个候选：填进 `emulator.address`，再跑 `doctor` 确认连上。
-   - 有几个：问用户是哪个模拟器（多开时问是哪个窗口），对应常见端口：BlueStacks 5555 起、MuMu 12 / MuMu Pro 16384（旧版 7555）、雷电 5555 或 `emulator-5554`、夜神 62001、逍遥 21503。
+   - 有几个：**先自己试，再请用户确认**。依次把每个候选填进 `emulator.address`，跑 `bin/maapilot doctor`，连得上的再 `bin/maapilot screen shot` 看一眼：
+     画面是明日方舟、`game` 项的 `package` / `installed` 有明日方舟的，就是它。认出来以后跟用户确认一句（"连上的是开着明日方舟的那个模拟器窗口，对吗？"），用户说对就定下。
+     几个都像、或者都不像，才问用户是哪个模拟器（多开时问是哪个窗口）；常见端口：BlueStacks 5555 起、MuMu 12 / MuMu Pro 16384（旧版 7555）、雷电 5555 或 `emulator-5554`、夜神 62001、逍遥 21503。
    - 一个都没有：请用户在模拟器设置里找"ADB 端口 / ADB 地址"并告诉你；还连不上就看连接设置那页的排障。
 3. **服务器**：`doctor` 的 `game` 项里，`package` 是前台应用的包名（游戏开着时），`installed` 是模拟器里装着的明日方舟客户端（游戏没开也有，已经带了对应的 `server`）。
    只装了一个就用它的 `server`；前台的包名是：`com.hypergryph.arknights` → `Official`，`com.hypergryph.arknights.bilibili` → `Bilibili`，
@@ -79,7 +81,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 ## 5. 写配置、设定时、收尾
 
-1. 把回答写进 `private/config.yaml`（每次写都会弹确认框，告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、前面的 `server`、`emulator`、`tools`。改完 `bin/maapilot doctor` 再确认一次。
+1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、前面的 `server`、`emulator`、`tools`。改完 `bin/maapilot doctor` 再确认一次。
 2. `bin/maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）。会弹权限确认；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：

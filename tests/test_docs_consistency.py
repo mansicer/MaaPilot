@@ -176,3 +176,12 @@ def test_hook_runs_doctor_brief():
     hooks = _settings()["hooks"]["SessionStart"]
     cmds = [h["command"] for g in hooks for h in g["hooks"]]
     assert any(c.endswith("bin/maapilot doctor --hook") for c in cmds)
+
+
+def test_settings_file_rules_use_edit_not_write():
+    """Claude Code 的文件权限只认 Edit(...)（覆盖所有写文件的工具）；Write(...) 规则不生效，还会在启动时报警告。"""
+    import json
+    from pathlib import Path
+    s = json.loads((Path(__file__).resolve().parents[1] / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    rules = [r for k in ("allow", "ask", "deny") for r in s["permissions"].get(k, [])]
+    assert not [r for r in rules if r.startswith("Write(")]
