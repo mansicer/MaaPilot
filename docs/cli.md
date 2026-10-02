@@ -212,9 +212,10 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 `maapilot maa why [--task <任务>] [--since <时间> [--until <时间>]] [--last]`（只读：不碰模拟器、不拿锁）
 
-查一个 MAA 任务为什么失败。时间段默认取最近 7 天里最近一次失败的 `maapilot maa …`（命令记录的结束时间和时长；定时日常里跑的每一项也在里面），
+把一个 MAA 任务失败那段时间的事实都拿出来，交给 agent 自己判断：**只摆事实，不下结论**（没有"原因"字段，不按关键字归类；怎么读写在 skill `maapilot-recovery`）。
+时间段默认取最近 7 天里最近一次失败的 `maapilot maa …`（命令记录的结束时间和时长；定时日常里跑的每一项也在里面），
 `--task` 只看这一项，`--last` 不管成没成取最近一次，`--since`/`--until`（ISO 时间或今天的 `HH:MM`，`--until` 默认现在）自己指定。时间段前后各多读几秒。
-从 maa-cli 的详细日志 `asst.log`（日志目录用 `maa dir log` 找；轮换下来的 `asst.bak.log` 也读）里按时间二分定位，只读这一段（最多 48 MB，超了 `log.truncated`），摘成：
+从 maa-cli 的详细日志 `asst.log`（日志目录用 `maa dir log` 找；轮换下来的 `asst.bak.log` 也读）里按时间二分定位，只读这一段（最多 48 MB，超了 `log.truncated`），整理成：
 
 ```json
 {"task": "infrast", "window": {"start": "…", "end": "…"},
@@ -223,23 +224,23 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
  "log": {"dir": "…/debug", "files": ["…/asst.log"], "bytes_read": 2677065, "truncated": false},
  "lines": 16279, "start": "16:00:59", "end": "16:09:18",
  "taskchains": [{"at": "16:01:10", "event": "TaskChainStart", "taskchain": "Infrast"}, …],
- "steps": [{"at": "16:06:53", "task": "LoadingText", "action": "DoNothing", "matched": "正在提交", "repeat": 39, "last": "16:07:24"}, …],
+ "steps": [{"at": "16:06:53", "task": "LoadingText", "action": "DoNothing", "matched": "正在提交", "repeat": 39, "last": "16:07:24"}, …], "steps_total": 222,
  "tried": [{"at": "16:08:56", "cur_task": "InfrastBegin", "first": ["InfrastBegin"]}, …],
  "errors": [{"at": "16:09:17", "class": "ProcessTask", "first": ["InfrastBegin"], "pre_task": "Stop"}, …], "error_count": 24,
- "ocr_tail": [{"text": "玩家/ | 187", "first": "16:08:30", "last": "16:08:30", "count": 1}, …],
- "loading": [{"text": "正在提交", "first": "16:06:53", "last": "16:07:24", "count": 39, "seconds": 31}],
- "events": [{"kind": "title_screen", "first": "16:08:30", "last": "16:08:30", "count": 1, "detail": "OCR 看到标题页的字：玩家/ 187"}],
- "error_lines": [], "last_match": {"at": "16:07:24", "task": "LoadingText", "matched": "正在提交"},
- "screenshots": [{"path": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}],
- "likely_cause": {"kind": "logged_out", "summary": "最晚 16:08:30 游戏已经回到标题页（开始唤醒）：被登出了；…", "evidence": ["…"]}}
+ "last_match": {"at": "16:07:24", "task": "LoadingText", "matched": "正在提交"},
+ "ocr": [{"text": "正在提交", "first": "16:01:56", "last": "16:07:24", "count": 59}, {"text": "玩家/ | 187", "first": "16:08:30", "last": "16:08:30", "count": 1}, …], "ocr_total": 155,
+ "waits": [{"task": "LoadingText", "matched": "正在提交", "first": "16:06:53", "last": "16:07:24", "count": 39, "seconds": 31}],
+ "screencap_failures": [], "connection": [{"what": "Connected", "details": {…}, "first": "16:01:04", "last": "16:01:04", "count": 1}, …],
+ "error_lines": [{"message": "skill has no recognition result", "first": "16:01:36", "last": "16:06:13", "count": 13}, …],
+ "screenshots": [{"path": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}]}
 ```
 
-- `steps`：MAA 一步步做的事（`SubTaskStart`：任务、动作、认出的字或模板），连续相同的合成一条（`repeat`、`last`），留最后 30 条；
-  `tried`：它在找哪一页（`cur_task` / `first`）的变化；`errors`：最后 8 个 `SubTaskError`；`ocr_tail`：最后两分钟 OCR 到的字（同样的字合一条）；
-  `loading`：连续 3 次以上的"正在提交"之类等服务器的字；`events`：标题页、掉线弹窗、别的设备登录的字、截图失败、连接异常；`error_lines`：MAA 的 ERR 行（去掉常见噪声）；
-  `screenshots`：时间段内（结束后再宽 30 秒）MAA 存的截图，最多 12 张。
-- `likely_cause.kind`：`other_device`（看到别的设备登录的字）、`logged_out`（认出或 OCR 到标题页）、`offline`（掉线弹窗 / 网络字样）、`emulator`（截图失败 3 次以上）、
-  `stuck_loading`（等服务器 15 秒以上之后认不出页面）、`entry_failed`（从头到尾没认出任何页面）、`unknown`（看不出，不猜）。`evidence` 是依据。
+- `steps`：MAA 一步步做的事（`SubTaskStart`：任务、动作、认出的字或模板），连续相同的合成一条（`repeat`、`last`），留最后 40 条（`steps_total` 是总数）；
+  `tried`：它在找哪一页（`cur_task` / `first`）的变化，最后 20 次；`errors`：最后 10 个 `SubTaskError`（`error_count` 是总数）；`last_match`：最后一次真的认出东西（不算 `JustReturn`）。
+- `ocr`：这段时间 OCR 到的所有字（去掉空白处的噪声），同样的字合一条，带第一次、最后一次、次数，按第一次出现排；超过 80 种时留最后还出现的 80 种（`ocr_total` 是总数）。
+- `waits`：MAA 自己的 `Loading*` 任务（等加载、等服务器回应）连续出现的一段和时长；`screencap_failures`：截图命令返回非 0 或报 ERR 的（连接时试 `nc` 截图方式的不算）；
+  `connection`：MAA 的连接信息（每隔几秒一条的截图耗时、帧率不列）；`error_lines`：MAA 的 ERR 行，去重带次数，最后 15 种。
+- `screenshots`：时间段内（结束后再宽 30 秒）MAA 存的截图，最多 12 张。
 - 找不到记录退出码 2（`not_found`）；找不到 MAA 的日志目录时照常返回，`log.dir` 为 `null`、`hint` 提示 `doctor`。
 
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。

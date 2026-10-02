@@ -1,7 +1,7 @@
-"""`maapilot maa why`：一个 MAA 任务为什么失败 —— 从 MAA 自己的详细日志（asst.log）里摘出那段时间的经过。
+"""`maapilot maa why`：一个 MAA 任务失败那段时间的经过 —— 从 MAA 自己的详细日志（asst.log）里整理出事实，不下结论。
 
 只读：不碰模拟器、不拿锁。时间段默认取最近一次失败的 `maapilot maa …`（private/log/<日期>.jsonl 的记录：
-结束时间 `at`、时长 `duration_s`；定时日常里跑的每一项也记在这里）。摘要与推断见 maapilot.crew.maalog。
+结束时间 `at`、时长 `duration_s`；定时日常里跑的每一项也记在这里）。怎么整理见 maapilot.crew.maalog。
 契约见 docs/cli.md「maa why」。
 """
 from __future__ import annotations
@@ -130,7 +130,7 @@ def cmd(args):
 
 
 def register(gs) -> None:
-    p = gs.add_parser("why", help="查一个 MAA 任务为什么失败（读 MAA 的详细日志，只读）")
+    p = gs.add_parser("why", help="一个 MAA 任务失败那段时间的经过（读 MAA 的详细日志，只读，不下结论）")
     p.add_argument("--task", dest="task_key", metavar="任务", help="哪一项（如 infrast）；默认最近失败的那项")
     p.add_argument("--since", metavar="时间", help="自己指定时间段的开始（ISO 时间或 HH:MM）")
     p.add_argument("--until", metavar="时间", help="时间段的结束（默认现在）")

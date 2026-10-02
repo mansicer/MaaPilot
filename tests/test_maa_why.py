@@ -1,4 +1,4 @@
-"""MAA 详细日志（asst.log）：按时间段读、摘要、推断原因；`maa why` 命令。
+"""MAA 详细日志（asst.log）：按时间段读、整理成事实（不下结论）；`maa why` 命令。
 
 日志用真实格式的行拼成（2026-10-02 16:01–16:09 基建失败那次的代表性行：正在提交卡住 → 回到标题页 → 找不到 InfrastBegin）。
 """
@@ -144,18 +144,18 @@ def test_read_window_spans_rotated_file(tmp_path):
     assert rows[-1][0].startswith("2026-10-02 09:02:30")
 
 
-def test_summary_and_likely_cause_logged_out(maa_dir):
+def test_summary_lists_the_facts(maa_dir):
     r = maalog.why(W0, W1, root=maa_dir)
-    c = r["likely_cause"]
-    assert c["kind"] == "logged_out" and "16:08:30" in c["summary"] and "正在提交" in c["summary"]
-    assert "没有别的设备登录的提示" in c["summary"]
-    assert r["last_match"]["matched"] == "正在提交"
-    (stuck,) = [l for l in r["loading"] if l["seconds"] >= 15]
-    assert stuck["count"] == 39 and stuck["first"] == "16:06:53"
+    assert "likely_cause" not in r and "events" not in r                 # 只摆事实，不下结论
+    assert r["last_match"] == {"at": "16:07:23", "task": "LoadingText", "matched": "正在提交"}
+    (wait,) = [w for w in r["waits"] if w["task"] == "LoadingText"]
+    assert wait["count"] == 39 and wait["first"] == "16:06:53" and wait["last"] == "16:07:23" and wait["seconds"] == 30
     assert [e["first"] for e in r["errors"]][-1] == ["InfrastBegin"] and r["error_count"] == 3
-    assert {e["kind"] for e in r["events"]} == {"title_screen"}           # nc 试截图那行不算截图失败
-    texts = [o["text"] for o in r["ocr_tail"]]
-    assert "玩家/ | 187" in texts and "__" not in texts
+    texts = {o["text"]: o for o in r["ocr"]}
+    assert texts["玩家/ | 187"]["first"] == "16:08:30" and texts["正在提交"]["count"] == 39 and "__" not in texts
+    assert [o["text"] for o in r["ocr"]] == ["正在提交", "玩家/ | 187"]                  # 按第一次出现排
+    assert r["screencap_failures"] == []                                  # nc 试截图那行不算截图失败
+    assert any("Killing child" in e["message"] for e in r["error_lines"])  # 但 ERR 行照列
     assert [s["task"] for s in r["steps"]][-2:] == ["LoadingText", "InfrastBottomLeftTab"]
     assert r["steps"][-2]["repeat"] == 39
     assert r["tried"][-1]["cur_task"] == "InfrastBegin"
@@ -171,15 +171,20 @@ def _rows(*lines):
     return out
 
 
-def test_likely_cause_other_device_and_entry_failed_and_unknown():
-    s = maalog.summarize(_rows(ocr("10:00:01.000", "您的账号已在其他设备登录"), ocr("10:00:05.000", "开始唤醒")))
-    assert maalog.likely_cause(s, [])["kind"] == "other_device"
-    s = maalog.summarize(_rows(trying("10:00:01.000", "AwardBegin", ["AwardBegin"]), sub_error("10:00:20.000", ["AwardBegin"])))
-    c = maalog.likely_cause(s, [])
-    assert c["kind"] == "entry_failed" and "AwardBegin" in c["summary"]
-    s = maalog.summarize(_rows(start("10:00:01.000", "X", "ClickSelf", "MatchTemplate", {"template": "X.png"}, ["X"]),
-                               sub_error("10:00:20.000", ["Y"])))
-    assert maalog.likely_cause(s, [])["kind"] == "unknown"
+def test_screencap_failures_and_connection_info():
+    rows = _rows(
+        L("10:00:01.000", "INF", "Call ` adb -s 1:5 exec-out screencap -p ` ret 1 , cost 5 ms , stdout size: 0"),
+        L("10:00:02.000", "INF", "Call ` adb -s 1:5 exec-out screencap -p ` ret 1 , cost 6 ms , stdout size: 0"),
+        L("10:00:03.000", "INF", "Call ` adb -s 1:5 exec-out screencap -p ` ret 0 , cost 6 ms , stdout size: 9"),
+        L("10:00:04.000", "INF", 'Assistant::append_callback | ConnectionInfo {"details":{"why":"x"},"what":"Reconnecting"}'),
+        L("10:00:05.000", "INF", 'Assistant::append_callback | ConnectionInfo {"details":{"avg":1},"what":"ScreencapCost"}'),
+        ocr("10:00:06.000", "您的账号已在其他设备登录"))
+    s = maalog.summarize(rows)
+    (f,) = s["screencap_failures"]
+    assert f["count"] == 2 and f["first"] == "10:00:01" and f["last"] == "10:00:02"
+    assert [c["what"] for c in s["connection"]] == ["Reconnecting"]
+    assert s["ocr"] == [{"text": "您的账号已在其他设备登录", "first": "10:00:06", "last": "10:00:06", "count": 1}]
+    assert s["steps"] == [] and s["last_match"] is None
 
 
 # --- maa why 命令 -----------------------------------------------------------------------------------------------------
@@ -203,7 +208,7 @@ def test_maa_why_default_is_last_failed_task(maa_dir, capsys):
     assert d["task"] == "infrast" and d["record"]["run_id"] == "20261002-1558" and d["shot_now"] == "/x/fail-infrast.png"
     assert d["maa_cli_log"].endswith("20261002-160102-infrast.log") and d["maa_cli_log_tail"] == [
         "[2026-10-02 16:09:18 ERROR] Infrast Error"]
-    assert d["likely_cause"]["kind"] == "logged_out"
+    assert "likely_cause" not in d and any(o["text"] == "玩家/ | 187" for o in d["ocr"])
     assert d["window"]["start"].startswith("2026-10-02T16:00:5")
     assert paths.LOCK_FILE.exists() == lock_before                           # 不拿锁
     code, env = run(capsys, "maa", "why", "--task", "mall", "--last")
@@ -212,7 +217,7 @@ def test_maa_why_default_is_last_failed_task(maa_dir, capsys):
 
 def test_maa_why_since_until_and_not_found(maa_dir, capsys):
     code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00+08:00", "--until", "2026-10-02T16:09:20+08:00")
-    assert code == 0 and env["data"]["likely_cause"]["kind"] == "logged_out" and "record" not in env["data"]
+    assert code == 0 and env["data"]["waits"] and "record" not in env["data"]
     code, env = run(capsys, "maa", "why")
     assert code == 2 and env["error"]["code"] == "not_found"
     code, env = run(capsys, "maa", "why", "--until", "16:00")
@@ -223,4 +228,4 @@ def test_maa_why_without_maa_log_dir(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv(maalog.DIR_ENV, str(tmp_path / "missing"))
     code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00+08:00")
     assert code == 0 and env["data"]["log"]["dir"] is None and "hint" in env["data"]
-    assert env["data"]["likely_cause"]["kind"] == "unknown"
+    assert env["data"]["lines"] == 0 and env["data"]["screenshots"] == []

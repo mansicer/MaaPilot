@@ -168,7 +168,7 @@ def evidence_lines(ev: dict | None, task: str) -> list[str]:
         out.append("MAA 自己在这段时间存的截图（按时间）：" + "；".join(f"{s.get('at', '')[11:19]} {s['path']}" for s in shots))
     if ev.get("missing"):
         out.append("没取到：" + "；".join(ev["missing"]))
-    out.append(f"查原因：maapilot maa why --task {task}（MAA 详细日志里这段时间的经过、最后的错误、推断的原因）。")
+    out.append(f"查原因：maapilot maa why --task {task}（MAA 详细日志里这段时间的经过：做了什么、看到什么字、等了多久、出错；原因你自己判断）。")
     return out
 
 
@@ -383,7 +383,7 @@ def _finish(r: _Run) -> dict:
     if d.get("handoff"):
         h = d["handoff"]
         raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
-                       hint=f"按 maapilot-recovery 先看 handoff.evidence 的截图、maapilot maa why 查原因，处理好再 "
+                       hint=f"按 maapilot-recovery 先看 handoff.evidence 的截图、maapilot maa why 看经过，处理好再 "
                             f"maapilot daily run --only {','.join(h['rest'])} 接着跑",
                        exit=FAILED, data=d)
     if d["failed"]:
