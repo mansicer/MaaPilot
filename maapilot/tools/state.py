@@ -66,7 +66,7 @@ def read_depot() -> dict:
         items = maa.depot_ids()
     except Exception as e:
         raise CliError("depot_failed", f"仓库识别失败：{e}", exit=FAILED,
-                       hint="截图看看在哪个页面（bin/maapilot screen shot），回首页后再试") from None
+                       hint="截图看看在哪个页面（maapilot screen shot），回首页后再试") from None
     prev = load("depot")
     snap = {"at": common.iso(), "items": items}
     common.write_json(snap_path("depot"), snap)
@@ -82,7 +82,7 @@ def read_box() -> dict:
         ops = maa.operbox()
     except Exception as e:
         raise CliError("box_failed", f"干员识别失败：{e}", exit=FAILED,
-                       hint="截图看看在哪个页面（bin/maapilot screen shot），回首页后再试") from None
+                       hint="截图看看在哪个页面（maapilot screen shot），回首页后再试") from None
     try:
         from maapilot.knowledge.gamedata import operators
         known = operators()
@@ -258,7 +258,7 @@ def cmd_show(args):
     if not out:
         what = args.kind or "任何状态"
         raise CliError("no_snapshot", f"还没有读过{what}", exit=BAD_REQUEST,
-                       hint=f"先 bin/maapilot state {args.kind or 'depot'}")
+                       hint=f"先 maapilot state {args.kind or 'depot'}")
     return out[args.kind] if args.kind else out
 
 

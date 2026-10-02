@@ -126,7 +126,7 @@ def connect(*, ocr: bool = False):
         return Game(debug=False, ocr=ocr)
     except Exception as e:                           # adb 连不上、分辨率不对、资源缺失
         raise CliError("screen_failed", f"连不上模拟器或截不了图：{type(e).__name__}: {e}",
-                       hint="bin/maapilot doctor", exit=ENVIRONMENT) from None
+                       hint="maapilot doctor", exit=ENVIRONMENT) from None
 
 
 def public_lock(d: dict | None) -> dict | None:

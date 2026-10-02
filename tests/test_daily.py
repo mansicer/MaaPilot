@@ -139,7 +139,7 @@ def test_schedule_failure_wakes_recovery_agent_and_continues(capsys, env):
     assert argv[2:] == ["--output-format", "stream-json", "--verbose",
                         "--settings", str(paths.ROOT / ".claude" / "settings.json"),
                         "--permission-mode", "default", "--permission-prompts", "none"]
-    assert "bin/maapilot maa infrast" in argv[1]
+    assert "maapilot maa infrast" in argv[1]
     assert call["cwd"] == str(paths.ROOT) and call["token"] and call["daily"] == d["run_id"]
     infra = next(t for t in d["tasks"] if t["task"] == "infrast")
     assert infra["ok"] is False and infra["recovered"] is True
@@ -322,7 +322,7 @@ elif sys.argv[1] == "-":
 """
 
 OTHER = ("SHELL=/bin/sh\n"
-         "*/15 * * * * cd /Users/x/Developer/MAA && .venv/bin/maapilot job tick >> private/log/tick.log 2>&1\n"
+         "*/15 * * * * cd /Users/x/Developer/MAA && .venv/maapilot job tick >> private/log/tick.log 2>&1\n"
          "0 3 * * * /usr/local/bin/backup.sh  # 别人的\n")
 
 
@@ -350,7 +350,7 @@ def test_schedule_keeps_other_lines(capsys, cron):
     mine = text[len(OTHER):].splitlines()
     assert len(mine) == 2 and mine[0].startswith("40 4 * * * PATH=") and mine[1].startswith("40 16 * * * ")
     assert all(ln.endswith(f"# maapilot-v2 {paths.ROOT}") and "daily run --trigger schedule" in ln for ln in mine)
-    assert "PYTHONUTF8=1" in mine[0] and str(paths.ROOT / "bin" / "maapilot") in mine[0]
+    assert "PYTHONUTF8=1" in mine[0] and str(paths.ROOT / ".venv" / "bin" / "maapilot") in mine[0]
     assert out["data"]["old_entries"] == [OTHER.splitlines()[1]] and out["data"]["removed_old"] == []
     # 重复执行结果相同
     code, out = run(capsys, "daily", "schedule")
@@ -375,7 +375,7 @@ def test_schedule_dry_run_and_replace_old(capsys, cron):
 
 
 def test_unschedule_only_removes_ours(capsys, cron):
-    other_root = "40 4 * * * /elsewhere/bin/maapilot daily run # maapilot-v2 /elsewhere\n"
+    other_root = "40 4 * * * /elsewhere/maapilot daily run # maapilot-v2 /elsewhere\n"
     cron.write_text(OTHER + other_root, encoding="utf-8")
     run(capsys, "daily", "schedule")
     code, out = run(capsys, "daily", "unschedule", "--dry-run")
@@ -466,7 +466,7 @@ def test_recovery_prompt_has_real_command_for_farm(capsys, env, monkeypatch):
     env["behavior"]["fail"] = {"fight"}
     code, out = run(capsys, "daily", "run", "--trigger", "schedule")
     prompts = [c["argv"][1] for c in claude_calls(env)]
-    assert any("bin/maapilot maa fight 1-7" in p for p in prompts)
+    assert any("maapilot maa fight 1-7" in p for p in prompts)
     assert not any("maa farm" in p for p in prompts)
 
 

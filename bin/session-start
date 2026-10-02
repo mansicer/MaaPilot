@@ -1,0 +1,11 @@
+#!/bin/sh
+# Claude Code 启动钩子：把项目的虚拟环境加进本次会话的 PATH（之后命令直接写 `maapilot …`），再做启动检查。
+# 环境还没建时（第一次打开）也照样写 PATH：setup 建好 .venv 后，同一个会话里马上就能用。
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -n "$CLAUDE_ENV_FILE" ]; then
+  echo "export PATH=\"$ROOT/.venv/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+fi
+if [ -x "$ROOT/.venv/bin/maapilot" ]; then
+  exec "$ROOT/.venv/bin/maapilot" doctor --hook
+fi
+echo '{"systemMessage": "MaaPilot 还没装好运行环境。随便说一句，我带你一步步设置。", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查：项目的虚拟环境还没建（.venv/bin/maapilot 不存在，no_env），maapilot 命令暂时用不了。用户开口后加载 skill maapilot-setup，从「装运行环境」开始。"}}'

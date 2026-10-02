@@ -14,15 +14,18 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 说清你是谁、接下来做什么，例如："你好！我是你的明日方舟助手，能帮你每天自动做日常、练干员、合材料。先花十几分钟把环境设好：确认模拟器、装 MAA、问你几个日常的偏好。先问一句：电脑上已经装好安卓模拟器、装了明日方舟吗？"
 
-重新设置（`private/setup.json` 已经在）时：先 `bin/maapilot doctor` 看哪些已经好了，只重做用户想改的和没通过的部分。
+重新设置（`private/setup.json` 已经在）时：先 `maapilot doctor` 看哪些已经好了，只重做用户想改的和没通过的部分。
 
-## 没有 Python
+## 装运行环境
 
-启动检查或命令输出里是 `no_python`（`bin/maapilot` 找不到 Python 3.12 以上）：命令都用不了，先解决这个。
-1. 告诉用户要装 Python 3.12（MaaPilot 的工具靠它跑），征得同意。
-2. 有 Homebrew（`brew --version` 能跑）：`brew install python@3.12`（会弹确认，要几分钟）。没有 Homebrew：请用户按 https://brew.sh 首页那一行命令装好，再装 Python；
-   或者从 https://www.python.org/downloads/macos/ 下载 3.12 的安装包自己装。
-3. 装好后 `bin/maapilot doctor --offline`：第一次会自己建环境、装依赖（一两分钟），能出结果就接着往下做。
+启动检查里是 `no_env`（项目里还没有 `.venv/bin/maapilot`）：`maapilot` 命令都用不了，先装好。命令都在仓库根目录跑。
+1. 跟用户说一次：要在这个文件夹里建一个 Python 运行环境，默认用 uv 装（uv 会自己准备 Python 3.12，一两分钟）。问用户同不同意。
+2. **同意**：
+   - 没有 uv（`uv --version` 跑不了）：有 Homebrew 就 `brew install uv`，没有就 `curl -LsSf https://astral.sh/uv/install.sh | sh`（装在 `~/.local/bin`，之后用 `~/.local/bin/uv`）。
+   - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
+3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
+   再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
+4. 装好后 `maapilot doctor --offline`（启动钩子已经把 `.venv/bin` 加进了 PATH，同一个会话就能用；万一提示找不到命令，就用 `.venv/bin/maapilot` 跑这一次，并请用户之后重开一次会话）。能出结果就接着往下做。
 
 ## 1. 模拟器
 
@@ -33,9 +36,9 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 **装好了**：找 ADB 地址。
 1. 若没有 `private/config.yaml`：读 `templates/config.yaml`，原样写成 `private/config.yaml`（`emulator.address` 先空着）。
-2. 请用户先把模拟器打开。跑 `bin/maapilot doctor`，看 `emulator` 这一项的 `candidates`（它会列 `adb devices` 和常见端口的探测结果）。
+2. 请用户先把模拟器打开。跑 `maapilot doctor`，看 `emulator` 这一项的 `candidates`（它会列 `adb devices` 和常见端口的探测结果）。
    - 只有一个候选：填进 `emulator.address`，再跑 `doctor` 确认连上。
-   - 有几个：**先自己试，再请用户确认**。依次把每个候选填进 `emulator.address`，跑 `bin/maapilot doctor`，连得上的再 `bin/maapilot screen shot` 看一眼：
+   - 有几个：**先自己试，再请用户确认**。依次把每个候选填进 `emulator.address`，跑 `maapilot doctor`，连得上的再 `maapilot screen shot` 看一眼：
      画面是明日方舟、`game` 项的 `package` / `installed` 有明日方舟的，就是它。认出来以后跟用户确认一句（"连上的是开着明日方舟的那个模拟器窗口，对吗？"），用户说对就定下。
      几个都像、或者都不像，才问用户是哪个模拟器（多开时问是哪个窗口）；常见端口：BlueStacks 5555 起、MuMu 12 / MuMu Pro 16384（旧版 7555）、雷电 5555 或 `emulator-5554`、夜神 62001、逍遥 21503。
    - 一个都没有：请用户在模拟器设置里找"ADB 端口 / ADB 地址"并告诉你；还连不上就看连接设置那页的排障。
@@ -45,7 +48,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 ## 2. 环境逐项通过
 
-反复 `bin/maapilot doctor`，按每项的 `fix` 处理，直到 `ok_all: true`（`schedule`、`setup` 两项此时不通过是正常的，最后才做）。
+反复 `maapilot doctor`，按每项的 `fix` 处理，直到 `ok_all: true`（`schedule`、`setup` 两项此时不通过是正常的，最后才做）。
 
 | 项 | 常见处理 |
 |---|---|
@@ -53,7 +56,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `emulator` | 见上一步；模拟器没开、ADB 没打开、地址填错 |
 | `screen` | 分辨率不对：请用户在模拟器设置里改成 1280×720（16:9），改完多半要重启模拟器 |
 | `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。这两条会弹权限确认 |
-| `maa_config` `ocr_model` `game_data` | `bin/maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
+| `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `claude` | `trusted: false`：请用户在这个文件夹里正常启动一次 claude 并接受信任提示（不然定时日常叫起的 agent 用不了放行的命令）；这项只是提示 |
 
@@ -63,10 +66,10 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 ## 3. 试启动、第一次读账号
 
-1. `bin/maapilot maa startup`（启动游戏回首页，一两分钟）。成功后看 `data.home`：不是 `true` 就 `bin/maapilot screen shot` 看停在哪，按 `maapilot-recovery`「回首页」回去；
+1. `maapilot maa startup`（启动游戏回首页，一两分钟）。成功后看 `data.home`：不是 `true` 就 `maapilot screen shot` 看停在哪，按 `maapilot-recovery`「回首页」回去；
    是 `true` 也截一张图，看一眼确实在首页（右上有"终端"）。
    失败：按 `maapilot-recovery` 看屏幕。常见：停在登录页（账号没登录过 → 请用户在模拟器里手动登录一次）、公告弹窗、正在更新资源（等它下完）。
-2. `bin/maapilot state depot`（读仓库，一两分钟），再 `bin/maapilot state box`（读干员，几分钟，放后台跑）。
+2. `maapilot state depot`（读仓库，一两分钟），再 `maapilot state box`（读干员，几分钟，放后台跑）。
 3. 告诉用户读到了什么，一两句："读到了：龙门币约 120 万、合成玉 3200、干员 86 名。"读不到就说哪样没读到，稍后日常会再读。
 
 ## 4. 问日常（一次一个问题）
@@ -75,14 +78,14 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 2. **做哪些日常项**，默认全做，逐项用玩家的话说：启动游戏、公开招募、基建换班收菜、信用商店与访问好友、剿灭（本周合成玉拿满就不打）、领任务奖励和邮件。用户说"都做"就不再细问。
 3. **没有目标时刷哪关**：默认 1-7（产固源岩，理智划算）。有目标时会优先刷目标缺的材料。
 
-**旧版 MaaPilot 的定时任务**：`doctor` 的 `schedule` 项会报出旧版（`maapilot job tick` 或 `bin/daily.sh`）的定时行。有的话：
+**旧版 MaaPilot 的定时任务**：`doctor` 的 `schedule` 项会报出旧版的定时行（命令里有 job tick 或 bin/daily.sh）。有的话：
 - 把那一行**原样**给用户看，说明两边同时跑会抢模拟器、重复做日常；
 - 问用户要不要停掉旧的：**只有用户能决定**，不要自己删。用户同意后在第 5 步用 `daily schedule --replace-old` 删掉；用户想自己处理，就告诉他在终端 `crontab -e` 里删掉或注释掉这一行。
 
 ## 5. 写配置、设定时、收尾
 
-1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、前面的 `server`、`emulator`、`tools`。改完 `bin/maapilot doctor` 再确认一次。
-2. `bin/maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）。会弹权限确认；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
+1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、前面的 `server`、`emulator`、`tools`。改完 `maapilot doctor` 再确认一次。
+2. `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）。会弹权限确认；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
    - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude 问"今天做了什么"就行；

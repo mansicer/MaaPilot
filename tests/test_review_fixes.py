@@ -192,23 +192,17 @@ def test_game_check_lists_installed_clients(cfg):
 
 # --- 启动脚本 --------------------------------------------------------------------------------------
 
-def test_bootstrap_without_python_speaks_hook_format(tmp_path):
+def test_session_start_without_venv(tmp_path):
+    """还没建 .venv：启动钩子照样把 .venv/bin 写进 CLAUDE_ENV_FILE，并按钩子的格式说 no_env。"""
     root = tmp_path / "repo"
     (root / "bin").mkdir(parents=True)
-    shutil.copy(paths.ROOT / "bin" / "maapilot", root / "bin" / "maapilot")
-    fakebin = tmp_path / "fakebin"                               # PATH 上只有不够新的 python3
-    fakebin.mkdir()
-    for prog in ("dirname", "sh"):
-        os.symlink(shutil.which(prog), fakebin / prog)
-    (fakebin / "python3").write_text("#!/bin/sh\nexit 1\n")
-    (fakebin / "python3").chmod(0o755)
-    env = {"PATH": str(fakebin), "HOME": str(tmp_path)}
-    p = subprocess.run(["/bin/sh", str(root / "bin" / "maapilot"), "doctor", "--hook"], capture_output=True,
-                       text=True, env=env)
+    shutil.copy(paths.ROOT / "bin" / "session-start", root / "bin" / "session-start")
+    envfile = tmp_path / "env.sh"
+    p = subprocess.run(["/bin/sh", str(root / "bin" / "session-start")], capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "CLAUDE_ENV_FILE": str(envfile)})
     out = json.loads(p.stdout)
-    assert p.returncode == 0 and out["systemMessage"] and "no_python" in out["hookSpecificOutput"]["additionalContext"]
-    p = subprocess.run(["/bin/sh", str(root / "bin" / "maapilot"), "doctor"], capture_output=True, text=True, env=env)
-    assert p.returncode == 5 and json.loads(p.stdout)["error"]["code"] == "no_python"
+    assert p.returncode == 0 and out["systemMessage"] and "no_env" in out["hookSpecificOutput"]["additionalContext"]
+    assert f'{root.resolve()}/.venv/bin' in envfile.read_text() or f'{root}/.venv/bin' in envfile.read_text()
 
 
 # --- calc / data -----------------------------------------------------------------------------------

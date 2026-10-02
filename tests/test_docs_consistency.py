@@ -1,12 +1,13 @@
 """skills、CLAUDE.md 里写的命令都要是真能跑的命令，权限设置也要对得上。
 
-从说明文字里抽出 `bin/maapilot …`（以及反引号里以命令组开头的简写，如 `state depot`），把占位符换成样例值，
+从说明文字里抽出 `maapilot …`（以及反引号里以命令组开头的简写，如 `state depot`），把占位符换成样例值，
 交给 argparse 解析；再检查每条命令都有权限规则（放行或询问），要用户确认的几条在"询问"里。
 """
 from __future__ import annotations
 
 import argparse
 import json
+from maapilot import paths
 import re
 import shlex
 from pathlib import Path
@@ -39,7 +40,7 @@ def _spans(text: str) -> list[str]:
     """反引号里的片段与代码块里的每一行。"""
     out = re.findall(r"`([^`\n]+)`", text)
     for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
-        out += [l.strip() for l in block.splitlines() if l.strip().startswith("bin/maapilot ")]
+        out += [l.strip() for l in block.splitlines() if l.strip().startswith("maapilot ")]
     return out
 
 
@@ -48,15 +49,15 @@ def invocations() -> list[tuple[str, str, bool]]:
     for f in DOCS:
         for s in _spans(f.read_text(encoding="utf-8")):
             s = s.strip()
-            if s.startswith("bin/maapilot "):
-                cmd = s[len("bin/maapilot "):]
+            if s.startswith("maapilot "):
+                cmd = s[len("maapilot "):]
             elif s.split(" ", 1)[0] in GROUPS and " " in s and s not in MAA_CLI:
                 cmd = s                                      # 简写（`state depot`）：只查命令名
             else:
                 continue
             if GENERIC.search(cmd):
                 continue
-            found.append((f"{f.parent.name}/{f.name}", cmd, s.startswith("bin/maapilot ")))
+            found.append((f"{f.parent.name}/{f.name}", cmd, s.startswith("maapilot ")))
     return found
 
 
@@ -132,7 +133,7 @@ def _prefixes(kind: str) -> list[str]:
 
 def _rule(argv: list[str]) -> str | None:
     """这条命令落在哪一类规则（deny > ask > allow，同 Claude Code）。"""
-    line = "bin/maapilot " + " ".join(argv)
+    line = "maapilot " + " ".join(argv)
     for kind in ("deny", "ask", "allow"):
         for p in _prefixes(kind):
             if line == p or line.startswith(p + " "):
@@ -166,8 +167,8 @@ def test_every_subcommand_has_rule():
 def test_confirm_commands_are_ask():
     for c in ASK:
         assert _rule(c.split()) == "ask", f"`{c}` 必须是询问"
-    allowed_ask = [c for c in ASK if any(c.startswith(p.removeprefix("bin/maapilot ")) or
-                                          p.removeprefix("bin/maapilot ") == c.split()[0]
+    allowed_ask = [c for c in ASK if any(c.startswith(p.removeprefix("maapilot ")) or
+                                          p.removeprefix("maapilot ") == c.split()[0]
                                           for p in _prefixes("allow"))]
     assert not allowed_ask, f"放行规则盖住了要询问的命令：{allowed_ask}"
 
@@ -175,7 +176,8 @@ def test_confirm_commands_are_ask():
 def test_hook_runs_doctor_brief():
     hooks = _settings()["hooks"]["SessionStart"]
     cmds = [h["command"] for g in hooks for h in g["hooks"]]
-    assert any(c.endswith("bin/maapilot doctor --hook") for c in cmds)
+    assert any(c.endswith("bin/session-start") for c in cmds)
+    assert "doctor --hook" in (paths.ROOT / "bin" / "session-start").read_text(encoding="utf-8")
 
 
 def test_settings_file_rules_use_edit_not_write():

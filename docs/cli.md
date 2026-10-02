@@ -4,8 +4,8 @@
 
 ## 通用约定
 
-- **调用形式**：agent 在仓库根目录用 `bin/maapilot <命令> …`（不写 `./`、不用全路径、一次一条命令，权限规则按这个形式匹配）。
-  `bin/maapilot` 第一次用时自动建 `.venv` 并安装，之后直接转给 `.venv/bin/maapilot`。
+- **调用形式**：agent 在仓库根目录用 `maapilot <命令> …`（不写 `./`、不用全路径、一次一条命令，权限规则按这个形式匹配）。
+  `maapilot` 装在项目的虚拟环境 `.venv` 里（setup 时用 uv 建，见 skill `maapilot-setup`）；启动钩子 `bin/session-start` 把 `.venv/bin` 加进本次会话的 PATH，所以直接写 `maapilot`。定时任务用 `.venv/bin/maapilot` 的完整路径。
 - **输出**：stdout 只有一个 JSON 信封，进度与日志写 stderr：
 
   ```json
@@ -443,7 +443,7 @@ agent 结束（或超时被杀）后日常换一次锁的 token：它留下还�
 `daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`（权限"询问"）：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行：
 
 ```
-40 4 * * * PATH=<maa、claude、adb 所在目录>:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin PYTHONUTF8=1 <仓库>/bin/maapilot daily run --trigger schedule >> <仓库>/private/log/cron.log 2>&1 # maapilot-v2 <仓库>
+40 4 * * * PATH=<maa、claude、adb 所在目录>:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin PYTHONUTF8=1 <仓库>/maapilot daily run --trigger schedule >> <仓库>/private/log/cron.log 2>&1 # maapilot-v2 <仓库>
 ```
 
 PATH 写在每行里（不加单独的 `PATH=` 行，免得影响别人的行）。只动以 `# maapilot-v2 <本仓库路径>` 结尾的行，别的行一个字节都不动，重复执行结果相同。
@@ -599,23 +599,23 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(bin/maapilot doctor:*)",
-      "Bash(bin/maapilot screen:*)",
-      "Bash(bin/maapilot input:*)",
-      "Bash(bin/maapilot maa:*)",
-      "Bash(bin/maapilot state:*)",
-      "Bash(bin/maapilot data:*)",
-      "Bash(bin/maapilot calc:*)",
-      "Bash(bin/maapilot goals:*)",
-      "Bash(bin/maapilot op:*)",
-      "Bash(bin/maapilot craft:*)",
-      "Bash(bin/maapilot report:*)",
-      "Bash(bin/maapilot daily run:*)",
-      "Bash(bin/maapilot daily status:*)",
-      "Bash(bin/maapilot guard snapshot:*)",
-      "Bash(bin/maapilot guard check:*)",
-      "Bash(bin/maapilot guard status:*)",
-      "Bash(bin/maapilot lock status:*)",
+      "Bash(maapilot doctor:*)",
+      "Bash(maapilot screen:*)",
+      "Bash(maapilot input:*)",
+      "Bash(maapilot maa:*)",
+      "Bash(maapilot state:*)",
+      "Bash(maapilot data:*)",
+      "Bash(maapilot calc:*)",
+      "Bash(maapilot goals:*)",
+      "Bash(maapilot op:*)",
+      "Bash(maapilot craft:*)",
+      "Bash(maapilot report:*)",
+      "Bash(maapilot daily run:*)",
+      "Bash(maapilot daily status:*)",
+      "Bash(maapilot guard snapshot:*)",
+      "Bash(maapilot guard check:*)",
+      "Bash(maapilot guard status:*)",
+      "Bash(maapilot lock status:*)",
       "Read(private/**)",
       "Edit(private/goals.md)",
       "Edit(private/goals-done.md)",
@@ -626,10 +626,10 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "WebFetch(domain:maa.plus)"
     ],
     "ask": [
-      "Bash(bin/maapilot guard allow:*)",
-      "Bash(bin/maapilot daily schedule:*)",
-      "Bash(bin/maapilot daily unschedule:*)",
-      "Bash(bin/maapilot lock release:*)",
+      "Bash(maapilot guard allow:*)",
+      "Bash(maapilot daily schedule:*)",
+      "Bash(maapilot daily unschedule:*)",
+      "Bash(maapilot lock release:*)",
       "Edit(private/config.yaml)"
     ],
     "deny": [
@@ -647,7 +647,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/maapilot doctor --hook",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/maapilot doctor --hook",
             "timeout": 300
           }
         ]
@@ -658,11 +658,11 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ```
 
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
-- 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `bin/maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
+- 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。
 - `private/config.yaml` 的改动是 **ask**：里面有定时日常会执行的程序路径（`tools.*`、`emulator.adb`），无头 agent 不能改，会话里改要用户点同意。
 - `guard snapshot` 可以放行：上次对账之后跑过可能花东西的命令时它改做对账（见「guard」），不能拿来抹掉花费。
-- 启动钩子用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）；新克隆的仓库第一次会建 `.venv`，要几分钟，所以超时给 300 秒。钩子跑的是 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。
+- 启动钩子 `bin/session-start` 用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）：先往 `$CLAUDE_ENV_FILE` 写一行把 `.venv/bin` 加进 PATH（环境还没建也写，setup 建好后同一会话就能用），再跑 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。
   `next` 是 `setup` / `guard` 时另带顶层的 `systemMessage`（直接显示给用户的一行）：钩子不会让 agent 先开口，要用户先说一句，这一行告诉用户"随便说一句就开始"。
-  没有 Python 3.12 时 `bin/maapilot` 自己按钩子的格式输出（`no_python`），agent 按 `maapilot-setup` 帮用户装。
+  `.venv` 还没建时钩子自己按钩子的格式输出（`no_env`），agent 按 `maapilot-setup`「装运行环境」帮用户建。
 - 启动钩子的输出进会话上下文；`CLAUDE.md` 让 agent 看到 `next: "setup"` 时，用户一开口就进入 `maapilot-setup`。

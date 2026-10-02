@@ -161,11 +161,11 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
     cmd = " ".join(shlex.quote(a) for a in (argv or [task]))
     return "\n".join([
         f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
-        f"日常项「{reportmod.label(task)}」（bin/maapilot maa {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
+        f"日常项「{reportmod.label(task)}」（maapilot maa {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
         f"MAA 日志：{log}。" if log else "",
         "加载 skill maapilot-recovery，只处理这一项：先截图看停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
-        "先 bin/maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
+        "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",
         "结束时用几句中文写做了什么、现在怎样；最后一行单独写「结果：完成」或「结果：没做成」。",
     ]).replace("\n\n", "\n")
@@ -181,7 +181,7 @@ def goals_prompt(run_id: str, active: list[dict], tasks: list[dict]) -> str:
         "加载 skill maapilot-daily，做目标部分：用剩下的理智刷目标缺的材料，材料够了就养成，"
         "在 goals.md 里更新分解与进展，做完的目标移除。",
         "用户不在场：目标之外的花费、要用户决定或确认的事一律不做，写进总结。",
-        "先 bin/maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
+        "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令在前台跑、Bash 超时设 600000 毫秒，不放后台；刷图按 skill 里说的分批（--times 每批几次）。",
         "结束时用几句中文写做了什么、花了什么、目标进展到哪，以及要用户决定的事；最后一行单独写「结果：完成」或「结果：没做成」。",
     ])
@@ -364,7 +364,7 @@ def _finish(r: _Run) -> dict:
     if d.get("handoff"):
         h = d["handoff"]
         raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
-                       hint=f"按 maapilot-recovery 看屏幕处理好，再 bin/maapilot daily run --only {','.join(h['rest'])} 接着跑",
+                       hint=f"按 maapilot-recovery 看屏幕处理好，再 maapilot daily run --only {','.join(h['rest'])} 接着跑",
                        exit=FAILED, data=d)
     if d["failed"]:
         raise CliError("daily_incomplete", f"有 {len(d['failed'])} 项没做成：{'、'.join(map(reportmod.label, d['failed']))}",
@@ -622,8 +622,8 @@ def _parse_times(times: list[str]) -> list[tuple[int, int]]:
 
 
 def _path_dirs(cfg: dict) -> str:
-    """定时任务的 PATH：maa、claude、adb 所在目录 + 系统目录。"""
-    dirs = []
+    """定时任务的 PATH：项目的 .venv/bin（叫起来的 agent 直接用 maapilot）、maa、claude、adb 所在目录 + 系统目录。"""
+    dirs = [str(paths.ROOT / ".venv" / "bin")]
     tools = cfg.get("tools") or {}
     for prog in (tools.get("maa") or "maa", tools.get("claude") or "claude",
                  (cfg.get("emulator") or {}).get("adb") or "adb"):
@@ -644,7 +644,7 @@ def cron_lines(times: list[tuple[int, int]], cfg: dict) -> list[str]:
     envs = f"PATH={q(_path_dirs(cfg))} PYTHONUTF8=1"
     if os.environ.get("MAAPILOT_PRIVATE"):
         envs += f" MAAPILOT_PRIVATE={q(paths.PRIVATE)}"
-    cmd = (f"{envs} {q(paths.ROOT / 'bin' / 'maapilot')} daily run --trigger schedule"
+    cmd = (f"{envs} {q(paths.ROOT / '.venv' / 'bin' / 'maapilot')} daily run --trigger schedule"
            f" >> {q(paths.LOGS / 'cron.log')} 2>&1")
     return [f"{m} {h} * * * {cmd} {TAG} {paths.ROOT}" for h, m in times]
 

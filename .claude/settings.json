@@ -2,23 +2,23 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(bin/maapilot doctor:*)",
-      "Bash(bin/maapilot screen:*)",
-      "Bash(bin/maapilot input:*)",
-      "Bash(bin/maapilot maa:*)",
-      "Bash(bin/maapilot state:*)",
-      "Bash(bin/maapilot data:*)",
-      "Bash(bin/maapilot calc:*)",
-      "Bash(bin/maapilot goals:*)",
-      "Bash(bin/maapilot op:*)",
-      "Bash(bin/maapilot craft:*)",
-      "Bash(bin/maapilot report:*)",
-      "Bash(bin/maapilot daily run:*)",
-      "Bash(bin/maapilot daily status:*)",
-      "Bash(bin/maapilot guard snapshot:*)",
-      "Bash(bin/maapilot guard check:*)",
-      "Bash(bin/maapilot guard status:*)",
-      "Bash(bin/maapilot lock status:*)",
+      "Bash(maapilot doctor:*)",
+      "Bash(maapilot screen:*)",
+      "Bash(maapilot input:*)",
+      "Bash(maapilot maa:*)",
+      "Bash(maapilot state:*)",
+      "Bash(maapilot data:*)",
+      "Bash(maapilot calc:*)",
+      "Bash(maapilot goals:*)",
+      "Bash(maapilot op:*)",
+      "Bash(maapilot craft:*)",
+      "Bash(maapilot report:*)",
+      "Bash(maapilot daily run:*)",
+      "Bash(maapilot daily status:*)",
+      "Bash(maapilot guard snapshot:*)",
+      "Bash(maapilot guard check:*)",
+      "Bash(maapilot guard status:*)",
+      "Bash(maapilot lock status:*)",
       "Read(private/**)",
       "Edit(private/goals.md)",
       "Edit(private/goals-done.md)",
@@ -29,10 +29,10 @@
       "WebFetch(domain:maa.plus)"
     ],
     "ask": [
-      "Bash(bin/maapilot guard allow:*)",
-      "Bash(bin/maapilot daily schedule:*)",
-      "Bash(bin/maapilot daily unschedule:*)",
-      "Bash(bin/maapilot lock release:*)",
+      "Bash(maapilot guard allow:*)",
+      "Bash(maapilot daily schedule:*)",
+      "Bash(maapilot daily unschedule:*)",
+      "Bash(maapilot lock release:*)",
       "Edit(private/config.yaml)"
     ],
     "deny": [
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/maapilot doctor --hook",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/bin/session-start",
             "timeout": 300
           }
         ]

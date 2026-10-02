@@ -20,31 +20,31 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 
 ## 用户说"跑一次日常"
 
-1. 先 `bin/maapilot daily status`：有没有正在跑、离下次定时多久。定时点前后 20 分钟内就告诉用户"马上会自动跑"，问还要不要现在跑。
-2. `bin/maapilot daily run`，用 Bash 的后台运行（要 20–60 分钟），告诉用户大概多久。只补几项用 `--only recruit,mall`。
+1. 先 `maapilot daily status`：有没有正在跑、离下次定时多久。定时点前后 20 分钟内就告诉用户"马上会自动跑"，问还要不要现在跑。
+2. `maapilot daily run`，用 Bash 的后台运行（要 20–60 分钟），告诉用户大概多久。只补几项用 `--only recruit,mall`。
 3. 结束后看 `data`：
    - 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的）。
-     马上按 `maapilot-recovery` 看屏幕处理（掉线就重新登录，要用户决定的先问用户），处理好后 `bin/maapilot daily run --only <rest 用逗号连起来>` 接着跑，一轮下来直到跑完；
+     马上按 `maapilot-recovery` 看屏幕处理（掉线就重新登录，要用户决定的先问用户），处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑，一轮下来直到跑完；
    - `failed` 里有失败的项（定时运行里 agent 也没救回来的）：同样按 `maapilot-recovery` 处理，处理完 `daily run --only <这几项>` 补跑；
    - `goals_pending: true`：程序把刷理智交回给你，按下面「目标部分」做；`award_pending: true` 时领奖励也留给你（奖励要在刷理智之后领）。
-     做完目标部分：`bin/maapilot maa award`（`award_pending` 时）→ `bin/maapilot guard check` → `bin/maapilot report write <run_id> --append "<目标部分做了什么、花了什么>"`，再一起汇报；
+     做完目标部分：`maapilot maa award`（`award_pending` 时）→ `maapilot guard check` → `maapilot report write <run_id> --append "<目标部分做了什么、花了什么>"`，再一起汇报；
    - 退出码 3：货币对账不过，转述给用户（`maapilot-recovery`「货币对账停机」）；退出码 4：模拟器被占用。
 4. 汇报（见「汇报」）。
 
 ## 目标部分（定时运行叫起你，或 `goals_pending`）
 
-1. `bin/maapilot goals list`：只看"进行中"的。`problems` 里有写错的目标，照着修好那几行（`goals update`）。
-2. `bin/maapilot state sanity` 看理智；`state show depot` 的时间是今天这次日常之前的，就先 `state depot`。
+1. `maapilot goals list`：只看"进行中"的。`problems` 里有写错的目标，照着修好那几行（`goals update`）。
+2. `maapilot state sanity` 看理智；`state show depot` 的时间是今天这次日常之前的，就先 `state depot`。
 3. 逐个目标（按文件里的顺序；"分解与进展"里写了先后的照写的）：
    - 读它的"分解与进展"，接着上次做；
-   - `bin/maapilot calc need "<对象>"`（技能等级、专精按笔记里记的加 `--from`）：`short` 为空 → 现在就做（`maapilot-training`）；缺的能合成 → `maapilot-base` 合出来再做；
+   - `maapilot calc need "<对象>"`（技能等级、专精按笔记里记的加 `--from`）：`short` 为空 → 现在就做（`maapilot-training`）；缺的能合成 → `maapilot-base` 合出来再做；
    - `关卡`、`其他` 类目标按笔记里的分解做（`maapilot-battle`）。
-4. 刷理智：把所有目标还缺的基础材料合起来，`bin/maapilot calc stages 固源岩=20 聚酸酯=8 …`，按 `plan` 刷（`bin/maapilot maa fight <关卡> --times N`，只刷 `open_today` 的关）。
+4. 刷理智：把所有目标还缺的基础材料合起来，`maapilot calc stages 固源岩=20 聚酸酯=8 …`，按 `plan` 刷（`maapilot maa fight <关卡> --times N`，只刷 `open_today` 的关）。
    **分批**：Bash 一条命令最长 10 分钟，一批只打大约 8 分钟的量（一般每批 4–6 次，按 `maa fight` 返回的 `duration_s` 调），Bash 超时设 600000 毫秒，一批一批接着打。
    多个目标抢同一种材料时，按目标顺序先满足前面的。目标都在等（训练室在练、材料在路上）、没东西可刷时，刷 `config.yaml` 的 `daily.default_stage`。
    `maa fight` 失败 `not_open` 就换建议里的下一关；打不了代理（没三星通关过）的关换一关，或按 `maapilot-battle` 处理。
 5. 刷到材料够了就回到第 3 步做养成。
-6. 每个目标做完一段就记一笔：`bin/maapilot goals update <标题> --note "<做了什么、还差什么>"`。完成了（用 `calc need` 或屏幕核对确实达到）：`bin/maapilot goals remove <标题> --status 完成 --reason "<核对依据>"`。
+6. 每个目标做完一段就记一笔：`maapilot goals update <标题> --note "<做了什么、还差什么>"`。完成了（用 `calc need` 或屏幕核对确实达到）：`maapilot goals remove <标题> --status 完成 --reason "<核对依据>"`。
 7. 写汇报（见下）。
 
 **理智液**：默认不用（`--medicine` 不加）。先查自动记忆里用户对理智液（包括快过期的）怎么说：说过"快过期的可以用"就加 `--expiring-medicine`；
@@ -53,11 +53,11 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 ## 定时运行里（无人值守）
 
 提示里写着这次运行的编号。用户不在场：
-- 先 `bin/maapilot lock status`：`inherited` 为 `true` 才说明日常把模拟器交给了你；不是就别操作，写进总结后结束。
+- 先 `maapilot lock status`：`inherited` 为 `true` 才说明日常把模拟器交给了你；不是就别操作，写进总结后结束。
 - 不问问题；要确认的命令会被拒，别试。
 - 命令都在前台跑、不放后台（Bash 超时设 600000 毫秒）：你一结束日常就收回模拟器，没跑完的会被拦下。刷图照上面分批。时间有上限（默认 90 分钟），先做最要紧的。
 - 只做目标里同意过的花费；合成玉、源石一律不碰；第一次遇到、记忆里没答案的事不做，写进汇报。
-- 最后 `bin/maapilot report write <运行编号> --append "<这一段汇报>"`，你的最后一条回复也写一两句同样的摘要。
+- 最后 `maapilot report write <运行编号> --append "<这一段汇报>"`，你的最后一条回复也写一两句同样的摘要。
 
 ## 汇报
 
@@ -73,13 +73,13 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 
 - 数从 `data`（`depot_change`、`farm`、`tasks`）和你自己做的操作里来；龙门币说"约"。
 - 失败了的项说清是什么、处理了没有、下次会不会自己好。
-- 用户问"今天做了什么""上次日常怎么样"：`bin/maapilot report show --last`（或指定哪次），转述，不整篇念。
+- 用户问"今天做了什么""上次日常怎么样"：`maapilot report show --last`（或指定哪次），转述，不整篇念。
 
 ## 改日常
 
-- 时间：改 `private/config.yaml` 的 `schedule`，然后 `bin/maapilot daily schedule`（弹确认）。
-- 做哪些项、没目标刷哪关、某项的 MAA 参数：改 `daily.tasks`、`daily.default_stage`、`daily.params`，改完 `bin/maapilot doctor` 确认。只改用户说的。
-- 不想要定时了：`bin/maapilot daily unschedule`（弹确认）。
+- 时间：改 `private/config.yaml` 的 `schedule`，然后 `maapilot daily schedule`（弹确认）。
+- 做哪些项、没目标刷哪关、某项的 MAA 参数：改 `daily.tasks`、`daily.default_stage`、`daily.params`，改完 `maapilot doctor` 确认。只改用户说的。
+- 不想要定时了：`maapilot daily unschedule`（弹确认）。
 
 ## 问用户的情形
 

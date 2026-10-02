@@ -167,7 +167,7 @@ def operator_need(name: str, target: dict, current: dict, box: dict) -> tuple[di
                 lmd += mc["lmd"]
                 _add(items, mc["items"])
         except g.ModuleDataUnavailable:
-            raise CliError("no_game_data", "没有模组数据表", hint="bin/maapilot data sync", exit=BAD_REQUEST) from None
+            raise CliError("no_game_data", "没有模组数据表", hint="maapilot data sync", exit=BAD_REQUEST) from None
         except (g.UnknownNameError, ValueError) as e:
             raise _bad(f"{name} 的模组：{e}") from None
         frm.setdefault("module", {})[t] = md_cur
@@ -288,7 +288,7 @@ def craft(item: str, count: int = 1) -> dict:
     shop = {i: shops.as_recipe(o) for i, o in shops.offers(config.server().lower()).items()}
     rs = recipes.goal_recipes(shop)
     if iid not in rs:
-        raise CliError("not_craftable", f"{_name(iid)} 不能合成，只能刷（bin/maapilot calc stages {_name(iid)}）",
+        raise CliError("not_craftable", f"{_name(iid)} 不能合成，只能刷（maapilot calc stages {_name(iid)}）",
                        exit=BAD_REQUEST)
     depot, depot_at = depot_snapshot()
     plan = recipes.plan_crafts_ids({iid: count}, depot, extra=True, recipes=rs)
@@ -351,7 +351,7 @@ def stages(specs: list[str]) -> dict:
     if no_stage:
         out["no_stage"] = no_stage
     if lv is None:
-        out["note"] = "没有掉率缓存（bin/maapilot data sync）：只列了主掉落关，算不了次数"
+        out["note"] = "没有掉率缓存（maapilot data sync）：只列了主掉落关，算不了次数"
     return out
 
 

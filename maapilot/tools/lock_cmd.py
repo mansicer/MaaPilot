@@ -32,7 +32,7 @@ def cmd_release(args):
     why = lock.stale_reason(d)
     if why is None:
         raise CliError("busy", f"锁还有效：{d.get('job') or d.get('owner')}（pid {d.get('pid')}）在用模拟器",
-                       hint="等它结束；bin/maapilot lock status 看是谁", exit=BUSY, data={"holder": _public(d)})
+                       hint="等它结束；maapilot lock status 看是谁", exit=BUSY, data={"holder": _public(d)})
     try:
         paths.LOCK_FILE.unlink()
     except FileNotFoundError:

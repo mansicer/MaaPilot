@@ -25,7 +25,7 @@ def _do(command: str, action) -> dict:
         except CliError:
             raise
         except Exception as e:
-            raise CliError("input_failed", f"操作没做成：{type(e).__name__}: {e}", hint="bin/maapilot doctor") from None
+            raise CliError("input_failed", f"操作没做成：{type(e).__name__}: {e}", hint="maapilot doctor") from None
     return {"done": True}
 
 

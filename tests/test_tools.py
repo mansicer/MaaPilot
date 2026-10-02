@@ -482,7 +482,7 @@ def test_doctor_candidates_when_no_address(_tmp_private):
 
 def test_doctor_brief(capsys, monkeypatch):
     from maapilot.tools import doctor
-    monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, f"40 4,16 * * * {paths.ROOT}/bin/maapilot daily run --trigger schedule\n*/15 * * * * /x/maapilot job tick\n".encode(), b"")}))
+    monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, f"40 4,16 * * * {paths.ROOT}/maapilot daily run --trigger schedule\n*/15 * * * * /x/maapilot job tick\n".encode(), b"")}))
     code, env = run(capsys, "doctor", "--brief")
     assert code == 0 and env["data"]["next"] == "setup" and env["data"]["setup_done"] is False
     paths.SETUP.parent.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,7 @@ MaaPilot/
   .claude/settings.json   权限（放行 maapilot 命令）、启动钩子
   .claude/skills/         各 skill（见第 5 节）
   maapilot/               Python 包：命令行工具
-  bin/maapilot            启动脚本：不用激活虚拟环境也能用，第一次自动建环境
+  bin/session-start       启动钩子：把 .venv/bin 加进会话的 PATH（命令直接写 maapilot），再做启动检查
   templates/config.yaml   配置模板
   private/                用户数据（不入库）：config.yaml、goals.md、goals-done.md、快照、日志、报告
   docs/                   本文稿、给开发者的说明

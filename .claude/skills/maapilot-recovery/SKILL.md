@@ -9,7 +9,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 
 ## 1. 先看
 
-1. `bin/maapilot screen shot`，用读图看截图。要找字就 `bin/maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
+1. `maapilot screen shot`，用读图看截图。要找字就 `maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
 2. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（MAA 日志，用读文件看最后一段）、`data.errors`、`data.shot`。
 
 ## 2. 常见情形
@@ -20,7 +20,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 | 月签到日历 | 右上关闭（约 1215,68） |
 | 签到活动页（一排"DAY"卡片，左下"结束时间"） | 能领的点一下领、弹"获得物资"点掉；右上 ✕（约 1232,100）关掉 |
 | 多选一奖励（"选一样"） | 不花资源，但选择是用户的：记忆里用户说过"你替我选"才选；否则关掉，告诉用户 |
-| "当前系统发生未知故障，尝试重新恢复"（掉线） | 点 ✓（约 640,491），等十几秒自己重连；回到标题页就点屏幕"开始唤醒"；还不行 `bin/maapilot maa closedown` 再 `bin/maapilot maa startup` |
+| "当前系统发生未知故障，尝试重新恢复"（掉线） | 点 ✓（约 640,491），等十几秒自己重连；回到标题页就点屏幕"开始唤醒"；还不行 `maapilot maa closedown` 再 `maapilot maa startup` |
 | 服务器维护 | 什么都别点，告诉用户维护中，下次日常照常；不用接管 |
 | "是否确认离开罗德岛基建？" | 确认（约 842,495） |
 | 设置页（被误点开） | 左上返回（约 85,45） |
@@ -32,8 +32,8 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 
 **回首页**：首页的标志是右上有"终端"。
 - 左上菜单（约 270,38）→ 菜单里的"首页"（约 92,260）；
-- 没有菜单的全屏页：`bin/maapilot input back`，一次一下，每次截图；
-- 还是回不去：`bin/maapilot maa startup`（启动或登录后会自己回首页，`data.home` 为 `true` 就是回到了）；最后手段 `bin/maapilot maa closedown` 再 `bin/maapilot maa startup`。
+- 没有菜单的全屏页：`maapilot input back`，一次一下，每次截图；
+- 还是回不去：`maapilot maa startup`（启动或登录后会自己回首页，`data.home` 为 `true` 就是回到了）；最后手段 `maapilot maa closedown` 再 `maapilot maa startup`。
 
 ## 3. 按错误码
 
@@ -44,23 +44,23 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 | 剿灭 `maa_failed`，屏幕上关卡页没有"代理指挥"或提示不能代理 | 这张剿灭图还没 400 杀满过，不能代理：别重试，写进总结（要用户决定：找作业打一次、或这周先不打）。日常里连着 2 次没打成，这周就不再打 |
 | `maa fight` `not_open` | 关卡今天不开：换关，不是故障 |
 | `op` / `craft` `shortcut_failed` | 看 `data.stage` 和截图，按 `maapilot-training` / `maapilot-base` 手动接着做 |
-| 退出码 4（被占用） | `bin/maapilot lock status` 看谁占着、做到哪。在跑日常就等它；持有进程已经不在了（残留）才 `bin/maapilot lock release`（弹确认） |
-| 退出码 5（环境） | `bin/maapilot doctor`，按每项的修复建议；要用户动手的（开模拟器、装软件）告诉用户 |
+| 退出码 4（被占用） | `maapilot lock status` 看谁占着、做到哪。在跑日常就等它；持有进程已经不在了（残留）才 `maapilot lock release`（弹确认） |
+| 退出码 5（环境） | `maapilot doctor`，按每项的修复建议；要用户动手的（开模拟器、装软件）告诉用户 |
 | 模拟器卡死、截图失败 | 请用户重启模拟器；`doctor` 确认连上再继续 |
 
 ## 4. 货币对账停机
 
 `guard check` / `guard snapshot` 或 `daily run` 退出码 3（`currency_decreased`），或会话开头 `next: "guard"`：合成玉或源石少了，而没有记下的同意。日常会一直停着。
 （对账只在"上次对账之后动过会花钱的操作"时才会拿旧的起点比，所以用户两次日常之间自己在游戏里花的一般不会被算进来。）
-1. `bin/maapilot guard status` 看少了多少、什么时候。
+1. `maapilot guard status` 看少了多少、什么时候。
 2. 告诉用户："合成玉少了 600（9 月 30 日 21:40 之后），我没有记录到你同意过这笔花费，所以日常先停下了。是你自己在游戏里花的吗？"
-3. 用户说是自己花的 / 同意这笔：`bin/maapilot guard allow 合成玉 600 --reason "用户说是自己寻访用的（日期）"`（弹确认），再 `bin/maapilot guard check`，对上了就恢复。
+3. 用户说是自己花的 / 同意这笔：`maapilot guard allow 合成玉 600 --reason "用户说是自己寻访用的（日期）"`（弹确认），再 `maapilot guard check`，对上了就恢复。
 4. 用户也不知道：别放行，请用户在游戏里查（寻访记录、采购中心），可以帮着截图看。
 
 ## 5. 定时日常里被叫起来
 
 提示里写着哪次运行、哪一项失败、日志和截图在哪。用户不在场：
-0. 先 `bin/maapilot lock status`：`inherited` 应为 `true`（日常把模拟器锁交给了你）。不是就什么都别点，最后一条回复写明"没拿到模拟器"。
+0. 先 `maapilot lock status`：`inherited` 应为 `true`（日常把模拟器锁交给了你）。不是就什么都别点，最后一条回复写明"没拿到模拟器"。
 1. 按上面看屏幕、处理；处理完可以把这一项重跑一次（提示里写了原来的命令，照抄），重跑还失败就不再试。命令在前台跑，Bash 超时设 600000 毫秒。
 2. **最后把游戏留在首页**，日常会接着跑下一项。
 3. 要用户决定的、会花钱的一律不做（要确认的命令也会被拒）。
@@ -68,7 +68,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 
 ## 6. 会话里
 
-处理完告诉用户：什么坏了、怎么处理的、现在好了没有。日常里失败的项处理完用 `bin/maapilot daily run --only <这几项>` 补跑（后台）。
+处理完告诉用户：什么坏了、怎么处理的、现在好了没有。日常里失败的项处理完用 `maapilot daily run --only <这几项>` 补跑（后台）。
 处理不了：说清卡在哪、屏幕上是什么，请用户自己看一眼。
 
 ## 问用户的情形

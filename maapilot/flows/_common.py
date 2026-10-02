@@ -39,7 +39,7 @@ def journal(command: str, args: dict, ok: bool, exit: int, duration_s: float, **
 
 
 def game_data_error(e: Exception) -> CliError:
-    return CliError("no_game_data", f"读不到游戏数据：{e}", hint="bin/maapilot data sync（或 doctor --fix）",
+    return CliError("no_game_data", f"读不到游戏数据：{e}", hint="maapilot data sync（或 doctor --fix）",
                     exit=ENVIRONMENT)
 
 
@@ -64,7 +64,7 @@ def depot_names() -> dict[str, int]:
     try:
         snap = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        raise CliError("no_snapshot", "没有仓库快照，算不了要合成什么", hint="先 bin/maapilot state depot",
+        raise CliError("no_snapshot", "没有仓库快照，算不了要合成什么", hint="先 maapilot state depot",
                        exit=BAD_REQUEST) from None
     return {display_name(str(k)): int(v) for k, v in (snap.get("items") or {}).items()}
 
@@ -91,7 +91,7 @@ def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: 
                 try:
                     g = Game()
                 except Exception as e:                  # noqa: BLE001 - 连不上模拟器是环境问题
-                    raise CliError("device_failed", f"连不上模拟器：{e}", hint="bin/maapilot doctor",
+                    raise CliError("device_failed", f"连不上模拟器：{e}", hint="maapilot doctor",
                                    exit=ENVIRONMENT) from None
             try:
                 return body(g, pr)

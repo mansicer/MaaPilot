@@ -11,8 +11,8 @@ description: 在游戏里给明日方舟干员升级、精英化、升技能、�
 
 | 要做 | 命令 |
 |---|---|
-| 升级 / 精英化 / 升技能 | `bin/maapilot op upgrade <干员> --elite 2 --level 1 [--skill 7]` |
-| 专精（一次开一阶） | `bin/maapilot op mastery <干员> --skill 3 --rank 1` |
+| 升级 / 精英化 / 升技能 | `maapilot op upgrade <干员> --elite 2 --level 1 [--skill 7]` |
+| 专精（一次开一阶） | `maapilot op mastery <干员> --skill 3 --rank 1` |
 
 成功时 `data` 有 `before`、`after`（升级前后的练度）。花了多少命令不算：动手前后各跑一次 `state depot`，对比着汇报。
 失败（`shortcut_failed`）时看 `data.stage`（做到哪一步）、`data.done`（已经做了的部分）、`data.shot`（失败时的截图，用读图看），**从卡住的地方接着手动做**，别从头再来一遍（已经升上去的不会退回）。
@@ -20,7 +20,7 @@ description: 在游戏里给明日方舟干员升级、精英化、升技能、�
 
 ## 手动操作的基本功
 
-- 看：`bin/maapilot screen shot`，读图；找按钮用 `bin/maapilot screen ocr --find "<字>"`，点 `center`。下面的坐标是 1280×720 上的参考位置，**先截图确认再点**。
+- 看：`maapilot screen shot`，读图；找按钮用 `maapilot screen ocr --find "<字>"`，点 `center`。下面的坐标是 1280×720 上的参考位置，**先截图确认再点**。
 - 点完不会自动截图：每点一下都 `screen shot` 看结果再决定下一步。转场、加载时等一两秒再截。
 - 回首页、处理弹窗见 `maapilot-recovery`。
 
@@ -68,7 +68,7 @@ description: 在游戏里给明日方舟干员升级、精英化、升技能、�
 
 ## 做完核对
 
-- 等级、精英化、技能等级：`bin/maapilot state op <干员>`（约一分钟）；很多干员一起核对用 `state box`（几分钟，读不到技能）。专精、模组读不到，以屏幕为准。
+- 等级、精英化、技能等级：`maapilot state op <干员>`（约一分钟）；很多干员一起核对用 `state box`（几分钟，读不到技能）。专精、模组读不到，以屏幕为准。
 - 告诉用户结果和花费："遥升到了精2 1级，花了约 18 万龙门币、2 个聚合剂和 1 个辅助双芯片。"数从做前后各一次 `state depot` 的对比里来。
 - 记进目标的"分解与进展"。
 

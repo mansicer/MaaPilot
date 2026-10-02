@@ -11,16 +11,16 @@ description: 明日方舟打关卡 via MaaPilot —— 刷已三星的关（maa 
 
 | 情形 | 做法 |
 |---|---|
-| 已经三星通关过的关，刷材料 | `bin/maapilot maa fight <关卡> --times N` |
+| 已经三星通关过的关，刷材料 | `maapilot maa fight <关卡> --times N` |
 | 没打过 / 没三星的关 | 找作业，`maa copilot` |
-| 剿灭 | `bin/maapilot maa annihilation` |
+| 剿灭 | `maapilot maa annihilation` |
 | 模组任务 | 读任务要求，拆成具体的关和条件，再按上面做 |
 
-先 `bin/maapilot data stage <关卡>`：理智消耗、今天开不开、主要掉落。理智不够就 `state sanity` 看看，告诉用户要等还是用理智液（见 `maapilot-daily` 的理智液规矩）。**不用源石回理智。**
+先 `maapilot data stage <关卡>`：理智消耗、今天开不开、主要掉落。理智不够就 `state sanity` 看看，告诉用户要等还是用理智液（见 `maapilot-daily` 的理智液规矩）。**不用源石回理智。**
 
 ## 刷已通关的关
 
-`bin/maapilot maa fight <关卡> --times N`（不写 `--times` 就打到理智用完）。结果里有 `times_done`、`sanity_used`、`drops`。
+`maapilot maa fight <关卡> --times N`（不写 `--times` 就打到理智用完）。结果里有 `times_done`、`sanity_used`、`drops`。
 - `not_open`：今天不开（芯片本、资源本按星期开），换一关或改天。
 - 打不了代理（关卡页没有"代理指挥"或没勾上）：这关没三星通关过，按下一节打一遍三星。
 - `offline`：掉线或维护，按 `maapilot-recovery`。
@@ -28,10 +28,10 @@ description: 明日方舟打关卡 via MaaPilot —— 刷已三星的关（maa 
 ## 打没打过的关：用作业
 
 1. **找作业**：MAA 作业站 https://prts.plus 按关卡号搜。也可以用 WebFetch 读接口 `https://prts.maa.plus/copilot/query?levelKeyword=<关卡>&order_by=hot`（返回 JSON，每份作业的内容里有要用的干员、技能、练度要求）。接口读不到就请用户在网页上挑一份，把作业编号告诉你。
-2. **挑作业**：对照 `bin/maapilot state show box`：作业要的干员用户都有、精英化和等级够（作业常写"精2 满级 / 技能 7"之类）。优先挑干员少、要求低、评分高的；缺一两个干员的，看作业有没有写替换。
+2. **挑作业**：对照 `maapilot state show box`：作业要的干员用户都有、精英化和等级够（作业常写"精2 满级 / 技能 7"之类）。优先挑干员少、要求低、评分高的；缺一两个干员的，看作业有没有写替换。
    都打不了：告诉用户缺谁、缺什么练度，问要不要加成长期目标（`maapilot-goals`：写成 `关卡 <编号>`，分解成要练的干员）。
 3. **进关卡页**：把游戏停在这关的关卡页（能看到"开始行动"）。主线：首页"终端"→"主题曲"→ 章节 → 地图上左右滑找关卡号，点开。活动关从终端的活动入口进。每一步 `screen shot` 看。
-4. **打**：`bin/maapilot maa copilot maa://<作业编号> --formation`（`--formation` 让 MAA 按作业自动编队）。本地作业文件写路径。
+4. **打**：`maapilot maa copilot maa://<作业编号> --formation`（`--formation` 让 MAA 按作业自动编队）。本地作业文件写路径。
 5. **核对**：打完马上 `screen shot` 看结算页：三星（三颗星）才算。`maa copilot` 的结果里没有星数，命令返回时结算页可能已经过去了：
    截图不是结算页就回到这关的关卡选择页，看关卡号旁边的星星（三颗亮的才算），或点开关卡看"代理指挥"能不能勾选（能勾就是三星过了）。
    两星或失败就换一份作业、或者看是哪个干员练度不够。
@@ -39,7 +39,7 @@ description: 明日方舟打关卡 via MaaPilot —— 刷已三星的关（maa 
 
 ## 剿灭
 
-`bin/maapilot maa annihilation`（默认当期剿灭、打 1 次；`--times N` 打几次）。结果里 `orundum_gained` 是这次拿的合成玉，`weekly_capped` 为真说明本周合成玉已经拿满，别再打（日常也会自动跳过）。剿灭能代理的前提是这张图以前 400 杀满过；没满过就找剿灭的作业，用 `maa copilot`。
+`maapilot maa annihilation`（默认当期剿灭、打 1 次；`--times N` 打几次）。结果里 `orundum_gained` 是这次拿的合成玉，`weekly_capped` 为真说明本周合成玉已经拿满，别再打（日常也会自动跳过）。剿灭能代理的前提是这张图以前 400 杀满过；没满过就找剿灭的作业，用 `maa copilot`。
 剿灭拿的是合成玉（增加），不算花费。每次打要消耗理智。日常里剿灭连着 2 次没打成（多半是不能代理），这周的日常就不再打，汇报里会提；要用户决定是找作业打一次，还是先不打。
 
 ## 推主线
@@ -49,7 +49,7 @@ description: 明日方舟打关卡 via MaaPilot —— 刷已三星的关（maa 
 ## 模组任务
 
 干员页的模组入口里能看到模组任务，一般两步：一个关卡条件（例如"在某关中部署该干员并三星通关"或"使用该干员击倒 N 个敌人"），一个关卡挑战。
-1. `bin/maapilot data operator <干员>` 的 `modules[].missions` 是每一步任务的原文（`stage` 是要打的关），`unlock` 是解锁要的精英化和等级。
+1. `maapilot data operator <干员>` 的 `modules[].missions` 是每一步任务的原文（`stage` 是要打的关），`unlock` 是解锁要的精英化和等级。
    拆成"在哪关、带谁、满足什么条件"；数据里没有（新模组）再去模组页截图读。
 2. 找能带上这个干员的作业（或在用户同意下自己编队）；条件是"部署该干员"时，作业里没有他就不算。
 3. 打完回模组页看任务是否打勾。两步都完成后才能解锁模组（花费见 `maapilot-training` 的模组部分）。

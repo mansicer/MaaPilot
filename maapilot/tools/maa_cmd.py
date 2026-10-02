@@ -292,14 +292,14 @@ def run(task: str, **opts) -> dict:
             data["home"] = go_home()
         return data
     if mrun.error:
-        raise CliError("maa_failed", mrun.error, hint="bin/maapilot doctor", exit=FAILED, data=data)
+        raise CliError("maa_failed", mrun.error, hint="maapilot doctor", exit=FAILED, data=data)
     data["errors"] = maa.error_lines(mrun)
     if mrun.offline:
         raise CliError("offline", "游戏掉线或服务器维护，任务没做完", exit=FAILED, data=data,
-                       hint="重新登录（bin/maapilot maa startup）后再试；维护中就等维护结束")
+                       hint="重新登录（maapilot maa startup）后再试；维护中就等维护结束")
     why = "超时，已终止 maa" if mrun.timed_out else f"maa 退出码 {mrun.returncode}"
     raise CliError("maa_failed", f"{task} 没做成（{why}）", exit=FAILED, data=data,
-                   hint="截图看看卡在哪（bin/maapilot screen shot），按 maapilot-recovery 处理")
+                   hint="截图看看卡在哪（maapilot screen shot），按 maapilot-recovery 处理")
 
 
 @common.logged

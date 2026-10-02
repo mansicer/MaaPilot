@@ -91,7 +91,7 @@ def currencies(depot_items: dict) -> dict:
     """{originite, orundum}；一件都没认出 → CliError(unreadable)。"""
     if not depot_items:
         raise CliError("unreadable", "仓库识别什么都没认出，读不到源石、合成玉", exit=FAILED,
-                       hint="回首页后再试（bin/maapilot guard check）")
+                       hint="回首页后再试（maapilot guard check）")
     return {k: int(depot_items.get(iid, 0)) for k, iid in ITEMS.items()}
 
 
@@ -258,7 +258,7 @@ def allow(item: str, amount: int, reason: str) -> dict:
     _save_allowances(rows)
     out = {"recorded": row}
     if stopped():
-        out["hint"] = "现在停机中：bin/maapilot guard check 对一下，对上了就解除"
+        out["hint"] = "现在停机中：maapilot guard check 对一下，对上了就解除"
     return out
 
 

@@ -217,7 +217,7 @@ def check_game(ctx: Ctx) -> dict:
         return _item("game", False, "模拟器里没装明日方舟", "在模拟器的应用商店里装好明日方舟，并登录一次账号",
                      required=False, package=fg, installed=inst)
     return _item("game", False, "游戏不在前台" + (f"（前台是 {fg}）" if fg else ""),
-                 "bin/maapilot maa startup（启动游戏、回首页）", required=False, package=fg, installed=inst)
+                 "maapilot maa startup（启动游戏、回首页）", required=False, package=fg, installed=inst)
 
 
 def installed_games(ctx: Ctx) -> list[dict] | None:
@@ -307,7 +307,7 @@ def check_maa_config(ctx: Ctx) -> dict:
     from maapilot.crew import maa
     missing = maa.config_missing()
     if missing:
-        return _item("maa_config", False, f"maa-cli 配置目录缺 {'、'.join(missing)}", "bin/maapilot doctor --fix",
+        return _item("maa_config", False, f"maa-cli 配置目录缺 {'、'.join(missing)}", "maapilot doctor --fix",
                      dir=str(maa.config_dir()))
     return _item("maa_config", True, str(maa.config_dir()))
 
@@ -315,7 +315,7 @@ def check_maa_config(ctx: Ctx) -> dict:
 def check_ocr_model(ctx: Ctx) -> dict:
     missing = [f for f in OCR_FILES if not (paths.OCR_MODEL / f).exists()]
     if missing:
-        return _item("ocr_model", False, f"OCR 模型缺 {'、'.join(missing)}", "bin/maapilot doctor --fix（从 maa-cli 资源复制）")
+        return _item("ocr_model", False, f"OCR 模型缺 {'、'.join(missing)}", "maapilot doctor --fix（从 maa-cli 资源复制）")
     return _item("ocr_model", True, "齐全")
 
 
@@ -323,13 +323,13 @@ def check_game_data(ctx: Ctx) -> dict:
     from maapilot.knowledge import datasync
     missing = datasync.missing_tables()
     if missing:
-        return _item("game_data", False, f"数据表缺 {len(missing)} 张", "bin/maapilot doctor --fix 或 bin/maapilot data sync")
+        return _item("game_data", False, f"数据表缺 {len(missing)} 张", "maapilot doctor --fix 或 maapilot data sync")
     stamps = [common.parse_iso(v.get("fetched_at")) for v in datasync.read_manifest().values() if isinstance(v, dict)]
     stamps = [s for s in stamps if s]
     if stamps:
         days = (common.now() - max(stamps)).days
         if days > DATA_STALE_DAYS:
-            return _item("game_data", False, f"{days} 天没同步了", "bin/maapilot data sync", age_days=days)
+            return _item("game_data", False, f"{days} 天没同步了", "maapilot data sync", age_days=days)
         return _item("game_data", True, f"齐全，{days} 天前同步", age_days=days)
     return _item("game_data", True, "齐全")
 
@@ -361,7 +361,7 @@ def check_schedule(ctx: Ctx) -> dict:
     extra = {"old_entries": info["old_entries"]} if info["old_entries"] else {}
     if not info["installed"]:
         detail = "还没设定时日常" + ("；有旧版 MaaPilot 的定时任务" if info["old_entries"] else "")
-        return _item("schedule", False, detail, "bin/maapilot daily schedule", required=False, **extra)
+        return _item("schedule", False, detail, "maapilot daily schedule", required=False, **extra)
     return _item("schedule", True, f"定时日常：{'、'.join(info['times'])}" +
                  ("；还有旧版 MaaPilot 的定时任务" if info["old_entries"] else ""), required=False, **extra)
 
@@ -507,7 +507,7 @@ def hook_output(data: dict) -> dict:
     钩子不会让 agent 自己先开口：要用户先说一句。systemMessage 是直接显示给用户的那一行，告诉用户说一句就开始。"""
     import json
     env = {"ok": True, "command": "doctor --brief", "data": data, "error": None}
-    text = "MaaPilot 启动检查（bin/maapilot doctor --brief 的输出）：\n" + json.dumps(env, ensure_ascii=False, indent=1, default=str)
+    text = "MaaPilot 启动检查（maapilot doctor --brief 的输出）：\n" + json.dumps(env, ensure_ascii=False, indent=1, default=str)
     out = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
     msg = {"setup": SETUP_GREETING, "guard": GUARD_NOTICE}.get(data.get("next"))
     if msg:
@@ -530,7 +530,7 @@ def cmd(args):
     if not ok_all:
         bad = [c["name"] for c in checks if not c["ok"] and c.get("required", True)]
         raise CliError("checks_failed", f"没通过：{'、'.join(bad)}", exit=ENVIRONMENT, data=data,
-                       hint="按每项的 fix 处理；能自动修的先 bin/maapilot doctor --fix")
+                       hint="按每项的 fix 处理；能自动修的先 maapilot doctor --fix")
     return data
 
 

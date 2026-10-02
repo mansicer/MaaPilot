@@ -23,7 +23,7 @@ def require_tables() -> None:
         missing = ["?"]
     if missing:
         raise CliError("no_game_data", f"游戏数据表不全（缺 {', '.join(missing)}）", exit=ENVIRONMENT,
-                       hint="bin/maapilot data sync")
+                       hint="maapilot data sync")
 
 
 def _suggest(name: str, pool) -> list[str]:
