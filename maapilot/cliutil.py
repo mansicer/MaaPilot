@@ -92,6 +92,17 @@ def device(owner: str, *, wait_s: float = 0, job: str | None = None):
         lk.release()
 
 
+@contextmanager
+def device_readonly():
+    """只读的命令（截图、识字）用：读配置、配置设备连接，不拿锁、不记"可能花了东西"。
+    连接时用 Game(readonly=True)（不开输入服务），不会打扰正在跑的 MAA 或拿着锁的命令。"""
+    from maapilot import config
+    from maapilot.crew import device as dev
+
+    dev.configure(config.connection())   # 没配置 → CliError(ENVIRONMENT)
+    yield
+
+
 def register_stub(sub, name: str, help: str, subcommands: list[str] | None = None) -> None:
     """占位：注册一个还没实现的命令组，任何参数都回 not_implemented。实现时整个 register() 换掉。"""
     import argparse

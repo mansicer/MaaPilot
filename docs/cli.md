@@ -26,7 +26,8 @@
   | 5 | 环境问题（没配置、adb 连不上、maa-cli 没装） | `doctor` |
 
 - **坐标**：所有坐标、区域都是 1280×720 参考坐标系（截图也按这个尺寸存），与设备真实分辨率无关（要求 16:9）。
-- **锁**：标"碰模拟器"的命令自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。持锁的进程（`daily run`）起的子进程
+- **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
+  只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
   （无头 `claude -p`）通过环境变量 `MAAPILOT_LOCK_TOKEN` 继承锁，子进程里的命令不会被挡（见 `maapilot/crew/lock.py`）。
 - **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行（见[文件](#private-文件)）。
 - **物品与干员名**：参数里用游戏里的中文名；输出里物品同时给 `id` 与 `name`。
@@ -38,7 +39,7 @@
 | 命令 | 碰模拟器 | 权限 | 负责 |
 |---|---|---|---|
 | `doctor [--brief] [--offline] [--fix]` | 除 `--brief`/`--offline` 外只读 | 放行 | A |
-| `screen shot / ocr` | 只读 | 放行 | A |
+| `screen shot / ocr` | 只读，**不拿锁** | 放行 | A |
 | `input tap / swipe / back / text` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
 | `maa why` | 否（只读 MAA 的日志） | 放行 | A |
@@ -120,7 +121,10 @@
 `lines` 是给会话开头看的 3–5 行中文摘要。`last_daily` 取 `private/reports/` 里最新的 `.json`（读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
 `goals_active` 用 `maapilot.flows.goals.active_count()`。
 
-## screen —— 截图与识别（只读）
+## screen —— 截图与识别（只读，不拿锁）
+
+不拿模拟器锁、不记进对账的 dirty：MAA 或日常正在操作时也能用。MaaFramework 连接时输入方式设为 `Null`（`Game(readonly=True)`），
+设备上不起 maatouch / minitouch，也不发任何点击，所以不会和正在跑的任务抢输入；截图方式和平时一样（`RawWithGzip | Encode`，缩到 1280×720）。
 
 `maapilot screen shot [--name <名>]`
 截一张图存到 `private/shots/<YYYYmmdd-HHMMSS>[-<名>].png`（1280×720）。agent 用读图工具看它：`path` 是绝对路径。

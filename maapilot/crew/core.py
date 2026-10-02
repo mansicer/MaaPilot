@@ -44,9 +44,14 @@ class OcrHit:
 
 
 class Game:
-    def __init__(self, debug: bool = True, conn: Connection | None = None, *, ocr: bool = True):
+    def __init__(self, debug: bool = True, conn: Connection | None = None, *, ocr: bool = True,
+                 readonly: bool = False):
         """Connect to the device. ocr=False skips loading the OCR resource (a screenshot-only command is faster);
-        ocr() then raises RuntimeError."""
+        ocr() then raises RuntimeError.
+
+        readonly=True connects with no input method at all (MaaAdbInputMethodEnum.Null): MaaFramework starts no
+        input server (maatouch / minitouch) on the device, so a screenshot or OCR can run while MAA or another
+        MaaPilot command is driving the game without the lock. tap / swipe / key / text then raise RuntimeError."""
         conn = conn or device.current()
         paths.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         Toolkit.init_option(str(paths.DEBUG_DIR))
@@ -55,8 +60,10 @@ class Game:
             conn.adb,
             conn.address,
             screencap_methods=MaaAdbScreencapMethodEnum.RawWithGzip | MaaAdbScreencapMethodEnum.Encode,
-            input_methods=MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.AdbShell,
+            input_methods=(MaaAdbInputMethodEnum.Null if readonly
+                           else MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.AdbShell),
         )
+        self.readonly = readonly
         self.ctrl.set_screenshot_target_short_side(REF_H)  # MaaFw scales screenshots and maps clicks back
         if not self.ctrl.post_connection().wait().succeeded:
             raise RuntimeError("adb connection failed")
@@ -133,7 +140,12 @@ class Game:
         raise TimeoutError(f"'{pattern}' not found within {timeout}s (screenshot saved)")
 
     # ---- input ------------------------------------------------------------
+    def _writable(self) -> None:
+        if self.readonly:
+            raise RuntimeError("Game(readonly=True) 只能截图、识字，不能操作")
+
     def tap(self, x: int, y: int, delay: float = 0.8) -> None:
+        self._writable()
         self.ctrl.post_click(int(x), int(y)).wait()
         time.sleep(delay)
 
@@ -141,10 +153,12 @@ class Game:
         self.tap(*hit.center, delay=delay)
 
     def swipe(self, x1, y1, x2, y2, duration_ms: int = 400, delay: float = 0.8) -> None:
+        self._writable()
         self.ctrl.post_swipe(int(x1), int(y1), int(x2), int(y2), duration_ms).wait()
         time.sleep(delay)
 
     def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
+        self._writable()
         self.ctrl.post_touch_down(int(x), int(y)).wait()
         time.sleep(duration_ms / 1000)
         self.ctrl.post_touch_up().wait()
@@ -152,12 +166,14 @@ class Game:
 
     def key_back(self, delay: float = 0) -> None:
         """The Android back key (KEYCODE_BACK)."""
+        self._writable()
         if not self.ctrl.post_click_key(4).wait().succeeded:
             raise RuntimeError("back key failed")
         time.sleep(delay)
 
     def input_text(self, text: str, delay: float = 0) -> None:
         """Type into the focused input box. 待真机核对：adb shell input text 不支持非 ASCII。"""
+        self._writable()
         if not self.ctrl.post_input_text(text).wait().succeeded:
             raise RuntimeError("input text failed")
         time.sleep(delay)

@@ -273,7 +273,7 @@ EVIDENCE_SHOTS = 6        # 失败时最多带几张 MAA 自己的截图
 def failure_shot(task: str) -> str:
     """失败那一刻截一张（同 `screen shot`），返回路径；连不上抛异常。测试里替换掉。"""
     from maapilot.tools import screen
-    return screen.capture(common.connect(ocr=False), f"fail-{task}")[1]["path"]
+    return screen.capture(common.connect(ocr=False, readonly=True), f"fail-{task}")[1]["path"]
 
 
 def collect_evidence(task: str, started, ended) -> dict:

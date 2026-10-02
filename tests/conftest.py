@@ -15,7 +15,7 @@ def _tmp_private(tmp_path, monkeypatch):
     from maapilot.cliutil import ENVIRONMENT, CliError
     from maapilot.tools import common
 
-    def _no_device(ocr=False):
+    def _no_device(ocr=False, readonly=False):
         raise CliError("screen_failed", "测试里没有模拟器", exit=ENVIRONMENT)
     monkeypatch.setattr(common, "connect", _no_device)
     yield tmp_path / "private"

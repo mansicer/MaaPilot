@@ -118,12 +118,13 @@ def ensure_device() -> None:
         dev.configure(config.connection())
 
 
-def connect(*, ocr: bool = False):
-    """连模拟器（MaaFramework）。测试里替换掉。失败 → CliError(screen_failed, 退出码 5)。"""
+def connect(*, ocr: bool = False, readonly: bool = False):
+    """连模拟器（MaaFramework）。readonly=True 不开输入服务、不能点（截图、识字用，不拿锁时只能这样连）。
+    测试里替换掉。失败 → CliError(screen_failed, 退出码 5)。"""
     from maapilot.cliutil import ENVIRONMENT
     try:
         from maapilot.crew.core import Game
-        return Game(debug=False, ocr=ocr)
+        return Game(debug=False, ocr=ocr, readonly=readonly)
     except Exception as e:                           # adb 连不上、分辨率不对、资源缺失
         raise CliError("screen_failed", f"连不上模拟器或截不了图：{type(e).__name__}: {e}",
                        hint="maapilot doctor", exit=ENVIRONMENT) from None

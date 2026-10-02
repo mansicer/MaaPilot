@@ -255,6 +255,11 @@ class FakeHit:
 class FakeGame:
     def __init__(self):
         self.calls = []
+        self.connects = []                     # 每次连接是不是只读
+
+    def connected(self, readonly: bool):
+        self.connects.append(readonly)
+        return self
 
     def screencap(self):
         return np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -278,7 +283,7 @@ class FakeGame:
 @pytest.fixture
 def game(cfg, monkeypatch):
     g = FakeGame()
-    monkeypatch.setattr(common, "connect", lambda ocr=False: g)
+    monkeypatch.setattr(common, "connect", lambda ocr=False, readonly=False: g.connected(readonly))
     return g
 
 
@@ -291,6 +296,38 @@ def test_screen_shot_and_ocr(game, capsys):
     assert env["data"]["hits"][0]["center"] == [1110, 165]
     code, env = run(capsys, "screen", "ocr", "--roi", "1200", "0", "200", "10")
     assert code == 2 and env["error"]["code"] == "bad_roi"
+
+
+def _foreign_lock():
+    common.write_json(paths.LOCK_FILE, {"owner": "maa infrast", "pid": os.getpid() + 999999, "host": lock._host(),
+                                        "job": "maa infrast", "token": "secret", "acquired_at": common.iso(),
+                                        "heartbeat_at": common.iso(), "ttl_s": 900})
+
+
+def test_screen_does_not_need_the_lock(game, capsys, monkeypatch):
+    """截图、识字是只读的：别人拿着锁（MAA 正在跑）也能做，用只读连接，不动锁、不记"可能花了东西"；点击照样被挡。"""
+    monkeypatch.setattr(lock, "pid_alive", lambda pid: True)
+    _foreign_lock()
+    before = paths.LOCK_FILE.read_text()
+    code, env = run(capsys, "screen", "shot")
+    assert code == 0, env
+    code, env = run(capsys, "screen", "ocr", "--find", "终端")
+    assert code == 0 and env["data"]["hits"][0]["text"] == "终端"
+    assert game.connects == [True, True]
+    assert paths.LOCK_FILE.read_text() == before
+    assert not (paths.GUARD / "dirty.json").exists()
+    code, env = run(capsys, "input", "tap", "10", "20")
+    assert code == 4 and env["error"]["code"] == "busy" and game.calls == []
+
+
+def test_readonly_game_refuses_input():
+    from maapilot.crew.core import Game
+    g = Game.__new__(Game)
+    g.readonly = True
+    for call in (lambda: g.tap(1, 2), lambda: g.swipe(1, 2, 3, 4), lambda: g.key_back(), lambda: g.input_text("a"),
+                 lambda: g.long_press(1, 2, 10)):
+        with pytest.raises(RuntimeError):
+            call()
 
 
 def test_input_commands(game, capsys):

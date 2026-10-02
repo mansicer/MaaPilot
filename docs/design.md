@@ -41,7 +41,7 @@ MaaPilot/
 | `daily schedule / unschedule` | 设置、取消系统定时任务 |
 | `reset [--dry-run] [--memory]` | 从头设置：`private/` 整个改名成备份、删本项目的定时任务（要用户确认；不删任何东西） |
 
-所有碰模拟器的命令自动拿锁，同一时间只有一个。
+所有操作模拟器的命令自动拿锁，同一时间只有一个；只读的截图、识字（`screen shot / ocr`）不拿锁，随时能看。
 
 ## 4. 数据（`private/`）
 

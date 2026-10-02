@@ -21,7 +21,7 @@ def run(capsys, *argv):
 @pytest.fixture
 def game(cfg, monkeypatch):
     g = FakeGame()
-    monkeypatch.setattr(common, "connect", lambda ocr=False: g)
+    monkeypatch.setattr(common, "connect", lambda ocr=False, readonly=False: g.connected(readonly))
     return g
 
 

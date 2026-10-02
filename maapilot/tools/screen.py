@@ -1,4 +1,7 @@
-"""`maapilot screen shot / ocr`：截图、识别文字（碰模拟器，只读，拿锁）。契约见 docs/cli.md「screen」。
+"""`maapilot screen shot / ocr`：截图、识别文字（只读：不拿锁，用不开输入服务的只读连接）。契约见 docs/cli.md「screen」。
+
+不拿锁：MAA 或别的命令正在操作模拟器时也能截图看看。连接用 Game(readonly=True)：MaaFramework 不在设备上起
+maatouch / minitouch，也不发任何点击，所以不会和正在跑的任务抢输入。
 
 截图按 1280×720 参考坐标系存成 PNG（MaaFramework 已把截图缩到短边 720；不是正好 1280×720 时再缩一次），
 放在 private/shots/<YYYYmmdd-HHMMSS>[-<名>].png，输出绝对路径给 agent 用读图工具看。
@@ -8,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from maapilot import paths
+from maapilot import cliutil, paths
 from maapilot.cliutil import BAD_REQUEST, CliError
 from maapilot.tools import common
 
@@ -77,8 +80,8 @@ def ocr_hits(game, img, roi, pattern: str | None) -> list[dict]:
 
 @common.logged
 def cmd_shot(args):
-    with common.device("screen shot"):
-        game = common.connect(ocr=False)
+    with cliutil.device_readonly():
+        game = common.connect(ocr=False, readonly=True)
         return capture(game, args.name)[1]
 
 
@@ -87,8 +90,8 @@ def cmd_ocr(args):
     roi = _roi(args.roi)
     if args.find:
         _check_regex(args.find)
-    with common.device("screen ocr"):
-        game = common.connect(ocr=True)
+    with cliutil.device_readonly():
+        game = common.connect(ocr=True, readonly=True)
         img, meta = capture(game, args.name or "ocr")
         return {"path": meta["path"], "roi": list(roi), "hits": ocr_hits(game, img, roi, args.find)}
 
