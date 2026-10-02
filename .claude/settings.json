@@ -35,6 +35,7 @@
       "Bash(maapilot daily schedule:*)",
       "Bash(maapilot daily unschedule:*)",
       "Bash(maapilot lock release:*)",
+      "Bash(maapilot reset:*)",
       "Edit(private/config.yaml)"
     ],
     "deny": [

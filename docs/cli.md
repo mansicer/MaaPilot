@@ -47,6 +47,7 @@
 | `data …` | 否（`sync` 联网） | 放行 | A |
 | `calc need / craft / stages` | 否 | 放行 | A |
 | `lock status` / `lock release` | 否 | 放行 / **询问** | A |
+| `reset [--dry-run] [--memory]` | 否 | **询问** | B |
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
 | `goals list / add / update / remove` | 否 | 放行 | B |
@@ -503,6 +504,34 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 "schedule": {"installed": true, "times": [...], "old_entries": [...]}, "next_at": "…"}`。
 程序里 `maapilot.flows.daily.schedule_info()`、`maapilot.flows.report.latest()` 给 `doctor` 用。
 
+## reset —— 从头设置
+
+`maapilot reset [--dry-run] [--memory]`（权限"询问"；不碰模拟器）
+
+用户说要从头设置时用。**什么都不删**：
+1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令或接管的 agent 在操作，退出码 4 `busy`，`data.holder`）、
+   在日常叫起来的 agent 里（环境里有 `MAAPILOT_DAILY_RUN` 或 `MAAPILOT_LOCK_TOKEN`，退出码 2 `not_allowed`）→ 不做。
+2. crontab 里本项目的行（以 `# maapilot-v2 <本仓库路径>` 结尾，同 `daily unschedule`）删掉，别的行（包括别的目录的 MaaPilot）一个字节都不动。
+3. `private/` 整个改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、`setup.json`、目标、快照、日志、汇报、截图、对账都在里面）；
+   再把备份里的 `maa-config/`（maa-cli 的配置与任务模板）复制回新的 `private/maa-config/`。之后 `doctor --brief` 的 `next` 是 `setup`。
+   恢复：把新建的 `private/` 挪开，把备份改回 `private`（`data.private.restore` 写着）。
+4. `--memory`（默认不动）：Claude Code 给这个项目目录记的自动记忆 `<~/.claude 或 $CLAUDE_CONFIG_DIR>/projects/<仓库绝对路径里非字母数字都换成 ->/memory/`
+   也改名成旁边的 `memory.bak-<时间>`。测试用 `MAAPILOT_CLAUDE_PROJECTS_DIR` 换掉 projects 目录。
+5. 留着：`.venv`、`data/`、`resource/`、maa-cli 本身和它的资源。
+
+`--dry-run` 只列出会挪什么、删哪几行，什么都不动。
+
+```json
+{"dry_run": false,
+ "crontab": {"remove": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "removed": ["…"], "other_lines_kept": true},
+ "private": {"move": "/…/private", "to": "/…/private.bak-20261002-1700", "entries": ["config.yaml", "goals.md", "log", …],
+             "restore": "mv … …", "keep_maa_config": "/…/private/maa-config"},
+ "memory": {"move": null, "note": "没带 --memory：自动记忆不动"},
+ "keep": ["/…/.venv", "/…/data", "/…/resource", "maa-cli（及它的资源）"], "next": "setup"}
+```
+
+重置之后让用户重新开一次会话（启动检查会进入设置）。
+
 ## report —— 汇报
 
 | 命令 | 做什么 |
@@ -678,6 +707,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot daily schedule:*)",
       "Bash(maapilot daily unschedule:*)",
       "Bash(maapilot lock release:*)",
+      "Bash(maapilot reset:*)",
       "Edit(private/config.yaml)"
     ],
     "deny": [
@@ -706,6 +736,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ```
 
 - `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
+- `reset` 在 **ask** 里：挪走用户的全部设置和数据，用户在确认框里点同意才做；无头运行里一律被拒（命令自己也拒绝）。
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。

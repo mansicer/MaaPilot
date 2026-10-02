@@ -19,9 +19,9 @@ from maapilot import cli
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md")) + [ROOT / "CLAUDE.md", ROOT / "README.md"]
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
-          "daily", "guard", "lock")
+          "daily", "guard", "lock", "reset")
 # 要用户在确认框里点同意的命令（design.md 第 7 节、docs/cli.md 命令总览）
-ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release")
+ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release", "reset")
 
 # 说明里提到的 maa-cli 自己的命令（setup 装资源用），不是 maapilot
 MAA_CLI = {"maa install", "maa update"}

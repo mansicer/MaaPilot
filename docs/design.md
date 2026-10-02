@@ -39,6 +39,7 @@ MaaPilot/
 | `guard snapshot / check / allow` | 真实货币对账；`allow` 记下用户同意的一次花费（权限设置里要弹确认） |
 | `daily run` | 日常：按配置依次跑 MAA 任务，出错当场叫 agent 接管，最后叫 agent 做目标部分（见第 6 节） |
 | `daily schedule / unschedule` | 设置、取消系统定时任务 |
+| `reset [--dry-run] [--memory]` | 从头设置：`private/` 整个改名成备份、删本项目的定时任务（要用户确认；不删任何东西） |
 
 所有碰模拟器的命令自动拿锁，同一时间只有一个。
 

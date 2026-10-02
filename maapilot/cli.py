@@ -32,6 +32,7 @@ GROUPS = [
     "maapilot.flows.op",
     "maapilot.flows.craft",
     "maapilot.flows.report",
+    "maapilot.flows.reset",
 ]
 
 
