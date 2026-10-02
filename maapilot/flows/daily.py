@@ -182,6 +182,7 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
         f"MAA 日志：{log}。" if log else "",
         *evidence_lines((data or {}).get("evidence"), why_task),
         "加载 skill maapilot-recovery，只处理这一项：先看上面的截图、查原因，再截图看现在停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
+        "被登出、掉线（停在开始唤醒的标题页）：用户不在场，直接重新登录（maapilot maa startup）再重跑这一项，并写进总结。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",

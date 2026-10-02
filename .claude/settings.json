@@ -20,6 +20,7 @@
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
+      "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
       "Edit(private/goals-done.md)",

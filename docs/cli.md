@@ -481,7 +481,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 无头 agent：`<tools.claude> -p "<提示>" --output-format stream-json --verbose --settings <仓库>/.claude/settings.json --permission-mode default --permission-prompts none`，
 工作目录是仓库根目录（运行时由安装位置推出），显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝），
 环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
-agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
+agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
 （程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
@@ -663,6 +663,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
+      "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
       "Edit(private/goals-done.md)",
@@ -704,7 +705,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 }
 ```
 
-- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。
+- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。

@@ -197,6 +197,7 @@ def test_recovery_prompt_lists_evidence(capsys, env):
     prompt = call["argv"][1]
     assert EVIDENCE["shot_now"] in prompt and EVIDENCE["maa_shots"][0]["path"] in prompt
     assert "maapilot maa why --task infrast" in prompt and "找不到 MAA 的日志目录" in prompt
+    assert "maapilot maa startup" in prompt                     # 被登出就直接重新登录
 
 
 def test_schedule_offline_also_wakes_agent(capsys, env, monkeypatch):
