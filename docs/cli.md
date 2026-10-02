@@ -401,8 +401,9 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 2. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
    - `--trigger schedule`：当场启动无头 `claude -p`（加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
      再 `guard check`，然后接着跑下一项；
-   - `manual`（默认；`--interactive` 同义，agent 在场）：记下失败，接着跑下一项；结束后 agent 看 `data.failed` 自己处理；
-   - 掉线 / 维护（`offline`）不叫 agent。
+   - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
+     `data.handoff = {task, error, log, rest}`（`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
+   - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
 3. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
    `manual` 时交回在场的 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
    agent 做完目标部分自己 `maa award`、`guard check`、`report write <run_id> --append …`。没有进行中的目标 → `maa fight <default_stage>`（失败同第 2 步）。
@@ -410,7 +411,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
 剿灭在一周里连续 2 次没做成（接管也没救回来，多半是还不能代理）→ 这周的日常不再打（`skipped`），汇报里告警；下周一 04:00 清零。
-有没做成（agent 也没处理好）的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`。
+会话里跑停下交给 agent → 退出码 1（`handoff`）；定时运行里有没做成（agent 也没处理好）的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`。
 
 `--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`，不列就不刷）；`--no-agent` 不启动无头 agent（失败只记下）。
 

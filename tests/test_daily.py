@@ -88,7 +88,7 @@ def env(tmp_path, monkeypatch):
         task = args[1]
         if task in behavior["fail"]:
             return 1, {"ok": False, "data": {"log": "private/log/maa/x.log"},
-                       "error": {"code": "maa_failed", "message": f"{task} 卡住了"}}
+                       "error": {"code": behavior.get("fail_code", "maa_failed"), "message": f"{task} 卡住了"}}
         if task == "fight":
             return 0, {"ok": True, "data": {"stage": args[2], "times_done": 12, "sanity_used": 72,
                                             "medicine_used": 0}, "error": None}
@@ -159,12 +159,25 @@ def test_schedule_agent_not_recovered_is_failed(capsys, env, monkeypatch):
     assert out["data"]["failed"] == ["recruit"] and out["data"]["status"] == "done"
 
 
-def test_manual_failure_is_returned_without_agent(capsys, env):
+def test_manual_failure_stops_and_hands_over(capsys, env):
+    """会话里跑：第一项失败就停下交给在场的 agent，后面的不跑；hint 里是接着跑的命令。"""
     env["behavior"]["fail"] = {"infrast"}
     code, out = run(capsys, "daily", "run", "--interactive")
-    assert code == 1 and out["error"]["code"] == "daily_incomplete"
-    assert out["data"]["failed"] == ["infrast"] and claude_calls(env) == []
-    assert "award" in maa_tasks(env)
+    assert code == 1 and out["error"]["code"] == "handoff"
+    d = out["data"]
+    assert d["status"] == "handed_off" and claude_calls(env) == []
+    assert d["handoff"]["task"] == "infrast" and d["handoff"]["rest"][0] == "infrast"
+    assert "award" not in maa_tasks(env) and "award" in d["handoff"]["rest"]
+    assert "--only " + ",".join(d["handoff"]["rest"]) in out["error"]["hint"]
+    assert "交给在场的 agent" in read_report(d)
+
+
+def test_schedule_offline_also_wakes_agent(capsys, env, monkeypatch):
+    env["behavior"]["fail"] = {"recruit"}
+    env["behavior"]["fail_code"] = "offline"
+    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "重新登录了。\n结果：处理好了")
+    run(capsys, "daily", "run", "--trigger", "schedule")
+    assert claude_calls(env)
 
 
 def test_no_agent_flag(capsys, env):

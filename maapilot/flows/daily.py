@@ -361,6 +361,11 @@ def _finish(r: _Run) -> dict:
     if d["status"] == "stopped":
         raise CliError("currency_decreased", d.get("stop_reason") or "合成玉 / 源石有没经同意的减少，日常停下了",
                        hint="把这笔减少告诉用户，等用户说明（guard status）", exit=NEEDS_USER, data=d)
+    if d.get("handoff"):
+        h = d["handoff"]
+        raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
+                       hint=f"按 maapilot-recovery 看屏幕处理好，再 bin/maapilot daily run --only {','.join(h['rest'])} 接着跑",
+                       exit=FAILED, data=d)
     if d["failed"]:
         raise CliError("daily_incomplete", f"有 {len(d['failed'])} 项没做成：{'、'.join(map(reportmod.label, d['failed']))}",
                        hint="看 data.tasks 里的原因；在场的话截图看看、处理后 daily run --only <项> 补跑",
@@ -410,8 +415,8 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
     r.data["tasks"].append(row)
     if code != 0:
         cliutil.log(f"[daily] {reportmod.label(task)} 没做成：{row['error']}")
-        if code == BUSY or err.get("code") == "offline":
-            pass                                         # 掉线 / 维护、被占用：叫 agent 也没用
+        if code == BUSY:
+            pass                                         # 被占用：叫 agent 也没用
         elif headless:
             r.data["agents"] += 1
             _set_step(f"{task}:agent")
@@ -489,9 +494,23 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
     want = (lambda t: t in only) if only else (lambda t: True)
     r.event("start", trigger=r.data["trigger"], only=only, headless=headless)
     r.save()
+    order = ([t for t in tasks if t == "startup"] + [t for t in tasks if t not in ("award", "startup")]
+             + [FARM] + [t for t in tasks if t == "award"])
+    order = [t for t in order if want(t)]
+
+    def handoff(row: dict) -> None:
+        """会话里跑（不是定时）：第一项失败就停下，把这一项和后面没跑的交给在场的 agent。"""
+        if headless or row.get("ok") or row.get("code") == "busy":
+            return
+        t = row["task"]
+        r.data["handoff"] = {"task": t, "error": row.get("error"), "log": row.get("log"),
+                             "rest": order[order.index(t):] if t in order else [t]}
+        r.data["status"] = "handed_off"
+        raise _Stop()
+
     try:
         if "startup" in tasks and want("startup"):      # 先把游戏开到首页：读仓库（对账）要在游戏里
-            _maa_task(r, cfg, "startup", ["startup"], headless, env, lk)
+            handoff(_maa_task(r, cfg, "startup", ["startup"], headless, env, lk))
         _set_step("guard")
         _guard(r, "snapshot", env, "上次对账")
         before = _depot_snapshot()
@@ -504,6 +523,7 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
                     r.data["tasks"].append(row)
                     continue
                 row = _maa_task(r, cfg, t, [t], headless, env, lk)
+                handoff(row)
                 if t == "annihilation" and not row["ok"] and not row.get("recovered") \
                         and row.get("code") not in ("offline", "busy"):
                     _annihilation_failed(r)
@@ -529,12 +549,13 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
             else:
                 stage = str(dcfg.get("default_stage") or "1-7")
                 row = _maa_task(r, cfg, FARM, ["fight", stage], headless, env, lk)
+                handoff(row)
                 r.data["farm"] = row.get("result") or {"stage": stage, "ok": False}
         if "award" in tasks and want("award"):
             if r.data["goals_pending"]:                  # award 要在刷理智之后：交给在场的 agent 做完目标再领
                 r.data["award_pending"] = True
             else:
-                _maa_task(r, cfg, "award", ["award"], headless, env, lk)
+                handoff(_maa_task(r, cfg, "award", ["award"], headless, env, lk))
         _set_step("guard")
         _guard(r, "check", env, "日常")
         r.data["depot_change"] = depot_change(before, _depot_snapshot())

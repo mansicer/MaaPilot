@@ -143,6 +143,9 @@ def render(d: dict) -> str:
         out.append("还在跑。")
     elif status == "aborted":
         out.append("没跑完（原因见下面「要注意」）。")
+    elif status == "handed_off":
+        h = d.get("handoff") or {}
+        out.append(f"停在{label(h.get('task', ''))}：没做成，交给在场的 agent 处理，处理完接着跑后面的。")
     elif status == "stopped":
         out.append("**停下了：" + (d.get("stop_reason") or "合成玉或源石有没经同意的减少") + "。**")
     elif failed:
