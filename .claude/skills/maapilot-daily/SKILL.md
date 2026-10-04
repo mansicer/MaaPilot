@@ -76,6 +76,9 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 - 数从 `data`（`depot_change`、`farm`、`tasks`）和你自己做的操作里来；龙门币说"约"。
 - 失败了的项说清是什么、处理了没有、下次会不会自己好。
 - 用户问"今天做了什么""上次日常怎么样"：`maapilot report show --last`（或指定哪次），转述，不整篇念。
+- **主动汇报**：会话里一直在后台挂着 `maapilot daily watch`（见 CLAUDE.md「盯着日常」），定时日常一跑完它就结束，你马上告诉用户：
+  有问题（退出码 1）就说清什么没做成、为什么、要用户决定什么；顺利的一两句（用户说过顺利时不用说就不说）。
+  告诉用户之后 `maapilot report seen <运行编号>`（会话开头的 `unseen_problems` 就不会再提它），然后再挂一个 `maapilot daily watch`。
 
 ## 改日常
 

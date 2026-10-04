@@ -48,6 +48,7 @@
 | `data …` | 否（`sync` 联网） | 放行 | A |
 | `calc need / craft / stages` | 否 | 放行 | A |
 | `lock status` / `lock release` | 否 | 放行 / **询问** | A |
+| `daily watch`、`report seen` | 否（只读 / 记账） | 放行 | B |
 | `reset [--dry-run] [--memory]` | 否 | **询问** | B |
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
@@ -114,6 +115,8 @@
  "last_daily": {"at": "2026-09-30T04:40:12+08:00", "ok": true, "report": "/…/private/reports/2026-09-30-0440.md"},
  "schedule": {"installed": true, "times": ["04:40", "16:40"]},
  "next": "setup",
+ "unseen_problems": [{"run_id": "20261004-1640", "started_at": "…", "status": "stopped", "report": "…",
+                      "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "…"]}],
  "lines": ["MaaPilot 还没设置：用户一开口就进入 maapilot-setup（…）"]}
 ```
 
@@ -508,6 +511,22 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 `daily unschedule [--dry-run]`（权限"询问"）：删掉本项目的定时行。`{"removed": [...], "old_entries": [...]}`
 `daily status`：`{"running": {run_id, step, started_at, …} | null, "last": {run_id, at, ok, status, report} | null,
 "schedule": {"installed": true, "times": [...], "old_entries": [...]}, "next_at": "…"}`。
+
+`daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果。
+会话里的 agent 一直在后台挂着一个（`CLAUDE.md`「盯着日常」），结束就告诉用户、`report seen`、再挂一个。每 20 秒看一次汇报（`private/reports/*.json` 的 `status`、`finished_at`）和运行标记；
+只认命令开始之后跑完的（`finished_at` 晚于开始时间）。等着的那次进程没了而汇报还写着 `running` → 当成 `aborted`（`alerts` 里写明）。
+默认最多等 110 分钟（Claude Code 的后台 Bash 最长 2 小时），到时退出码 1、`watch_timeout`（`data: {running, next_at}`），agent 再挂一个就行。
+
+```json
+{"run_id": "20261004-1640", "trigger": "schedule", "started_at": "…", "finished_at": "…", "status": "stopped", "ok": false,
+ "failed": [{"task": "infrast", "label": "基建", "error": "…", "code": "maa_failed"}], "alerts": [],
+ "guard_stop": {"reason": "日常之后发现合成玉 / 源石有没经同意的减少", "before": {…}, "after": {…}, "unexplained": {"orundum": -866}},
+ "report": "private/reports/2026-10-04-1640.md", "seen": false,
+ "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "对账：…（合成玉 -866）"]}
+```
+
+顺利（`status: done`、`ok` 不是 `false`、没有 `failed`）退出码 0；有问题（没做成的项、对账停下、没跑完、交给 agent）退出码 1、`daily_problem`，`data` 同上。
+`handoff` 只在停下交给 agent 时有；`guard_stop` 只在 `stopped` 时有。`seen`：这次已经 `report seen` 过（告诉过用户）。
 程序里 `maapilot.flows.daily.schedule_info()`、`maapilot.flows.report.latest()` 给 `doctor` 用。
 
 ## reset —— 从头设置
@@ -546,6 +565,10 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 | `report latest` | 同 `show --last` |
 | `report list [--limit N]` | 最近的汇报：`{"reports": [{run_id, at, trigger, ok, status, failed, report}]}` |
 | `report write <run_id> --append <文字>` | 在这次运行的汇报后面追加一段"补充"（运行还没结束也可以，结束时保留） |
+| `report seen [<run_id>]` | 记下这次运行的结果已经告诉过用户（默认最近一次）：写进 `private/reports/seen.json`（`{run_id: 时间}`）。`{"run_id", "seen_at"}`；没有这次运行退出码 2（`unknown_run`） |
+
+"有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
+`doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
 
 ---
 
@@ -662,7 +685,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ### reports/
 
 `<YYYY-MM-DD-HHMM>.md`：给人看的汇报（做了什么、花了什么、失败与处理、目标进展、要用户决定的事）；
-`.json`：`daily run` 的 `data`（加上无头 agent 追加的部分）。
+`.json`：`daily run` 的 `data`（加上无头 agent 追加的部分）。`seen.json`：`{run_id: 时间}`，哪几次的结果已经告诉过用户（`report seen`）。
 
 ### guard/
 
@@ -692,8 +715,10 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot op:*)",
       "Bash(maapilot craft:*)",
       "Bash(maapilot report:*)",
+      "Bash(maapilot report seen:*)",
       "Bash(maapilot daily run:*)",
       "Bash(maapilot daily status:*)",
+      "Bash(maapilot daily watch:*)",
       "Bash(maapilot guard snapshot:*)",
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",

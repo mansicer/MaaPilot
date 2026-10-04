@@ -473,6 +473,12 @@ def brief(probe: Probe | None = None) -> dict:
     data = {"setup_done": setup_done, "goals_active": goals_active(), "guard_stop": stop,
             "last_daily": last_daily(), "schedule": {"installed": sched["installed"], "times": sched["times"]},
             "next": "setup" if not setup_done else ("guard" if stop else None)}
+    try:
+        from maapilot.flows import report
+        data["unseen_problems"] = [{k: p.get(k) for k in ("run_id", "started_at", "status", "lines", "report")}
+                                   for p in report.unseen_problems()]
+    except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
+        data["unseen_problems"] = []
     data["lines"] = brief_lines(data)
     return data
 
@@ -493,6 +499,9 @@ def brief_lines(d: dict) -> list[str]:
         lines.append("还没跑过日常。")
     s = d["schedule"]
     lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
+    for p in d.get("unseen_problems") or []:
+        lines.append("还没告诉用户的问题：" + " ".join(p.get("lines") or [p.get("run_id") or "?"])
+                     + f"（运行 {p.get('run_id')}；告诉用户后 report seen {p.get('run_id')}）")
     return lines
 
 

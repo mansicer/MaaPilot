@@ -12,7 +12,25 @@
   （启动钩子已经在屏幕上提示用户"随便说一句就开始"。）
 - 启动检查里是 `no_env`：项目的运行环境还没装，`maapilot` 命令都用不了。用户开口后加载 `maapilot-setup`，从「装运行环境」开始。
 - `"guard"`：合成玉或源石出现了没经同意的减少，日常已停。先把这件事告诉用户（见 skill `maapilot-recovery`「货币对账停机」）。
-- `null`：自由对话。用户开口前不用主动汇报；用户问起再说。钩子输出缺失或报错时自己跑一次 `maapilot doctor --brief`。
+- `null`：自由对话。钩子输出缺失或报错时自己跑一次 `maapilot doctor --brief`。
+  启动检查里有 `unseen_problems`（之前的日常出了问题、还没告诉过用户）：**第一句回复就主动说**（不用等用户问），说完 `maapilot report seen <运行编号>`。
+  没有就不用主动汇报，用户问起再说。
+
+设置完成后（`next` 不是 `setup`，或刚做完 setup）就开始「盯着日常」（下一节），整个会话一直开着。
+
+## 盯着日常（会话里一直开着）
+
+用户的 Claude Code 一直开着，定时日常出了事要马上说，不能等用户来问。所以会话里**始终在后台挂着一个** `maapilot daily watch`：
+用 Bash 的后台运行（`run_in_background`，超时设 7200000 毫秒）。它只读、不占模拟器，等到下一次日常（定时的或手动的）跑完才结束；
+没日常跑完时最多等 110 分钟就以 `watch_timeout` 结束。它一结束 Claude Code 就会通知你：
+
+- `watch_timeout`：什么都不用说，再挂一个。
+- 退出码 1、`daily_problem`：**马上主动告诉用户**（不等用户开口）：哪次日常、什么没做成、为什么、要用户决定什么（`data.lines` 是要点，细节 `maapilot report show <运行编号>`；
+  对账停机按 `maapilot-recovery`「货币对账停机」，没做成的项按 `maapilot-recovery` 看要不要处理），然后 `maapilot report seen <运行编号>`，再挂一个。
+- 退出码 0（顺利）：用一两句话告诉用户跑完了（或按记忆里用户的偏好不说）。第一次遇到时顺便问一句"以后日常顺利跑完还要不要告诉你"，答案记进自动记忆。说完 `report seen`，再挂一个。
+- `data.seen` 为 `true`：已经告诉过用户了，不再重复，直接再挂一个。
+
+同一时间只挂一个；你自己在会话里跑的 `daily run` 结束时它也会结束，照上面一样处理（已经汇报过的就只 `report seen`）。
 
 ## 用户说的话 → 用哪个 skill
 

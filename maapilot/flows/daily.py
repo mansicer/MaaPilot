@@ -767,6 +767,14 @@ def register(sub) -> None:
     p = gs.add_parser("status", help="上次运行、下次定时、有没有在跑")
     p.set_defaults(func=lambda a: status(), command="daily status")
 
+    p = gs.add_parser("watch", help="等下一次日常跑完再输出结果（只读；会话里一直在后台挂着一个）")
+    p.add_argument("--timeout-min", type=float, help="最多等几分钟（默认 110：后台 Bash 最长 2 小时）")
+
+    def _watch(a):
+        from maapilot.flows import watch
+        return watch.watch(a.timeout_min)
+    p.set_defaults(func=_watch, command="daily watch")
+
     p = gs.add_parser("schedule", help="设定时任务（改 crontab，只动本项目的行）")
     p.add_argument("--times", help="HH:MM[,HH:MM]；默认 config.yaml 的 schedule")
     p.add_argument("--replace-old", action="store_true", help="同时删掉旧版 MaaPilot 的定时任务")

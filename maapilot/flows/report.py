@@ -100,6 +100,108 @@ def latest() -> dict | None:
     return None
 
 
+# --- 告诉过用户没有（report seen） ----------------------------------------------------------------------------------
+
+UNSEEN_DAYS = 7          # 只看最近几天的汇报
+UNSEEN_MAX = 5
+
+
+def seen_file():
+    return paths.REPORTS / "seen.json"
+
+
+def seen_runs() -> dict:
+    """{run_id: 什么时候告诉用户的}。"""
+    try:
+        d = json.loads(seen_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def mark_seen(run_id: str | None) -> dict:
+    rid = run_id or (runs() or [None])[0]
+    if rid is None:
+        raise CliError("no_report", "还没有日常汇报", exit=BAD_REQUEST)
+    load(rid)                                           # 不存在 → unknown_run
+    d = seen_runs()
+    d[rid] = now().isoformat(timespec="seconds")
+    _atomic(seen_file(), json.dumps(d, ensure_ascii=False, indent=1))
+    return {"run_id": rid, "seen_at": d[rid]}
+
+
+def has_problem(d: dict) -> bool:
+    """跑完了但不顺利：没做成的项、对账停下、没跑完、交给 agent 的。还在跑的不算。"""
+    st = d.get("status")
+    if st in (None, "running"):
+        return False
+    return st != "done" or d.get("ok") is False or bool(d.get("failed"))
+
+
+def problem_brief(d: dict) -> dict:
+    """一次有问题的运行的要点（doctor --brief、daily watch 用）。"""
+    tasks = {t.get("task"): t for t in d.get("tasks") or []}
+    failed = [{"task": t, "label": label(t), "error": (tasks.get(t) or {}).get("error"),
+               "code": (tasks.get(t) or {}).get("code")} for t in d.get("failed") or []]
+    out = {"run_id": d.get("run_id"), "trigger": d.get("trigger"), "started_at": d.get("started_at"),
+           "finished_at": d.get("finished_at"), "status": d.get("status"), "ok": d.get("ok"), "failed": failed,
+           "alerts": d.get("alerts") or [], "report": d.get("report")}
+    if d.get("status") == "stopped":
+        out["guard_stop"] = {"reason": d.get("stop_reason"), **{k: (d.get("guard") or {}).get(k)
+                                                                for k in ("before", "after", "unexplained")}}
+    if d.get("handoff"):
+        out["handoff"] = {k: d["handoff"].get(k) for k in ("task", "error", "rest")}
+    return out
+
+
+STATUS_WORDS = {"done": "跑完了", "stopped": "因为货币对账停下了", "aborted": "没跑完", "handed_off": "停下交给了 agent",
+                "running": "还在跑"}
+
+
+def summary_lines(d: dict) -> list[str]:
+    """给 agent 转述用的几句中文。"""
+    who = "定时日常" if d.get("trigger") == "schedule" else "日常"
+    lines = [f"{_when(d.get('started_at'))} 的{who}{STATUS_WORDS.get(d.get('status'), d.get('status') or '?')}"
+             + ("，都做成了。" if not has_problem(d) else "，有问题。")]
+    b = problem_brief(d)
+    for f in b["failed"]:
+        lines.append(f"没做成：{f['label']}" + (f"（{f['error']}）" if f.get("error") else ""))
+    if b.get("guard_stop"):
+        u = b["guard_stop"].get("unexplained") or {}
+        names = {"orundum": "合成玉", "originite": "源石"}
+        lines.append(f"对账：{b['guard_stop'].get('reason') or '停下了'}"
+                     + ("（" + "、".join(f"{names.get(k, k)} {v:+}" for k, v in u.items()) + "）" if u else ""))
+    if b.get("handoff"):
+        lines.append(f"停在：{label(b['handoff'].get('task') or '?')}（{b['handoff'].get('error')}）")
+    lines += [f"告警：{a}" for a in b["alerts"]]
+    return lines
+
+
+def unseen_problems(days: int = UNSEEN_DAYS, limit: int = UNSEEN_MAX) -> list[dict]:
+    """最近 days 天里有问题、还没告诉过用户（report seen）的运行，新的在前。"""
+    seen = seen_runs()
+    cutoff = now().timestamp() - days * 86400
+    out = []
+    for rid in runs()[:30]:
+        if rid in seen:
+            continue
+        try:
+            d = load(rid)
+        except CliError:
+            continue
+        t = d.get("started_at")
+        try:
+            if t and datetime.fromisoformat(t).timestamp() < cutoff:
+                break
+        except ValueError:
+            pass
+        if has_problem(d):
+            out.append({**problem_brief(d), "lines": summary_lines(d)})
+            if len(out) >= limit:
+                break
+    return out
+
+
 # --- 渲染 ------------------------------------------------------------------------------------------------------------
 
 def _dur(s) -> str:
@@ -266,6 +368,10 @@ def register(sub) -> None:
     p = gs.add_parser("list", help="最近的汇报")
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=lambda a: list_reports(a.limit), command="report list")
+
+    p = gs.add_parser("seen", help="记下这次运行的结果已经告诉过用户（默认最近一次）")
+    p.add_argument("run_id", nargs="?")
+    p.set_defaults(func=lambda a: mark_seen(a.run_id), command="report seen")
 
     p = gs.add_parser("write", help="在一次运行的汇报后面追加一段")
     p.add_argument("run_id")
