@@ -13,7 +13,7 @@
 - dirty.json  `{since, commands}`：上次对账（或快照）之后跑过可能花东西的命令（点击、MAA 任务、快捷操作；
   `cliutil.device()` 拿锁时调 `mark_dirty`）。
 
-check：减少量先扣掉快照之后记下的、还没用完的放行（按时间先后）；还有没放行的减少 → 写 stop.json、退出码 3；
+check：上千的数减少不到 1000 当作读数误差（ROUNDING）；其余减少量先扣掉快照之后记下的、还没用完的放行（按时间先后）；还有没放行的减少 → 写 stop.json、退出码 3；
 通过 → 更新快照、删 stop.json 和 dirty.json。增加不算问题。读不到时什么都不改（dirty 留着，下次照样要对）。
 
 snapshot：只在"快照之后没人碰过会花钱的操作"时重记起点（这样用户自己在游戏里花的不会被当成异常）；
@@ -180,8 +180,12 @@ def snapshot() -> dict:
     return take_snapshot()
 
 
+ROUNDING = 1000      # 上千的数读不准（仓库识别把上万的取整，顶栏也可能读不到）：减少不到这么多不算花费
+
+
 def evaluate(before: dict, after: dict, allowances: list[dict]) -> tuple[dict, dict, dict]:
-    """纯函数：(allowed 每种放行合计, used {allowance 下标: 用掉多少}, unexplained 每种没放行的减少（负数）)。"""
+    """纯函数：(allowed 每种放行合计, used {allowance 下标: 用掉多少}, unexplained 每种没放行的减少（负数）)。
+    前后有一个数上千时，减少不到 ROUNDING 当作读数误差，不算花费（用户 2026-10-05 定：不考虑只花了几百合成玉的情况）。"""
     allowed = {k: 0 for k in ITEMS}
     used: dict[int, int] = {}
     unexplained = {}
@@ -190,6 +194,8 @@ def evaluate(before: dict, after: dict, allowances: list[dict]) -> tuple[dict, d
         rows = [(i, r) for i, r in enumerate(allowances) if r.get("item") == k]
         allowed[k] = sum(int(r.get("amount", 0)) - int(r.get("used_amount", 0)) for _, r in rows)
         if dec <= 0:
+            continue
+        if dec < ROUNDING and max(int(before.get(k) or 0), int(after.get(k) or 0)) >= ROUNDING:
             continue
         left = dec
         for i, r in rows:

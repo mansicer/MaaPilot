@@ -82,7 +82,7 @@ def test_snapshot_cannot_hide_a_spend(cfg, capsys, monkeypatch):
     code, env = run(capsys, "guard", "snapshot")
     assert code == 0 and env["data"]["orundum"] == 3200 and guard.dirty() is None
     guard.mark_dirty("input tap")                               # agent 点了一下
-    now["v"] = {"originite": 12, "orundum": 2600}
+    now["v"] = {"originite": 12, "orundum": 1400}
     code, env = run(capsys, "guard", "snapshot")
     assert code == 3 and env["error"]["code"] == "currency_decreased"
     assert guard.stopped() is not None and json.loads(guard.snapshot_file().read_text())["orundum"] == 3200

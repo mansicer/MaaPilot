@@ -107,8 +107,11 @@ _SANITY_MAX = re.compile(r"理智\s*/\s*([0-9OoDlI]{2,3})")
 _SANITY_TEXT = re.compile(r"^\s*(\d{1,3})\s*/\s*(\d{2,3})\s*$")
 
 
+_EDGE_JUNK = re.compile(r"^[^0-9OoDlI|]+|[^0-9OoDlI|]+$")   # 数字前后的杂字符：图标认成的"{"、"+" 号等
+
+
 def _number(text: str) -> int | None:
-    t = text.strip().rstrip("+").strip().translate(_DIGITS)
+    t = _EDGE_JUNK.sub("", text.strip()).translate(_DIGITS)
     return int(t) if t.isdigit() else None
 
 
@@ -135,14 +138,14 @@ def parse_sanity(hits) -> tuple[int, int] | None:
 
 
 def parse_topbar(hits) -> dict | None:
-    """首页顶栏 → {lmd, orundum, originite}（精确值，不像仓库识别那样把上万的数取整）。认不全三样 → None。"""
+    """首页顶栏 → {lmd, orundum, originite}（精确值，不像仓库识别那样把上万的数取整）。
+    按位置取：源石最右、合成玉在它左边；龙门币（最左）读不出时为 None，不影响前两样。少于两个数 → None。"""
     nums = sorted((h.box[0], n) for h in hits if h.box[1] < TOPBAR_MAX_Y and h.box[3] >= TOPBAR_MIN_H
                   and (n := _number(h.text)) is not None)
-    # 按位置取：龙门币最左，源石最右
     nums = [(x, n) for x, n in nums if x >= 650]
-    if len(nums) != 3:
+    if len(nums) < 2 or len(nums) > 3:
         return None
-    return {"lmd": nums[0][1], "orundum": nums[1][1], "originite": nums[2][1]}
+    return {"lmd": nums[0][1] if len(nums) == 3 else None, "orundum": nums[-2][1], "originite": nums[-1][1]}
 
 
 def read_home(game=None) -> tuple[dict | None, tuple[int, int] | None, object]:

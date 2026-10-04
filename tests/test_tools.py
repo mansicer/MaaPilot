@@ -201,12 +201,17 @@ def test_state_depot_and_show(cfg, capsys):
 
 def test_guard_evaluate_pure():
     from maapilot.tools.guard import evaluate
-    allowed, used, unexplained = evaluate({"originite": 10, "orundum": 3200}, {"originite": 10, "orundum": 2600},
-                                          [{"item": "orundum", "amount": 600}])
-    assert unexplained == {} and used == {0: 600} and allowed["orundum"] == 600
-    _, _, unexplained = evaluate({"originite": 10, "orundum": 3200}, {"originite": 9, "orundum": 3000},
+    allowed, used, unexplained = evaluate({"originite": 10, "orundum": 3200}, {"originite": 10, "orundum": 1400},
+                                          [{"item": "orundum", "amount": 1800}])
+    assert unexplained == {} and used == {0: 1800} and allowed["orundum"] == 1800
+    _, _, unexplained = evaluate({"originite": 10, "orundum": 3200}, {"originite": 9, "orundum": 1100},
                                  [{"item": "orundum", "amount": 100}])
-    assert unexplained == {"originite": -1, "orundum": -100}
+    assert unexplained == {"originite": -1, "orundum": -2000}
+    # 上千的数读不准：精确值 16866 对仓库约数 16000，减少不到 1000 不算花费；源石这种小数照样精确比
+    _, _, unexplained = evaluate({"originite": 16, "orundum": 16866}, {"originite": 16, "orundum": 16000}, [])
+    assert unexplained == {}
+    _, _, unexplained = evaluate({"originite": 16, "orundum": 16866}, {"originite": 15, "orundum": 15800}, [])
+    assert unexplained == {"originite": -1, "orundum": -1066}
     _, used, unexplained = evaluate({"originite": 1, "orundum": 100}, {"originite": 5, "orundum": 900}, [])
     assert unexplained == {} and used == {}
 
@@ -217,22 +222,22 @@ def test_guard_flow(cfg, capsys, monkeypatch):
     monkeypatch.setattr(guard, "read_now", lambda: dict(now["v"]))
     code, env = run(capsys, "guard", "snapshot")
     assert code == 0 and env["data"]["orundum"] == 3200
-    now["v"] = {"originite": 12, "orundum": 2600}
+    now["v"] = {"originite": 12, "orundum": 1400}
     code, env = run(capsys, "guard", "check")
     assert code == 3 and env["error"]["code"] == "currency_decreased"
-    assert env["data"]["unexplained"] == {"orundum": -600}
+    assert env["data"]["unexplained"] == {"orundum": -1800}
     assert guard.stopped() is not None
     from maapilot.tools import doctor
     monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, b"", b"")}))
     code, env = run(capsys, "doctor", "--brief")
     assert env["data"]["guard_stop"] and (env["data"]["next"] in ("guard", "setup"))
-    code, env = run(capsys, "guard", "allow", "合成玉", "600", "--reason", "用户同意抽 1 次")
+    code, env = run(capsys, "guard", "allow", "合成玉", "1800", "--reason", "用户同意抽 3 次")
     assert code == 0 and env["data"]["recorded"]["item"] == "orundum"
     code, env = run(capsys, "guard", "check")
-    assert code == 0 and env["data"]["resumed"] is True and env["data"]["used"][0]["amount"] == 600
+    assert code == 0 and env["data"]["resumed"] is True and env["data"]["used"][0]["amount"] == 1800
     assert guard.stopped() is None
     code, env = run(capsys, "guard", "status")
-    assert env["data"]["allowances"] == [] and env["data"]["snapshot"]["orundum"] == 2600
+    assert env["data"]["allowances"] == [] and env["data"]["snapshot"]["orundum"] == 1400
     code, env = run(capsys, "guard", "allow", "龙门币", "1", "--reason", "x")
     assert code == 2
 
@@ -365,6 +370,12 @@ def test_topbar_parse_and_merge():
     top = parse_topbar(HOME_HITS)
     assert top == {"lmd": 10568025, "orundum": 16566, "originite": 16}
     assert parse_topbar(HOME_HITS[:3]) is None
+    # 真机 10-05：龙门币前的图标认成"{"，龙门币以前读不出就整个作废，退回仓库约数、误报合成玉减少
+    real = [_Hit("=", (659, 69, 49, 35)), _Hit("{10679969", (694, 59, 144, 40)), _Hit("294", (733, 135, 155, 88)),
+            _Hit("2o2oo5o2:3", (818, 16, 152, 31)), _Hit("16866+", (906, 38, 122, 45)), _Hit("16+", (1105, 23, 80, 38))]
+    assert parse_topbar(real) == {"lmd": 10679969, "orundum": 16866, "originite": 16}
+    no_lmd = [h for h in real if "1067" not in h.text]
+    assert parse_topbar(no_lmd) == {"lmd": None, "orundum": 16866, "originite": 16}
     depot = {"orundum": 16000, "originite": 16}
     assert merge_topbar(depot, top) == {"orundum": 16566, "originite": 16}
     assert merge_topbar(depot, {**top, "orundum": 19566}) == depot           # 对不上：不信顶栏
