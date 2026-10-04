@@ -374,6 +374,10 @@ def test_topbar_parse_and_merge():
     real = [_Hit("=", (659, 69, 49, 35)), _Hit("{10679969", (694, 59, 144, 40)), _Hit("294", (733, 135, 155, 88)),
             _Hit("2o2oo5o2:3", (818, 16, 152, 31)), _Hit("16866+", (906, 38, 122, 45)), _Hit("16+", (1105, 23, 80, 38))]
     assert parse_topbar(real) == {"lmd": 10679969, "orundum": 16866, "originite": 16}
+    # 同一屏另一次识别：日期认成"2o2oo5o2:"（去掉末尾冒号就像个数），不能被当成顶栏数字
+    real2 = [_Hit("{10679969", (694, 59, 144, 40)), _Hit("895", (715, 134, 175, 93)), _Hit("2o2oo5o2:", (818, 16, 152, 31)),
+             _Hit("16866+", (906, 38, 122, 45)), _Hit("16+", (1107, 23, 78, 38))]
+    assert parse_topbar(real2) == {"lmd": 10679969, "orundum": 16866, "originite": 16}
     no_lmd = [h for h in real if "1067" not in h.text]
     assert parse_topbar(no_lmd) == {"lmd": None, "orundum": 16866, "originite": 16}
     depot = {"orundum": 16000, "originite": 16}

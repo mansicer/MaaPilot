@@ -100,7 +100,7 @@ def read_box() -> dict:
 # 下面"终端"按钮左边是理智：大号的当前值（约 767,133），下面一行小字"理智/上限"（约 783,233）。
 HOME_ROI = (640, 15, 640, 265)
 TOPBAR_MAX_Y = 110
-TOPBAR_MIN_H = 30                 # 顶栏数字的字高约 38；更小的是上面一行的日期时间
+TOPBAR_MIN_H = 34                 # 顶栏数字的字高 38–45；上面一行的日期时间约 24–31（真机 10-05 见过 31）
 SANITY_MAX_RANGE = (80, 300)      # 理智上限的合理范围（真机见过 205）
 _DIGITS = str.maketrans({"O": "0", "o": "0", "D": "0", "l": "1", "I": "1", "|": "1", ",": "", " ": ""})
 _SANITY_MAX = re.compile(r"理智\s*/\s*([0-9OoDlI]{2,3})")
@@ -141,7 +141,7 @@ def parse_topbar(hits) -> dict | None:
     """首页顶栏 → {lmd, orundum, originite}（精确值，不像仓库识别那样把上万的数取整）。
     按位置取：源石最右、合成玉在它左边；龙门币（最左）读不出时为 None，不影响前两样。少于两个数 → None。"""
     nums = sorted((h.box[0], n) for h in hits if h.box[1] < TOPBAR_MAX_Y and h.box[3] >= TOPBAR_MIN_H
-                  and (n := _number(h.text)) is not None)
+                  and ":" not in h.text and (n := _number(h.text)) is not None)   # 带冒号的是日期时间
     nums = [(x, n) for x, n in nums if x >= 650]
     if len(nums) < 2 or len(nums) > 3:
         return None
