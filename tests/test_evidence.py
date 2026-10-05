@@ -52,6 +52,19 @@ def test_screenshots_in_window(maa_dir):
     assert maalog.debug_dir() == maa_dir
 
 
+def test_import_shots_copies_into_project(maa_dir, tmp_path):
+    shots = maalog.screenshots(W0, W1 + timedelta(seconds=30), maa_dir)
+    got = maalog.import_shots(shots, "infrast")
+    assert [g["path"].rsplit("/", 1)[1] for g in got] == ["20261002-160500-maa-infrast-066.png",
+                                                         "20261002-160917-maa-infrast-997.png"]
+    assert all(g["path"].startswith(str(paths.SHOTS.resolve())) and os.path.exists(g["path"]) for g in got)
+    assert got[1]["source"] == shots[1]["path"] and got[1]["at"] == shots[1]["at"]
+    again = maalog.import_shots(shots, "infrast")                         # 再来一次：用已有的副本，不重复
+    assert [g["path"] for g in again] == [g["path"] for g in got] and len(list(paths.SHOTS.iterdir())) == 2
+    missing = maalog.import_shots([{"path": str(tmp_path / "nope" / "2026.10.02-16.00.00.1_raw.png")}], "x")
+    assert missing[0]["path"] is None and "复制不了" in missing[0]["error"]
+
+
 def test_maa_failure_collects_evidence(cfg, game, maa_dir, capsys, monkeypatch):
     monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
     now = datetime.now()
@@ -66,7 +79,11 @@ def test_maa_failure_collects_evidence(cfg, game, maa_dir, capsys, monkeypatch):
     assert code == 1 and env["error"]["code"] == "maa_failed"
     ev = env["data"]["evidence"]
     assert ev["shot_now"].endswith("-fail-infrast.png") and os.path.exists(ev["shot_now"])
-    assert [s["path"].rsplit("/", 1)[1] for s in ev["maa_shots"]] == recent
+    # MAA 的截图在项目外（无头 agent 读不了）：复制进 private/shots/，原来的位置在 source
+    (shot,) = ev["maa_shots"]
+    assert shot["source"].endswith(recent[0]) and shot["kind"] == "other"
+    assert shot["path"].startswith(str(paths.SHOTS.resolve())) and "-maa-infrast-" in shot["path"]
+    assert open(shot["path"], "rb").read() == b"png"
     assert "missing" not in ev and ev["why"] == "maapilot maa why --task infrast"
     assert "_log" not in env["data"]
     rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()]

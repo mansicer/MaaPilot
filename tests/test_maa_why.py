@@ -160,7 +160,7 @@ def test_summary_lists_the_facts(maa_dir):
     assert r["steps"][-2]["repeat"] == 39
     assert r["tried"][-1]["cur_task"] == "InfrastBegin"
     assert [c["event"] for c in r["taskchains"]] == ["TaskChainStart", "TaskChainError"]
-    assert r["screenshots"][-1]["path"].endswith("16.09.17.997_raw.png")
+    assert r["screenshots"][-1]["path"].endswith("16.09.17.997_raw.png")       # maalog 给的是 MAA 的原位置
 
 
 def _rows(*lines):
@@ -209,6 +209,9 @@ def test_maa_why_default_is_last_failed_task(maa_dir, capsys):
     assert d["maa_cli_log"].endswith("20261002-160102-infrast.log") and d["maa_cli_log_tail"] == [
         "[2026-10-02 16:09:18 ERROR] Infrast Error"]
     assert "likely_cause" not in d and any(o["text"] == "玩家/ | 187" for o in d["ocr"])
+    shot = d["screenshots"][-1]                                               # 复制进项目，agent 读得到
+    assert shot["path"].startswith(str(paths.SHOTS.resolve())) and shot["path"].endswith("-maa-infrast-997.png")
+    assert shot["source"].endswith("2026.10.02-16.09.17.997_raw.png")
     assert d["window"]["start"].startswith("2026-10-02T16:00:5")
     assert paths.LOCK_FILE.exists() == lock_before                           # 不拿锁
     code, env = run(capsys, "maa", "why", "--task", "mall", "--last")

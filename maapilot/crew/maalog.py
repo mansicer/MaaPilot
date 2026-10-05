@@ -104,6 +104,33 @@ def screenshots(start: datetime, end: datetime, root: Path | None = None, limit:
     return [{k: v for k, v in x.items() if k != "_t"} for x in out[-limit:]]
 
 
+def import_shots(shots: list[dict], label: str, dest: Path | None = None) -> list[dict]:
+    """把 MAA 的截图复制进项目的 private/shots/（`<YYYYmmdd-HHMMSS>-maa-<label>-<毫秒>.png`）：MAA 的日志目录在项目外，
+    无头 agent 读不了。返回的 `path` 是项目里的副本，`source` 是原来的位置；已经复制过的（同名同大小）直接用。
+    复制不了的那张 `path` 为 null、带 `error`。"""
+    import re
+    import shutil
+    from maapilot import paths
+    dest = dest or paths.SHOTS
+    safe = re.sub(r"[^\w.-]+", "_", label or "maa").strip("_") or "maa"
+    out = []
+    for s in shots:
+        src = Path(s["path"])
+        t = shot_time(src.name)
+        stamp = f"{t:%Y%m%d-%H%M%S}-maa-{safe}-{t.microsecond // 1000:03d}" if t else f"maa-{safe}-{src.stem}"
+        target = dest / f"{stamp}.png"
+        item = {**s, "source": str(src)}
+        try:
+            if not (target.exists() and target.stat().st_size == src.stat().st_size):
+                dest.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, target)
+            item["path"] = str(target.resolve())
+        except OSError as e:
+            item.update(path=None, error=f"复制不了：{e}")
+        out.append(item)
+    return out
+
+
 # --- 按时间段读 asst.log --------------------------------------------------------------------------------------------
 
 def _next_ts(f, off: int) -> str | None:

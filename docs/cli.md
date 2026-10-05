@@ -207,11 +207,13 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 **失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
 再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
-（`interface/`、`other/` 等子目录下的 `YYYY.MM.DD-HH.MM.SS.mmm_raw.png`，本地时间，最多 6 张），放进 `data.evidence`：
+（`interface/`、`other/` 等子目录下的 `YYYY.MM.DD-HH.MM.SS.mmm_raw.png`，本地时间，最多 6 张），**复制进 `private/shots/`**
+（`<YYYYmmdd-HHMMSS>-maa-<任务>-<毫秒>.png`：MAA 的日志目录在项目外，无头 agent 读不了），放进 `data.evidence`：
 
 ```json
 {"shot_now": "/…/private/shots/20261002-160918-fail-infrast.png",
- "maa_shots": [{"path": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "2026-10-02T16:09:17+08:00"}],
+ "maa_shots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.png", "source": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png",
+                "kind": "interface", "at": "2026-10-02T16:09:17+08:00"}],
  "window": {"start": "…", "end": "…"}, "why": "maapilot maa why --task infrast", "missing": ["…"]}
 ```
 
@@ -240,7 +242,7 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
  "waits": [{"task": "LoadingText", "matched": "正在提交", "first": "16:06:53", "last": "16:07:24", "count": 39, "seconds": 31}],
  "screencap_failures": [], "connection": [{"what": "Connected", "details": {…}, "first": "16:01:04", "last": "16:01:04", "count": 1}, …],
  "error_lines": [{"message": "skill has no recognition result", "first": "16:01:36", "last": "16:06:13", "count": 13}, …],
- "screenshots": [{"path": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}]}
+ "screenshots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.png", "source": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}]}
 ```
 
 - `steps`：MAA 一步步做的事（`SubTaskStart`：任务、动作、认出的字或模板），连续相同的合成一条（`repeat`、`last`），留最后 40 条（`steps_total` 是总数）；
@@ -248,7 +250,7 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 - `ocr`：这段时间 OCR 到的所有字（去掉空白处的噪声），同样的字合一条，带第一次、最后一次、次数，按第一次出现排；超过 80 种时留最后还出现的 80 种（`ocr_total` 是总数）。
 - `waits`：MAA 自己的 `Loading*` 任务（等加载、等服务器回应）连续出现的一段和时长；`screencap_failures`：截图命令返回非 0 或报 ERR 的（连接时试 `nc` 截图方式的不算）；
   `connection`：MAA 的连接信息（每隔几秒一条的截图耗时、帧率不列）；`error_lines`：MAA 的 ERR 行，去重带次数，最后 15 种。
-- `screenshots`：时间段内（结束后再宽 30 秒）MAA 存的截图，最多 12 张。
+- `screenshots`：时间段内（结束后再宽 30 秒）MAA 存的截图，最多 12 张，同样复制进 `private/shots/`（`path` 是副本，`source` 是原位置；复制过的不再复制；复制不了的 `path` 为 `null`、带 `error`）。
 - 找不到记录退出码 2（`not_found`）；找不到 MAA 的日志目录时照常返回，`log.dir` 为 `null`、`hint` 提示 `doctor`。
 
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。

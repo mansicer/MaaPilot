@@ -294,8 +294,11 @@ def collect_evidence(task: str, started, ended) -> dict:
         if root is None:
             ev["missing"].append("MAA 的截图：找不到 MAA 的日志目录")
         else:
-            ev["maa_shots"] = maalog.screenshots(started - timedelta(seconds=3), common.now(), root,
-                                                 limit=EVIDENCE_SHOTS)
+            ev["maa_shots"] = maalog.import_shots(maalog.screenshots(started - timedelta(seconds=3), common.now(), root,
+                                                 limit=EVIDENCE_SHOTS), task)
+        bad = [s["source"] for s in ev["maa_shots"] if not s.get("path")]
+        if bad:
+            ev["missing"].append(f"MAA 的截图复制不进项目：{len(bad)} 张")
     except Exception as e:                             # noqa: BLE001
         ev["missing"].append(f"MAA 的截图：{type(e).__name__}: {e}")
     if not ev["missing"]:

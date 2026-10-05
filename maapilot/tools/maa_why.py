@@ -120,6 +120,7 @@ def explain(task: str | None = None, since: str | None = None, until: str | None
         out["maa_cli_log"] = common.rel(p) if p else None
         out["maa_cli_log_tail"] = _maa_log_tail(p)
     out.update(maalog.why(w_start, w_end))
+    out["screenshots"] = maalog.import_shots(out["screenshots"], task or "why")   # MAA 的日志目录在项目外，复制进来
     if out["log"]["dir"] is None:
         out["hint"] = "找不到 MAA 的日志目录（maa dir log）；先 maapilot doctor"
     return out
