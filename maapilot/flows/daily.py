@@ -435,6 +435,8 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
             row["evidence"] = data["evidence"]
     r.event("task", **row)
     r.data["tasks"].append(row)
+    if err.get("code") == "timeout":                  # 杀了 maapilot maa；它会带走 maa，万一没带走，这里补一刀
+        _stop_leftover_maa(r, TIMEOUT_LEFTOVER_WAIT_S, f"{reportmod.label(task)}超时停下后")
     if code != 0:
         cliutil.log(f"[daily] {reportmod.label(task)} 没做成：{row['error']}")
         if code == BUSY:
@@ -471,19 +473,36 @@ def _after_agent(r: _Run, env: dict, lk) -> None:
         env[lockmod.TOKEN_ENV] = lk.rotate_token()
     except Exception as e:                               # noqa: BLE001
         cliutil.log(f"[daily] 换锁 token 失败：{e}")
-    deadline = time.monotonic() + LEFTOVER_WAIT_S
+    _stop_leftover_maa(r, LEFTOVER_WAIT_S, "agent 结束后")
+
+
+LEFTOVER_KILL_GRACE_S = 10
+TIMEOUT_LEFTOVER_WAIT_S = 20     # 任务超时、maapilot maa 被杀之后，给 maa 多久自己跟着退
+
+
+def _stop_leftover_maa(r: _Run, wait_s: float, when: str) -> list[int]:
+    """日常拿着锁、自己没在跑 maa 时还在的 maa 进程：等 wait_s 秒让它自己走，还在就 TERM，再不走就 KILL。返回结束掉的。"""
+    deadline = time.monotonic() + wait_s
     pids = _leftover_maa()
     while pids and time.monotonic() < deadline:
-        time.sleep(5)
+        time.sleep(min(5, max(0.1, deadline - time.monotonic())))
         pids = _leftover_maa()
-    if pids:
+    if not pids:
+        return []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
         for pid in pids:
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.kill(pid, sig)
             except (ProcessLookupError, PermissionError):
                 pass
-        r.data["alerts"].append(f"agent 结束后还有 maa 进程在跑（pid {', '.join(map(str, pids))}），已结束掉")
-        r.event("leftover_maa", pids=pids)
+        end = time.monotonic() + LEFTOVER_KILL_GRACE_S
+        while time.monotonic() < end and set(_leftover_maa()) & set(pids):
+            time.sleep(0.5)
+        if not set(_leftover_maa()) & set(pids):
+            break
+    r.data["alerts"].append(f"{when}还有 maa 进程在跑（pid {', '.join(map(str, pids))}），已结束掉")
+    r.event("leftover_maa", pids=pids, when=when)
+    return pids
 
 
 def _annihilation_skip() -> str | None:

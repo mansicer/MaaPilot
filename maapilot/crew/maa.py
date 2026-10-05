@@ -9,13 +9,16 @@ MaaCore 与资源仍装在 maa-cli 的数据目录（`maa install`），与配�
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import shutil
 import signal
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -145,17 +148,54 @@ def new_log(label: str) -> Path:
     return d / f"{datetime.now():%Y%m%d-%H%M%S}-{re.sub(r'[^A-Za-z0-9_.-]', '_', label)}.log"
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
+def _kill_group(proc: subprocess.Popen, grace_s: float = KILL_GRACE_S) -> None:
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(proc.pid, sig)
         except (ProcessLookupError, PermissionError):
             return
         try:
-            proc.wait(timeout=KILL_GRACE_S)
+            proc.wait(timeout=grace_s)
             return
         except subprocess.TimeoutExpired:
             continue
+
+
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+STOP_GRACE_S = 5          # 被叫停时给 maa 多久自己退；日常杀 maapilot 时 TERM 之后 15 秒才 KILL，要赶在那之前
+
+
+@contextmanager
+def _stops_with_us(proc: subprocess.Popen):
+    """maa-cli 自成进程组（start_new_session，超时时能整组结束）。所以 maapilot 自己被叫停（SIGTERM / SIGINT / SIGHUP，
+    例如日常超时杀掉 `maapilot maa …` 的进程组）时，maa 不会跟着停：这里在被叫停时先结束 maa 的进程组再退出；
+    正常或异常退出时 maa 还在也结束掉（atexit 兜底）。"""
+    def stop(*_):
+        if proc.poll() is None:
+            _kill_group(proc, STOP_GRACE_S)
+
+    def on_signal(signum, _frame):
+        stop()
+        raise SystemExit(128 + signum)
+
+    old = {}
+    if threading.current_thread() is threading.main_thread():
+        for sig in STOP_SIGNALS:
+            try:
+                old[sig] = signal.signal(sig, on_signal)
+            except (ValueError, OSError):
+                pass
+    atexit.register(stop)
+    try:
+        yield
+    finally:
+        stop()
+        atexit.unregister(stop)
+        for sig, h in old.items():
+            try:
+                signal.signal(sig, h)
+            except (ValueError, OSError):
+                pass
 
 
 def _addr_args() -> list[str]:
@@ -174,15 +214,16 @@ def execute(argv_tail: list[str], *, label: str, timeout_s: float) -> MaaRun:
     except OSError as e:
         return MaaRun(argv, None, "", log, 0.0, error=f"maa 启动失败：{e}")
     timed_out = False
-    try:
-        stdout, _ = proc.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _kill_group(proc)
+    with _stops_with_us(proc):
         try:
-            stdout, _ = proc.communicate(timeout=KILL_GRACE_S)
-        except (subprocess.TimeoutExpired, ValueError):
-            stdout = ""
+            stdout, _ = proc.communicate(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_group(proc)
+            try:
+                stdout, _ = proc.communicate(timeout=KILL_GRACE_S)
+            except (subprocess.TimeoutExpired, ValueError):
+                stdout = ""
     run = MaaRun(argv, proc.returncode, stdout or "", log, round(time.monotonic() - t0, 1), timed_out=timed_out)
     run.parsed = parse_output(run.stdout, log)
     return run

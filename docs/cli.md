@@ -185,7 +185,8 @@
 
 maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFIG_DIR` 传给 maa-cli，不动用户原有的 maa-cli 配置）；
 任务文件每次生成为 `private/maa-config/tasks/maapilot-<任务>.toml`，maa-cli 的日志在 `private/log/maa/<YYYYmmdd-HHMMSS>-<任务>.log`。
-跑的时候持锁并每分钟心跳（锁不会因为刷图时间长而过期）。
+跑的时候持锁并每分钟心跳（锁不会因为刷图时间长而过期）。maa-cli 自成进程组（超时时整组结束）；`maapilot maa` 自己被叫停
+（SIGTERM / SIGINT / SIGHUP，例如日常超时杀掉它）时先结束 maa-cli 的进程组再退出（退出码 128+信号），正常或出错退出时 maa 还在也会结束掉。
 
 ```json
 {"task": "fight", "stage": "1-7", "ok": true, "duration_s": 312,
@@ -494,7 +495,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
 （程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
-每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
+每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）；超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
 
 `daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`（权限"询问"）：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行：
 
