@@ -23,6 +23,8 @@ def token_guide() -> str:
     from maapilot.crew.skland import TOKEN_PAGE
     return f"""怎么拿到鹰角账号 token（大约 1 分钟）：
 
+  （能弹浏览器时，程序会替你打开第 1、2 步的网页；不想自动打开就加 --no-browser。）
+
   1. 用浏览器打开 https://user.hypergryph.com/login ，用你玩明日方舟的鹰角账号登录
      （手机号 + 验证码或密码）。角色要在森空岛里绑定过（打开森空岛 App 能看到你的明日方舟角色就行）。
   2. 登录后，在同一个浏览器里打开：
@@ -106,10 +108,39 @@ def _record(store: dict, ok: bool, error: CliError | None = None) -> None:
 
 # --- skland token ----------------------------------------------------------------------------------------------------
 
+LOGIN_PAGE = "https://user.hypergryph.com/login"
+
+
+def _open(url: str) -> bool:
+    """用默认浏览器打开；打不开（没有图形界面、远程登录）返回 False。"""
+    import webbrowser
+    try:
+        return bool(webbrowser.open(url, new=2))
+    except Exception:
+        return False
+
+
+def _guided_browser(token_page: str) -> None:
+    """能弹浏览器时替用户打开第 1、2 步的网页；打不开就照说明手动打开。"""
+    if _open(LOGIN_PAGE):
+        print("已在浏览器里打开登录页（第 1 步）。登录好后回到这里按回车，我再打开 token 页（第 2 步）。",
+              file=sys.stderr, flush=True)
+        try:
+            input()
+        except EOFError:
+            return
+        if _open(token_page):
+            print("已打开 token 页。复制 content 的值，回到这里粘贴（第 3、4 步）。", file=sys.stderr, flush=True)
+            return
+    print("没能自动打开浏览器，请照上面的步骤手动打开网页。", file=sys.stderr, flush=True)
+
+
 def cmd_token(args):
     from maapilot.crew import skland
     if sys.stdin.isatty():
         print(token_guide() + "\n", file=sys.stderr, flush=True)
+        if not args.no_browser:
+            _guided_browser(skland.TOKEN_PAGE)
         raw = getpass.getpass("token: ", stream=sys.stderr)
     else:
         raw = sys.stdin.read()
@@ -219,6 +250,7 @@ def register(sub) -> None:
                       description="保存鹰角账号 token，之后 maapilot state skland 就能从森空岛读干员练度。\n\n" + token_guide(),
                       formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--uid", help="绑了好几个明日方舟角色时指定用哪个")
+    p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器，自己照步骤打开网页")
     p.set_defaults(func=cmd_token, command="skland token")
     p = gs.add_parser("status", help="接了没有、上次读成没成、token 过期没有（不显示 token）")
     p.set_defaults(func=cmd_status, command="skland status")

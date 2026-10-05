@@ -226,3 +226,16 @@ def test_state_skland_failure_keeps_box(fake, capsys):
 def test_state_skland_not_configured(capsys):
     code, env, _ = run(capsys, "state", "skland")
     assert code == 2 and env["error"]["code"] == "not_configured"
+
+
+def test_guided_browser_opens_login_then_token_page(monkeypatch, capsys):
+    from maapilot.tools import skland_cmd
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda url, new=0: opened.append(url) or True)
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    skland_cmd._guided_browser("https://example.test/token")
+    assert opened == [skland_cmd.LOGIN_PAGE, "https://example.test/token"]
+    opened.clear()
+    monkeypatch.setattr("webbrowser.open", lambda url, new=0: False)      # 没有图形界面：只提示手动打开
+    skland_cmd._guided_browser("https://example.test/token")
+    assert "手动打开" in capsys.readouterr().err
