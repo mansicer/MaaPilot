@@ -1,6 +1,6 @@
 # maa-cli 连接配置。模拟器地址不写在这里：MaaPilot 每次调用 maa-cli 都用 --addr 传入 private/config.yaml 的 emulator.address。
 [connection]
-config = "CompatMac"
+config = "General"
 
 [resource]
 user_resource = false
