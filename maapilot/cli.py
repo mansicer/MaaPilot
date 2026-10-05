@@ -27,6 +27,7 @@ GROUPS = [
     "maapilot.tools.calc",
     "maapilot.tools.lock_cmd",
     "maapilot.tools.guard",
+    "maapilot.tools.skland_cmd",
     "maapilot.flows.goals",
     "maapilot.flows.daily",
     "maapilot.flows.op",

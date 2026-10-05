@@ -673,3 +673,29 @@ def test_box_has_its_own_timeout(capsys, env, monkeypatch):
     monkeypatch.setattr(daily, "maapilot_call", spy)
     run(capsys, "daily", "run")
     assert seen["t"] == 15 * 60
+
+
+def _skland_configured():
+    from maapilot.tools import skland_cmd
+    skland_cmd.save_store({"token": "T" * 30, "did": "B", "uid": "1"})
+
+
+def test_box_uses_skland_when_configured(capsys, env):
+    _skland_configured()
+    code, out = run(capsys, "daily", "run")
+    assert code == 0, out
+    cmds = all_cmds(env)
+    assert "state skland" in cmds and "state box" not in cmds
+    box = next(t for t in out["data"]["tasks"] if t["task"] == "box")
+    assert box["ok"] is True and box["source"] == "skland" and out["data"]["alerts"] == []
+
+
+def test_box_falls_back_to_maa_when_skland_fails(capsys, env):
+    _skland_configured()
+    env["behavior"]["fail"] = {"skland"}
+    code, out = run(capsys, "daily", "run")
+    assert code == 0, out                                              # 不算失败
+    cmds = all_cmds(env)
+    assert cmds.index("state skland") < cmds.index("state box")
+    assert any("森空岛读练度没成" in a and "改用 MAA 识别" in a for a in out["data"]["alerts"])
+    assert out["data"]["failed"] == []

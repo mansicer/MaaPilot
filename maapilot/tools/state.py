@@ -277,6 +277,8 @@ def register(sub) -> None:
     p = gs.add_parser("op", help="进干员页读一名干员的精英化、等级、技能等级（只读，约一分钟）")
     p.add_argument("name", help="干员名")
     p.set_defaults(func=cmd_op, command="state op")
+    from maapilot.tools import skland_cmd
+    skland_cmd.register_state(gs)
     p = gs.add_parser("sanity", help="识别理智")
     p.set_defaults(func=cmd_sanity, command="state sanity")
     p = gs.add_parser("show", help="读快照（不碰模拟器）")

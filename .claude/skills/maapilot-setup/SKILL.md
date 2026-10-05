@@ -85,6 +85,20 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 - 把那一行**原样**给用户看，说明两边同时跑会抢模拟器、重复做日常；
 - 问用户要不要停掉旧的：**只有用户能决定**，不要自己删。用户同意后在第 5 步用 `daily schedule --replace-old` 删掉；用户想自己处理，就告诉他在终端 `crontab -e` 里删掉或注释掉这一行。
 
+## 4b. 要不要接森空岛（可选）
+
+问一句："要不要接森空岛？接了以后读干员的技能、专精、模组更准、更快（不用在模拟器里一个个看），日常每天也会顺手更新。"说清楚：
+- 要用你的**鹰角账号 token**，只存在这台电脑的项目文件夹里（`private/skland.json`），我（agent）看不到也不会碰；
+- 这是社区整理的非官方接口，可能哪天就不能用了，到时候还是用 MAA 识别，不影响别的；
+- 不想接就跳过，以后想接再说。
+
+用户要接：请用户自己做（agent 不能代办，也不要让用户把 token 发在对话里）：
+1. 在浏览器登录鹰角官网 https://user.hypergryph.com/login ；
+2. 打开 https://web-api.hypergryph.com/account/info/hg ，页面上是一段 JSON，复制 `content` 后面引号里的那串；
+3. 在终端里（项目文件夹下）运行 `maapilot skland token`，粘贴后回车（不会显示）。说"好了"就行。
+之后 `maapilot skland status` 看 `configured` 是 `true`，再 `maapilot state skland` 读一次，告诉用户读到了几名干员。
+`choose_role`（绑了好几个角色）：把 `data.roles` 给用户看，请用户在终端里跑 `maapilot skland token --uid <要用的>`。
+
 ## 5. 写配置、设定时、收尾
 
 1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、前面的 `server`、`emulator`、`tools`。改完 `maapilot doctor` 再确认一次。

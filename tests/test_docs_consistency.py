@@ -19,9 +19,11 @@ from maapilot import cli
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md")) + [ROOT / "CLAUDE.md", ROOT / "README.md"]
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
-          "daily", "guard", "lock", "reset")
+          "daily", "guard", "lock", "reset", "skland")
 # 要用户在确认框里点同意的命令（design.md 第 7 节、docs/cli.md 命令总览）
 ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release", "reset")
+# 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）
+USER_ONLY = ("skland token",)
 
 # 说明里提到的 maa-cli 自己的命令（setup 装资源用），不是 maapilot
 MAA_CLI = {"maa install", "maa update"}
@@ -156,11 +158,15 @@ def _all_subcommands() -> list[list[str]]:
 @pytest.mark.parametrize("where,cmd,full", INVOCATIONS, ids=[f"{f}:{c}" for f, c, _ in INVOCATIONS])
 def test_skill_command_has_permission_rule(where, cmd, full):
     argv = normalize(cmd)
+    if any(" ".join(argv).startswith(u) for u in USER_ONLY):           # 让用户自己在终端里跑的：agent 被拒
+        assert _rule(argv) == "deny", f"{where} 的 `{cmd}` 只能由用户跑，agent 应被拒"
+        return
     assert _rule(argv) in ("allow", "ask"), f"{where} 的 `{cmd}` 没有放行或询问的权限规则"
 
 
 def test_every_subcommand_has_rule():
-    missing = [" ".join(c) for c in _all_subcommands() if _rule(c) not in ("allow", "ask")]
+    missing = [" ".join(c) for c in _all_subcommands()
+               if _rule(c) not in ("allow", "ask") and " ".join(c) not in USER_ONLY]
     assert not missing, f"这些命令没有权限规则（agent 用时会弹确认、无头时被拒）：{missing}"
 
 
@@ -171,6 +177,13 @@ def test_confirm_commands_are_ask():
                                           p.removeprefix("maapilot ") == c.split()[0]
                                           for p in _prefixes("allow"))]
     assert not allowed_ask, f"放行规则盖住了要询问的命令：{allowed_ask}"
+
+
+def test_user_only_commands_and_token_file_are_denied():
+    for c in USER_ONLY:
+        assert _rule(c.split()) == "deny", f"`{c}` 要由用户自己跑，agent 应被拒"
+    deny = _settings()["permissions"]["deny"]
+    assert "Read(private/skland.json)" in deny and "Edit(private/skland.json)" in deny
 
 
 def test_hook_runs_doctor_brief():

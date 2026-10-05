@@ -32,6 +32,7 @@ MaaPilot/
 | `input tap / swipe / back / text` | 点击、滑动、返回、输入 |
 | `maa <任务> [参数]` | 调 MAA：启动、公招、基建、信用商店、领奖励、刷关（关卡、次数）、剿灭、作业（copilot）；失败时当场截图并带上 MAA 自己存的截图。`maa why` 只读 MAA 的详细日志，把失败那段时间的事实（做了什么、看到什么字、等了多久、出错、截图）整理出来，不下结论，由 agent 判断 |
 | `state depot / box / sanity` | 用 MAA 的识别读仓库、干员练度、理智，存一份带时间的快照 |
+| `state skland`、`skland token / status` | 从森空岛（非官方接口，用户自己存的鹰角账号 token）直接读干员练度、技能专精、模组和理智，不碰模拟器；日常的"识别干员练度"接了就先用它 |
 | `data …` | 游戏数据：同步；查干员养成消耗（升级、精英化、技能、专精、模组）、合成配方、关卡掉率 |
 | `calc need / craft / stages` | 纯计算：一个养成目标要多少材料、对照仓库缺多少、哪些能合成、哪几关最省理智（只给建议） |
 | `goals list / add / remove / update` | 目标清单的增删改（读写 `goals.md` 的固定字段；完成或放弃时挪进 `goals-done.md`） |

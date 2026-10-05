@@ -255,6 +255,30 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。
 
+## skland —— 森空岛（非官方接口）
+
+从森空岛直接读账号数据，比 MAA 识别快、准、全（技能、专精、模组都有），不碰模拟器。要用户的**鹰角账号 token**，只存在本机。
+
+| 命令 | 谁跑 | 做什么 |
+|---|---|---|
+| `skland token [--uid <uid>]` | **用户自己在终端里跑**（agent 的权限里是拒绝） | 从标准输入读 token（终端里不回显；也接受整页 JSON 粘贴），先完整登录一次验证，再存进 `private/skland.json`（权限 600）。绑了几个明日方舟角色时按 `config.yaml` 的 `server` 挑（官服 / B 服），挑不出退出码 2 `choose_role`（`data.roles`），用 `--uid` 指定 |
+| `skland status` | agent | `{configured, uid, role, saved_at, last: {at, ok, error?, code?}, token_expired}`；不显示 token |
+| `state skland` | agent、日常 | 见「state」 |
+
+token 怎么来：在浏览器登录鹰角官网（https://user.hypergryph.com/login），再打开 https://web-api.hypergryph.com/account/info/hg，
+页面上的 JSON 里 `data.content` 就是（森空岛网页版登录后 https://web-api.skland.com/account/info/hg 也行）。token 过一段时间会失效，失效了重新取、重新跑 `skland token`。
+
+流程（2026-10 按社区实现核对，`maapilot/crew/skland.py` 写了细节）：token → `POST as.hypergryph.com/user/oauth2/v2/grant`（appCode `4ca99fa6b56cc2ba`）拿授权码
+→ `POST zonai.skland.com/web/v1/user/auth/generate_cred_by_code` 拿 cred 与签名密钥（请求头带数美设备号 `dId`，`maapilot/crew/skland_device.py`）
+→ `GET zonai.skland.com/api/v1/game/player/binding`（明日方舟的绑定角色）→ `GET …/api/v1/game/player/info?uid=`。后两个要签名：
+`sign = md5(hmac_sha256(签名密钥, 路径 + query + 时间戳 + {"platform","timestamp","dId","vName"} 的紧凑 JSON))`，时间戳按服务器的 `Date` 校准。
+
+`state skland` 的 `data`：`{at, source: "skland", uid, operators, with_modules, mastered, sanity: {current, max}}`（`--op` 另给这些干员的 `operators_detail` 和 `missing`）。
+`box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential, skill_level, skills: [{index, id, mastery}], modules: [{id, name, level, equipped}]}`
+（模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能只有 id）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
+token 失效 → 退出码 3 `token_invalid`（请用户重新取 token、在终端跑 `skland token`）；接口、网络、设备号 → 退出码 1 `skland_api` / `skland_network` / `skland_device`。
+token 不出现在任何输出、日志、报错里；agent 读不了也改不了 `private/skland.json`（权限设置里拒绝）。
+
 ## state —— 读账号状态，存快照
 
 | 命令 | 做什么 | 快照 |
@@ -262,11 +286,12 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 | `state depot` | MAA 仓库识别（Depot），自动从首页进仓库 | `private/state/depot.json` |
 | `state box` | MAA 干员识别（OperBox）：精英化、等级、稀有度、潜能 | `private/state/box.json` |
 | `state op <干员>` | 进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，约一分钟；不存快照）。专精、模组读不了（`unread` 列出没读到的） | — |
+| `state skland [--op <名>…]` | 从森空岛读（**不碰模拟器、不拿锁**，要先接森空岛，见「skland」）：每名干员的精英化、等级、稀有度、潜能，**加上**技能等级、各技能专精、模组（等级、装没装）；顺手更新理智 | `box.json`（`source: "skland"`）、`sanity.json` |
 | `state sanity` | 回首页，OCR 右上角的理智（大号的当前值 + 下面的"理智/上限"；2026-09 真机核对过） | `private/state/sanity.json` |
 | `state show [depot\|box\|sanity] [--item <名>…] [--op <名>…]` | 读快照，不碰模拟器；不写种类时给三样里有的 | — |
 
 每次读完覆盖快照，`state depot` 并在 `private/log/` 的命令记录里记下和上一份的差（`depot_change`）。`--item` / `--op` 只筛选输出。
-OperBox 读不到技能等级、专精、模组：技能等级用 `state op <干员>` 读；专精、模组以用户说的或在游戏里看到的为准，写在目标的"分解与进展"里。
+OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state skland`（全都有）；没接时技能等级用 `state op <干员>` 读；专精、模组以用户说的或在游戏里看到的为准，写在目标的"分解与进展"里。
 `state op` 做不成退出码 1（`shortcut_failed`，带 `stage`、`shot`）。
 识别失败退出码 1（`depot_failed` / `box_failed` / `sanity_failed`，后者 `data.shot` 是截图）。
 程序里 `maapilot.tools.state.read_depot()` / `read_box()` 是不拿锁的版本。
@@ -463,7 +488,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
    - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
      `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
    - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
-3. 识别干员练度（`box`，`maapilot state box`，继承锁）：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
+3. 识别干员练度（`box`；接了森空岛先 `state skland`，没成记一条告警、不算失败，再用 `maapilot state box`（继承锁））：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
    读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 2 步（会话里停下交出、定时里叫 agent，提示里的重跑命令是 `maapilot state box`）；失败不改 `box.json`。
    放在刷理智、目标部分之前，让它们看到今天的练度。
 4. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
@@ -718,6 +743,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot maa:*)",
       "Bash(maapilot maa why:*)",
       "Bash(maapilot state:*)",
+      "Bash(maapilot state skland:*)",
       "Bash(maapilot data:*)",
       "Bash(maapilot calc:*)",
       "Bash(maapilot goals:*)",
@@ -732,6 +758,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
+      "Bash(maapilot skland status:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
@@ -756,7 +783,10 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maa copilot:*)",
       "Bash(adb shell input:*)",
       "Edit(private/guard/**)",
-      "Edit(private/lock.json)"
+      "Edit(private/lock.json)",
+      "Bash(maapilot skland token:*)",
+      "Read(private/skland.json)",
+      "Edit(private/skland.json)"
     ]
   },
   "hooks": {
@@ -780,6 +810,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。
+- 森空岛的 token：`skland token` 只能由用户自己在终端里跑（拒绝），`private/skland.json` agent 读不了、改不了（拒绝）。
 - `private/config.yaml` 的改动是 **ask**：里面有定时日常会执行的程序路径（`tools.*`、`emulator.adb`），无头 agent 不能改，会话里改要用户点同意。
 - `guard snapshot` 可以放行：上次对账之后跑过可能花东西的命令时它改做对账（见「guard」），不能拿来抹掉花费。
 - 启动钩子 `bin/session-start` 用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）：先往 `$CLAUDE_ENV_FILE` 写一行把 `.venv/bin` 加进 PATH（环境还没建也写，setup 建好后同一会话就能用），再跑 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。

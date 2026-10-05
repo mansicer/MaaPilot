@@ -431,6 +431,34 @@ def _box_fresh() -> str | None:
     return None
 
 
+SKLAND_TIMEOUT_S = 180
+
+
+def _box_from_skland(r: _Run, env: dict) -> bool:
+    """接了森空岛（private/skland.json）就 `state skland` 读练度。成了记一行、返回 True；
+    没成记一条告警（不算失败），返回 False，由 MAA 识别接着做。"""
+    from maapilot.tools import skland_cmd
+    if not skland_cmd.configured():
+        return False
+    _set_step("box:skland")
+    t0 = time.monotonic()
+    code, env_ = maapilot_call(["state", "skland"], env, timeout_s=SKLAND_TIMEOUT_S)
+    if code == 0:
+        d = env_.get("data") or {}
+        row = {"task": BOX, "ok": True, "source": "skland", "duration_s": round(time.monotonic() - t0, 1),
+               "result": {k: d.get(k) for k in ("operators", "with_modules", "mastered")}}
+        r.event("task", **row)
+        r.data["tasks"].append(row)
+        r.save()
+        return True
+    err = env_.get("error") or {}
+    r.data["alerts"].append(f"森空岛读练度没成（{err.get('message') or err.get('code') or f'退出码 {code}'}），"
+                            "改用 MAA 识别" + ("；token 失效了，要用户重新运行 maapilot skland token"
+                                              if err.get("code") == "token_invalid" else ""))
+    r.event("skland_failed", code=err.get("code"), message=err.get("message"))
+    return False
+
+
 # --- 刷理智的时限：按理智算 -------------------------------------------------------------------------------------------
 
 FARM_MIN_PER_FIGHT = 3          # 打一次大约几分钟（config: daily.farm_min_per_fight）
@@ -665,7 +693,7 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
                 row = {"task": BOX, "ok": True, "skipped": fresh}
                 r.event("task", **row)
                 r.data["tasks"].append(row)
-            else:
+            elif not _box_from_skland(r, env):            # 接了森空岛就从那里读（快、不碰模拟器），不行再用 MAA 识别
                 bt = float(dcfg.get("box_timeout_min") or BOX_TIMEOUT_MIN) * 60
                 handoff(_maa_task(r, cfg, BOX, [], headless, env, lk, timeout_s=bt, cli=["state", "box"]))
         if want(FARM):

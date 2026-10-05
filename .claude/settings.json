@@ -8,6 +8,7 @@
       "Bash(maapilot maa:*)",
       "Bash(maapilot maa why:*)",
       "Bash(maapilot state:*)",
+      "Bash(maapilot state skland:*)",
       "Bash(maapilot data:*)",
       "Bash(maapilot calc:*)",
       "Bash(maapilot goals:*)",
@@ -22,6 +23,7 @@
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
+      "Bash(maapilot skland status:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
@@ -46,7 +48,10 @@
       "Bash(maa copilot:*)",
       "Bash(adb shell input:*)",
       "Edit(private/guard/**)",
-      "Edit(private/lock.json)"
+      "Edit(private/lock.json)",
+      "Bash(maapilot skland token:*)",
+      "Read(private/skland.json)",
+      "Edit(private/skland.json)"
     ]
   },
   "hooks": {

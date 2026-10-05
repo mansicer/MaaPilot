@@ -14,6 +14,9 @@
 - 要试 agent 的对话效果，在临时副本里跑 `claude -p`，不要在这个目录里跑（会留下会话记录和自动记忆）。
 - 用户要求时才提交；提交信息用英文。
 
+- 森空岛（`maapilot/crew/skland*.py`）用的是**非官方接口**（社区从森空岛 App / 网页版扒出来的，含数美设备指纹），随时可能变；
+  坏了先对照社区的实现（docs/cli.md「skland」写了来源）。测试一律用假的 HTTP。用户的 token 在 `private/skland.json`，开发时也不要读、不要打印。
+
 ## 测试环境
 - 本机的模拟器、服务器、日常时间都看 `private/config.yaml`，不写进仓库。
 - 旧项目 `~/Developer/MAA` 只作参考，它的定时任务已停。
