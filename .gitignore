@@ -8,3 +8,4 @@ data/
 resource/model/
 .DS_Store
 .claude/settings.local.json
+debug/
