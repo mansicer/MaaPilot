@@ -593,3 +593,83 @@ def test_daily_farm_uses_sanity_timeout(capsys, env, monkeypatch):
     assert seen["timeout_s"] == (5 * 3 + 15) * 60
     farm = next(t for t in out["data"]["tasks"] if t["task"] == "farm")
     assert farm["timeout"]["fights"] == 5 and farm["timeout"]["sanity_source"] == "snapshot"
+
+
+# --- 识别干员练度（每个游戏日一次） ---------------------------------------------------------------------------------
+
+def all_cmds(env):
+    return [" ".join(c["args"]) for c in env["calls"] if c["args"][0] in ("maa", "state")]
+
+
+def test_box_read_once_per_game_day(capsys, env):
+    code, out = run(capsys, "daily", "run")
+    assert code == 0, out
+    cmds = all_cmds(env)
+    # 其余 MAA 项之后、刷理智之前
+    assert cmds.index("state box") > cmds.index("maa infrast") and cmds.index("state box") < cmds.index("maa fight 1-7")
+    box = next(t for t in out["data"]["tasks"] if t["task"] == "box")
+    assert box["ok"] is True and "skipped" not in box
+    # 今天（游戏日）读过了：跳过
+    from maapilot.tools import common
+    common.write_json(paths.STATE / "box.json", {"at": common.iso(), "operators": {}})
+    env["calls"].clear()
+    code, out = run(capsys, "daily", "run")
+    assert "state box" not in all_cmds(env)
+    box = next(t for t in out["data"]["tasks"] if t["task"] == "box")
+    assert box["skipped"].startswith("今天（游戏日）已经读过") and "识别干员练度" in read_report(out["data"])
+
+
+def test_box_fresh_uses_game_day_boundary(monkeypatch):
+    from datetime import datetime
+    from maapilot.tools import common
+    from maapilot.knowledge import calendar
+    t = calendar.to_game_tz(datetime(2026, 10, 5, 10, 0).astimezone())
+    monkeypatch.setattr(daily, "now", lambda: t)
+    common.write_json(paths.STATE / "box.json", {"at": t.replace(hour=4, minute=10).isoformat()})
+    assert daily._box_fresh()
+    common.write_json(paths.STATE / "box.json", {"at": t.replace(hour=3, minute=50).isoformat()})   # 昨天的游戏日
+    assert daily._box_fresh() is None
+
+
+def test_box_disabled_and_only(capsys, env):
+    code, out = run(capsys, "daily", "run", "--only", "box")
+    assert code == 0, out
+    assert all_cmds(env) == ["state box"]
+    env["calls"].clear()
+    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
+    cfg["daily"]["read_box"] = False
+    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and "state box" not in all_cmds(env)
+    assert not any(t["task"] == "box" for t in out["data"]["tasks"])
+
+
+def test_box_failure_hands_over_in_session(capsys, env):
+    env["behavior"]["fail"] = {"box"}
+    code, out = run(capsys, "daily", "run")
+    assert code == 1 and out["error"]["code"] == "handoff"
+    h = out["data"]["handoff"]
+    assert h["task"] == "box" and h["rest"][:2] == ["box", "farm"]
+    assert "maa fight 1-7" not in all_cmds(env)
+    assert not (paths.STATE / "box.json").exists()                      # 失败不写 box.json
+
+
+def test_box_failure_scheduled_recovery_prompt(capsys, env):
+    env["behavior"]["fail"] = {"box"}
+    run(capsys, "daily", "run", "--trigger", "schedule")
+    (call,) = claude_calls(env)
+    prompt = call["argv"][1]
+    assert "识别干员练度" in prompt and "maapilot state box" in prompt and "maapilot maa box" not in prompt
+    assert "maa why" not in prompt
+
+
+def test_box_has_its_own_timeout(capsys, env, monkeypatch):
+    inner, seen = daily.maapilot_call, {}
+
+    def spy(args, env_, timeout_s=None):
+        if args[:2] == ["state", "box"]:
+            seen["t"] = timeout_s
+        return inner(args, env_, timeout_s)
+    monkeypatch.setattr(daily, "maapilot_call", spy)
+    run(capsys, "daily", "run")
+    assert seen["t"] == 15 * 60

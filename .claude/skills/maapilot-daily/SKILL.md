@@ -16,7 +16,10 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 | `infrast` | 基建：换班、收制造站 / 贸易站产物、线索、会客室 | 基建换班收菜 |
 | `mall` | 信用商店买东西、访问好友拿信用 | 信用商店 |
 | `annihilation` | 当期剿灭打 1 次；本周合成玉拿满后自动跳过 | 剿灭 |
+| `box` | 识别干员练度（`maapilot state box`，MAA 干员识别，更新 `private/state/box.json`）：其余项之后、刷理智之前，每个游戏日（04:00 换日）只读一次，今天读过就跳过；`daily.read_box: false` 关掉 | 识别干员练度 |
 | `award` | 领任务奖励和邮件（总在刷理智之后） | 领奖励 |
+
+`box` 和刷理智（`farm`）不写在 `daily.tasks` 里，但 `--only` 里可以写（例如 `daily run --only box` 只重读练度）。`box` 失败了重跑用 `maapilot state box`（它不是 maa 任务）。
 
 ## 用户说"跑一次日常"
 

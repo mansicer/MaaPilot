@@ -14,7 +14,7 @@ from maapilot.cliutil import BAD_REQUEST, CliError
 from maapilot.flows._common import now, rel
 
 LABELS = {"startup": "启动游戏", "recruit": "公开招募", "infrast": "基建", "mall": "信用商店与访问好友",
-          "annihilation": "剿灭", "award": "领任务奖励与邮件", "farm": "刷理智", "goals": "目标",
+          "annihilation": "剿灭", "award": "领任务奖励与邮件", "farm": "刷理智", "box": "识别干员练度", "goals": "目标",
           "closedown": "关游戏"}
 _RUN_ID = re.compile(r"^(\d{4})(\d{2})(\d{2})-(\d{4,6})$")
 

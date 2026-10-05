@@ -41,3 +41,6 @@ daily:
   # 时限 = 次数 × farm_min_per_fight + farm_timeout_margin_min（分钟）。读不到理智时用上面的 task_timeout_min。
   farm_min_per_fight: 3
   farm_timeout_margin_min: 15
+  # 每个游戏日（04:00 换日）重读一次干员练度（MAA 干员识别 → private/state/box.json），在刷理智之前；最长几分钟
+  read_box: true
+  box_timeout_min: 15

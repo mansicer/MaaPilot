@@ -463,16 +463,19 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
    - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
      `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
    - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
-3. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
+3. 识别干员练度（`box`，`maapilot state box`，继承锁）：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
+   读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 2 步（会话里停下交出、定时里叫 agent，提示里的重跑命令是 `maapilot state box`）；失败不改 `box.json`。
+   放在刷理智、目标部分之前，让它们看到今天的练度。
+4. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
    `manual` 时交回在场的 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
    agent 做完目标部分自己 `maa award`、`guard check`、`report write <run_id> --append …`。没有进行中的目标 → `maa fight <default_stage>`（失败同第 2 步）。
-4. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
+5. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
 剿灭在一周里连续 2 次没做成（接管也没救回来，多半是还不能代理）→ 这周的日常不再打（`skipped`），汇报里告警；下周一 04:00 清零。
 会话里跑停下交给 agent → 退出码 1（`handoff`）；定时运行里有没做成（agent 也没处理好）的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`。
 
-`--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`，不列就不刷）；`--no-agent` 不启动无头 agent（失败只记下）。
+`--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`、识别干员练度写 `box`，不列就不跑）；`--no-agent` 不启动无头 agent（失败只记下）。
 
 ```json
 {"run_id": "20260930-0440", "trigger": "schedule", "status": "done", "ok": true,

@@ -37,6 +37,8 @@ AGENT_TIMEOUT_MIN = 90                    # 做目标部分的无头 agent 最�
 RECOVERY_TIMEOUT_MIN = 30                 # 接管失败项的无头 agent 最长跑多久（config: daily.recovery_timeout_min）
 TASK_TIMEOUT_MIN = 90                     # 一个 MAA 日常项最长跑多久（config: daily.task_timeout_min）
 FARM = "farm"                             # 刷理智（不在 daily.tasks 里；--only 里可以写）
+BOX = "box"                               # 识别干员练度（state box；每个游戏日一次，config: daily.read_box；--only 里可以写）
+BOX_TIMEOUT_MIN = 15                      # config: daily.box_timeout_min
 
 
 def _marker() -> Path:
@@ -172,15 +174,19 @@ def evidence_lines(ev: dict | None, task: str) -> list[str]:
     return out
 
 
-def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: list[str] | None = None) -> str:
+def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: list[str] | None = None,
+                    cli: list[str] | None = None) -> str:
+    """argv：`maapilot maa` 后面的部分；不是 maa 任务的项（识别干员练度）用 cli 给整条 maapilot 命令。"""
     log = (data or {}).get("log")
-    cmd = " ".join(shlex.quote(a) for a in (argv or [task]))
-    why_task = (argv or [task])[0]
+    cli = cli or ["maa", *(argv or [task])]
+    cmd = " ".join(shlex.quote(a) for a in cli)
+    why_task = cli[1] if cli[0] == "maa" and len(cli) > 1 else None
     return "\n".join([
         f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
-        f"日常项「{reportmod.label(task)}」（maapilot maa {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
+        f"日常项「{reportmod.label(task)}」（maapilot {cmd}）刚才失败了：{err.get('message') or err.get('code')}。",
         f"MAA 日志：{log}。" if log else "",
-        *evidence_lines((data or {}).get("evidence"), why_task),
+        *(evidence_lines((data or {}).get("evidence"), why_task) if why_task else []),
+        f"重跑这一项用 maapilot {cmd}（照抄这条命令）。",
         "加载 skill maapilot-recovery，只处理这一项：先看上面的截图、查原因，再截图看现在停在哪，处理卡点，需要时重跑这一项，最后回到游戏首页。",
         "被登出、掉线（停在开始唤醒的标题页）：用户不在场，直接重新登录（maapilot maa startup）再重跑这一项，并写进总结。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
@@ -338,10 +344,10 @@ def run(only: list[str] | None, trigger: str, no_agent: bool) -> dict:
     dcfg = cfg.get("daily") or {}
     tasks = [str(t) for t in (dcfg.get("tasks") or [])]
     if only:
-        unknown = [t for t in only if t not in tasks and t != FARM]
+        unknown = [t for t in only if t not in tasks and t not in (FARM, BOX)]
         if unknown:
             raise CliError("bad_arguments", f"--only 里有不在 daily.tasks 里的项：{', '.join(unknown)}",
-                           hint=f"能写的：{', '.join(tasks + [FARM])}", exit=BAD_REQUEST)
+                           hint=f"能写的：{', '.join(tasks + [BOX, FARM])}", exit=BAD_REQUEST)
     stop_file = paths.GUARD / "stop.json"
     if stop_file.exists():
         raise CliError("guard_stop", "合成玉 / 源石对账停机中，日常不开始", exit=NEEDS_USER,
@@ -414,6 +420,17 @@ def _guard(r: _Run, which: str, env: dict, after: str) -> None:
         r.data["guard"] = {"ok": None, "error": (env_.get("error") or {}).get("message")}
 
 
+def _box_fresh() -> str | None:
+    """box.json 已经是这个游戏日（04:00 换日）读的 → 跳过的原因；否则 None。"""
+    from maapilot.knowledge import calendar
+    from maapilot.tools import common
+    snap = common.read_json(paths.STATE / "box.json") or {}
+    at = common.parse_iso(snap.get("at"))
+    if at is not None and calendar.game_day(at) == calendar.game_day(now()):
+        return f"今天（游戏日）已经读过（{at:%H:%M}）"
+    return None
+
+
 # --- 刷理智的时限：按理智算 -------------------------------------------------------------------------------------------
 
 FARM_MIN_PER_FIGHT = 3          # 打一次大约几分钟（config: daily.farm_min_per_fight）
@@ -483,14 +500,16 @@ def farm_timeout(cfg: dict, stage: str, sanity: int | None, source: str) -> tupl
 
 
 def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, env: dict, lk,
-              timeout_s: float | None = None) -> dict:
+              timeout_s: float | None = None, cli: list[str] | None = None) -> dict:
+    """跑一个日常项：默认 `maapilot maa <args>`；cli 给了就跑那条 maapilot 命令（识别干员练度：state box）。"""
+    cli = cli or ["maa", *args]
     if timeout_s is None:
         timeout_s = float((cfg.get("daily") or {}).get("task_timeout_min") or TASK_TIMEOUT_MIN) * 60
     _set_step(task)
     lk.heartbeat(step=task)
     cliutil.log(f"[daily] {reportmod.label(task)} …")
     t0 = time.monotonic()
-    code, env_ = maapilot_call(["maa", *args], env, timeout_s=timeout_s)
+    code, env_ = maapilot_call(cli, env, timeout_s=timeout_s)
     err = env_.get("error") or {}
     row = {"task": task, "ok": code == 0, "duration_s": round(time.monotonic() - t0, 1)}
     data = env_.get("data") if isinstance(env_.get("data"), dict) else None
@@ -505,7 +524,7 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
             row["evidence"] = data["evidence"]
     r.event("task", **row)
     r.data["tasks"].append(row)
-    if err.get("code") == "timeout":                  # 杀了 maapilot maa；它会带走 maa，万一没带走，这里补一刀
+    if err.get("code") == "timeout":                  # 杀了 maapilot 命令；它会带走 maa，万一没带走，这里补一刀
         _stop_leftover_maa(r, TIMEOUT_LEFTOVER_WAIT_S, f"{reportmod.label(task)}超时停下后")
     if code != 0:
         cliutil.log(f"[daily] {reportmod.label(task)} 没做成：{row['error']}")
@@ -514,7 +533,7 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
         elif headless:
             r.data["agents"] += 1
             _set_step(f"{task}:agent")
-            info = run_agent(cfg, recovery_prompt(r.data["run_id"], task, err, data, args), env,
+            info = run_agent(cfg, recovery_prompt(r.data["run_id"], task, err, data, args, cli=cli), env,
                              paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{task}.jsonl", recovery=True)
             _after_agent(r, env, lk)
             row["agent"] = info
@@ -605,8 +624,9 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
     want = (lambda t: t in only) if only else (lambda t: True)
     r.event("start", trigger=r.data["trigger"], only=only, headless=headless)
     r.save()
+    read_box = dcfg.get("read_box", True) is not False
     order = ([t for t in tasks if t == "startup"] + [t for t in tasks if t not in ("award", "startup")]
-             + [FARM] + [t for t in tasks if t == "award"])
+             + ([BOX] if read_box else []) + [FARM] + [t for t in tasks if t == "award"])
     order = [t for t in order if want(t)]
 
     def handoff(row: dict) -> None:
@@ -639,6 +659,15 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
                 if t == "annihilation" and not row["ok"] and not row.get("recovered") \
                         and row.get("code") not in ("offline", "busy"):
                     _annihilation_failed(r)
+        if read_box and want(BOX):                     # 刷理智、目标部分之前：让它们看到今天的练度
+            fresh = _box_fresh()
+            if fresh:
+                row = {"task": BOX, "ok": True, "skipped": fresh}
+                r.event("task", **row)
+                r.data["tasks"].append(row)
+            else:
+                bt = float(dcfg.get("box_timeout_min") or BOX_TIMEOUT_MIN) * 60
+                handoff(_maa_task(r, cfg, BOX, [], headless, env, lk, timeout_s=bt, cli=["state", "box"]))
         if want(FARM):
             active = goalsmod.active_goals()
             r.data["goals_active"] = len(active)
