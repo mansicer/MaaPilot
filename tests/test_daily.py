@@ -5,6 +5,7 @@ import os
 import stat
 import sys
 import textwrap
+from datetime import timedelta
 
 import pytest
 import yaml
@@ -12,6 +13,7 @@ import yaml
 from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.flows import daily
+from maapilot.flows._common import now
 
 
 def run(capsys, *argv):
@@ -531,3 +533,63 @@ def test_annihilation_blocked_after_repeated_failures(capsys, env, monkeypatch):
     assert "annihilation" not in maa_tasks(env)
     row = next(t for t in out["data"]["tasks"] if t["task"] == "annihilation")
     assert "没打成" in row["skipped"]
+
+
+# --- 刷理智的时限按理智算 ------------------------------------------------------------------------------------------
+
+def test_farm_timeout_from_sanity(monkeypatch):
+    monkeypatch.setattr(daily, "_stage_cost", lambda stage: (6, stage == "1-7"))
+    secs, info = daily.farm_timeout({}, "1-7", 358, "snapshot")          # 超上限也照算
+    assert info["fights"] == 60 and info["min"] == 60 * 3 + 15 and secs == info["min"] * 60
+    secs, info = daily.farm_timeout({"daily": {"farm_min_per_fight": 2, "farm_timeout_margin_min": 0}}, "ZZ-9", 13, "x")
+    assert info["fights"] == 3 and info["min"] == 6 and info["stage_cost_known"] is False
+    secs, info = daily.farm_timeout({"daily": {"task_timeout_min": 40}}, "1-7", None, "none")
+    assert secs == 40 * 60 and info["basis"] == "task_timeout_min"
+    secs, info = daily.farm_timeout({}, "1-7", 0, "snapshot")             # 没理智也给一次的时间
+    assert info["fights"] == 1
+
+
+def test_sanity_estimate_regenerates_below_cap():
+    from maapilot.tools import common
+    at = (now() - timedelta(minutes=120)).isoformat(timespec="seconds")
+    assert daily._sanity_estimate({"at": at, "current": 100, "max": 205}) == 120
+    assert daily._sanity_estimate({"at": at, "current": 200, "max": 205}) == 205
+    assert daily._sanity_estimate({"at": at, "current": 358, "max": 205}) == 358
+    assert daily._sanity_estimate(None) is None
+
+
+def test_read_sanity_for_farm_sources(monkeypatch):
+    from maapilot.tools import common
+    calls = []
+
+    def fake(args, env, timeout_s=None):
+        calls.append(args)
+        return (0, {"ok": True, "data": {"current": 77, "max": 205}}) if fake.ok else (1, {"ok": False, "data": None})
+    fake.ok = True
+    monkeypatch.setattr(daily, "maapilot_call", fake)
+    common.write_json(paths.STATE / "sanity.json", {"at": common.iso(), "current": 50, "max": 205})
+    assert daily.read_sanity_for_farm({}) == (50, "snapshot") and calls == []
+    old = (now() - timedelta(hours=5)).isoformat(timespec="seconds")
+    common.write_json(paths.STATE / "sanity.json", {"at": old, "current": 50, "max": 205})
+    assert daily.read_sanity_for_farm({}) == (77, "state sanity") and calls == [["state", "sanity"]]
+    fake.ok = False
+    assert daily.read_sanity_for_farm({}) == (100, "old snapshot")    # 50 + 300 分钟 / 6
+
+
+def test_daily_farm_uses_sanity_timeout(capsys, env, monkeypatch):
+    """没有目标时刷 default_stage：先读理智，按理智给 maa fight 时限，记在这一项的 timeout 里。"""
+    from maapilot.tools import common
+    common.write_json(paths.STATE / "sanity.json", {"at": common.iso(), "current": 30, "max": 205})
+    monkeypatch.setattr(daily, "_stage_cost", lambda stage: (6, True))
+    inner, seen = daily.maapilot_call, {}
+
+    def spy(args, env_, timeout_s=None):
+        if args[:2] == ["maa", "fight"]:
+            seen["timeout_s"] = timeout_s
+        return inner(args, env_, timeout_s)
+    monkeypatch.setattr(daily, "maapilot_call", spy)
+    code, out = run(capsys, "daily", "run")
+    assert code == 0, out
+    assert seen["timeout_s"] == (5 * 3 + 15) * 60
+    farm = next(t for t in out["data"]["tasks"] if t["task"] == "farm")
+    assert farm["timeout"]["fights"] == 5 and farm["timeout"]["sanity_source"] == "snapshot"

@@ -414,8 +414,78 @@ def _guard(r: _Run, which: str, env: dict, after: str) -> None:
         r.data["guard"] = {"ok": None, "error": (env_.get("error") or {}).get("message")}
 
 
-def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, env: dict, lk) -> dict:
-    timeout_s = float((cfg.get("daily") or {}).get("task_timeout_min") or TASK_TIMEOUT_MIN) * 60
+# --- 刷理智的时限：按理智算 -------------------------------------------------------------------------------------------
+
+FARM_MIN_PER_FIGHT = 3          # 打一次大约几分钟（config: daily.farm_min_per_fight）
+FARM_MARGIN_MIN = 15            # 再多给几分钟（config: daily.farm_timeout_margin_min）
+SANITY_FRESH_MIN = 60           # 理智快照多久以内直接用（按 6 分钟回 1 点往上推）
+DEFAULT_STAGE_COST = 6          # 认不出关卡时一次按几点理智算（1-7 这类）
+
+
+def _stage_cost(stage: str) -> tuple[int, bool]:
+    try:
+        from maapilot.knowledge import stages
+        cost = stages.resolve_stage(stage).ap_cost
+        if cost:
+            return int(cost), True
+    except Exception:                                    # noqa: BLE001 - 没有数据表、认不出：按默认
+        pass
+    return DEFAULT_STAGE_COST, False
+
+
+def _sanity_estimate(snap: dict | None) -> int | None:
+    """快照 → 现在大概多少：没到上限的按 6 分钟 1 点往上加（最多加到上限）；超上限的（用了理智液、升级）不会再涨。"""
+    if not snap or snap.get("current") is None:
+        return None
+    cur, cap = int(snap["current"]), int(snap.get("max") or 0)
+    age = _age_min(snap.get("at"))
+    if cap and cur < cap and age:
+        cur = min(cap, cur + age // 6)
+    return cur
+
+
+def _age_min(at: str | None) -> int:
+    from maapilot.tools.common import age_min
+    return age_min(at) or 0
+
+
+def read_sanity_for_farm(env: dict) -> tuple[int | None, str]:
+    """刷理智前的理智：新的快照（state/sanity.json，1 小时内）直接用；否则 `state sanity`（回首页读右上角）；
+    再不行用旧快照推一个。→ (理智或 None, 来源)。"""
+    from maapilot.tools import common
+    snap = common.read_json(paths.STATE / "sanity.json")
+    if snap and _age_min(snap.get("at")) <= SANITY_FRESH_MIN:
+        return _sanity_estimate(snap), "snapshot"
+    code, env_ = maapilot_call(["state", "sanity"], env, timeout_s=180)
+    d = env_.get("data") if isinstance(env_.get("data"), dict) else None
+    if code == 0 and d and d.get("current") is not None:
+        return int(d["current"]), "state sanity"
+    est = _sanity_estimate(snap)
+    return est, ("old snapshot" if est is not None else "none")
+
+
+def farm_timeout(cfg: dict, stage: str, sanity: int | None, source: str) -> tuple[float, dict]:
+    """刷理智的时限（秒）：能打几次 = ceil(理智 / 一次的理智)，时限 = 次数 × 每次几分钟 + 余量。
+    理智读不到 → 用 task_timeout_min。→ (秒, 说明)。"""
+    dcfg = cfg.get("daily") or {}
+    fallback = float(dcfg.get("task_timeout_min") or TASK_TIMEOUT_MIN)
+    if sanity is None:
+        return fallback * 60, {"min": fallback, "basis": "task_timeout_min", "sanity_source": source}
+    cost, known = _stage_cost(stage)
+    fights = max(1, -(-int(sanity) // cost))
+    per = float(dcfg.get("farm_min_per_fight") or FARM_MIN_PER_FIGHT)
+    margin = float(dcfg.get("farm_timeout_margin_min") if dcfg.get("farm_timeout_margin_min") is not None
+                   else FARM_MARGIN_MIN)
+    minutes = fights * per + margin
+    return minutes * 60, {"min": round(minutes, 1), "basis": "sanity", "sanity": int(sanity), "sanity_source": source,
+                          "stage_cost": cost, "stage_cost_known": known, "fights": fights, "min_per_fight": per,
+                          "margin_min": margin}
+
+
+def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, env: dict, lk,
+              timeout_s: float | None = None) -> dict:
+    if timeout_s is None:
+        timeout_s = float((cfg.get("daily") or {}).get("task_timeout_min") or TASK_TIMEOUT_MIN) * 60
     _set_step(task)
     lk.heartbeat(step=task)
     cliutil.log(f"[daily] {reportmod.label(task)} …")
@@ -590,7 +660,13 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
                 _guard(r, "check", env, "目标部分")
             else:
                 stage = str(dcfg.get("default_stage") or "1-7")
-                row = _maa_task(r, cfg, FARM, ["fight", stage], headless, env, lk)
+                _set_step("farm:sanity")
+                sanity, source = read_sanity_for_farm(env)
+                ft, finfo = farm_timeout(cfg, stage, sanity, source)
+                r.event("farm_timeout", **finfo)
+                cliutil.log(f"[daily] 刷理智最长 {finfo['min']} 分钟（{finfo['basis']}）")
+                row = _maa_task(r, cfg, FARM, ["fight", stage], headless, env, lk, timeout_s=ft)
+                row["timeout"] = finfo
                 handoff(row)
                 r.data["farm"] = row.get("result") or {"stage": stage, "ok": False}
         if "award" in tasks and want("award"):

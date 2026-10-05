@@ -37,3 +37,7 @@ daily:
   agent_timeout_min: 90
   recovery_timeout_min: 30
   task_timeout_min: 90
+  # 刷理智（没有目标时刷 default_stage）的时限按理智算：能打几次 = 理智 ÷ 一次的理智（向上取整），
+  # 时限 = 次数 × farm_min_per_fight + farm_timeout_margin_min（分钟）。读不到理智时用上面的 task_timeout_min。
+  farm_min_per_fight: 3
+  farm_timeout_margin_min: 15

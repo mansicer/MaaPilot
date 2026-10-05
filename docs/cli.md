@@ -495,7 +495,10 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
 （程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
-每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）；超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
+每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。刷理智（`farm`）的时限按理智算：先读理智（`private/state/sanity.json` 1 小时内的直接用，
+没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity` 回首页读；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
+时限 = 次数 × `daily.farm_min_per_fight`（默认 3）+ `daily.farm_timeout_margin_min`（默认 15）分钟；理智超上限（如 358/205）照算。完全读不到理智才用 `task_timeout_min`。
+算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
 
 `daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`（权限"询问"）：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行：
 
