@@ -18,6 +18,30 @@ from maapilot.tools import common
 TOKEN_HINT = "请用户在终端里跑 maapilot skland token（按提示粘贴鹰角账号 token），agent 不要代办"
 
 
+def token_guide() -> str:
+    """`skland token` 的完整步骤：--help 和终端提示里都显示这一段。"""
+    from maapilot.crew.skland import TOKEN_PAGE
+    return f"""怎么拿到鹰角账号 token（大约 1 分钟）：
+
+  1. 用浏览器打开 https://user.hypergryph.com/login ，用你玩明日方舟的鹰角账号登录
+     （手机号 + 验证码或密码）。角色要在森空岛里绑定过（打开森空岛 App 能看到你的明日方舟角色就行）。
+  2. 登录后，在同一个浏览器里打开：
+       {TOKEN_PAGE}
+     页面上是一段文字，类似：
+       {{"code":0,"data":{{"content":"一长串字母数字"}},"msg":"接口调用成功"}}
+     如果 code 不是 0、或者提示未登录，说明第 1 步没登录成功，回去重新登录。
+  3. 复制 "content" 后面引号里的那一长串（不含引号）。整页全选复制也可以，程序会自己挑出来。
+  4. 回到终端，在提示 token: 后面粘贴，按回车。粘贴的内容不会显示在屏幕上，这是正常的。
+  5. 程序会用它登录一次森空岛、找到你的明日方舟角色：成功会显示角色名和服务器，token 才会保存。
+     绑了好几个角色时，按提示加 --uid <角色 uid> 再跑一次。
+
+注意：
+  - token 相当于你账号的登录凭证，只保存在本机 private/skland.json（只有你自己能读），
+    不会出现在任何输出和日志里。不要把它发给别人，也不要粘贴到和 agent 的对话里。
+  - 在官网退出登录、改密码后，token 可能失效；以后提示 token 过期时，照上面的步骤再做一遍。
+  - 这条命令只能你自己在终端里运行（在仓库目录下：.venv/bin/maapilot skland token）。"""
+
+
 def store_path():
     return paths.PRIVATE / "skland.json"
 
@@ -85,8 +109,7 @@ def _record(store: dict, ok: bool, error: CliError | None = None) -> None:
 def cmd_token(args):
     from maapilot.crew import skland
     if sys.stdin.isatty():
-        print("登录鹰角官网后打开 " + skland.TOKEN_PAGE + "，复制 data.content 的值粘贴到这里（不显示）：",
-              file=sys.stderr, flush=True)
+        print(token_guide() + "\n", file=sys.stderr, flush=True)
         raw = getpass.getpass("token: ", stream=sys.stderr)
     else:
         raw = sys.stdin.read()
@@ -191,7 +214,10 @@ def cmd_state(args):
 def register(sub) -> None:
     g = sub.add_parser("skland", help="森空岛：保存 token（用户自己在终端里跑）、看状态")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
-    p = gs.add_parser("token", help="保存鹰角账号 token（从标准输入读，终端里不显示；会先试一次）")
+    import argparse
+    p = gs.add_parser("token", help="保存鹰角账号 token（从标准输入读，终端里不显示；会先试一次）",
+                      description="保存鹰角账号 token，之后 maapilot state skland 就能从森空岛读干员练度。\n\n" + token_guide(),
+                      formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--uid", help="绑了好几个明日方舟角色时指定用哪个")
     p.set_defaults(func=cmd_token, command="skland token")
     p = gs.add_parser("status", help="接了没有、上次读成没成、token 过期没有（不显示 token）")
