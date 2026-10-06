@@ -86,6 +86,17 @@ def _activity_names() -> dict[str, str]:
     return {z: info[a]["name"] for z, a in at.get("zoneToActivity", {}).items() if a in info and info[a].get("name")}
 
 
+def _chapter(code: str) -> str:
+    return code.split("-", 1)[0]
+
+
+@lru_cache(maxsize=1)
+def _tough_chapters() -> frozenset[str]:
+    """有磨难难度的主线章节号（"10"…）。"""
+    return frozenset(_chapter(s.get("code") or "") for s in _stage_table().values()
+                     if s.get("stageType") in ("MAIN", "SUB") and s.get("diffGroup") == "TOUGH")
+
+
 def _is_primary(s: dict) -> bool:
     """同一编号的多份里，"正常"那份：普通难度、非简单/磨难、非突袭/六星变体。"""
     sid = s["stageId"]
@@ -154,8 +165,8 @@ def _nav(s: dict, events=None, at=None) -> tuple[str, str | None]:
         return "not_navigable", None                      # 突袭/六星/简单模式/教程；磨难（tough_）走 -HARD
     if typ in ("MAIN", "SUB"):
         grp = s.get("diffGroup")
-        if grp == "NORMAL":
-            return "main", f"{code}-NORMAL"
+        if grp == "NORMAL":                               # MAA 只在有磨难的章节认 -NORMAL（第 9 章只有简单 / 标准，带了会报错）
+            return "main", f"{code}-NORMAL" if _chapter(code) in _tough_chapters() else code
         if grp == "TOUGH":
             return "main", f"{code}-HARD"
         return "main", code

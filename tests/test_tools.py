@@ -601,3 +601,12 @@ def test_claude_trusted_reads_config(tmp_path, monkeypatch):
     assert claude_trusted(tmp_path / "repo") is True                      # 上级目录信任也算
     (tmp_path / ".claude.json").write_text(json.dumps({"projects": {}}))
     assert claude_trusted(tmp_path / "repo") is False
+
+
+@needs_data
+def test_main_stage_difficulty_suffix_only_where_tough_exists():
+    """MAA 只在有磨难的章节认 `-NORMAL`；第 9 章只有简单 / 标准，带了后缀 MAA 直接拒绝（"Cannot set stage 9-16-NORMAL"）。"""
+    from maapilot.knowledge import stages
+    assert stages.resolve_stage("9-16").maa_value == "9-16"
+    assert stages.resolve_stage("10-12").maa_value == "10-12-NORMAL"
+    assert stages.resolve_stage("1-7").maa_value == "1-7"
