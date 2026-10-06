@@ -182,11 +182,17 @@ def choose_role(roles: list[dict], server: str | None) -> dict:
 
 # --- 角色数据 → box.json --------------------------------------------------------------------------------------------
 
+def _potential(rank) -> int | None:
+    return rank + 1 if isinstance(rank, int) else None
+
+
 def to_box(info: dict, names: dict | None = None) -> dict:
-    """player/info 的 data → {名: {...}}：精英化、等级、潜能、稀有度（1–6）、技能等级、各技能专精、模组。
-    names：游戏数据表给的 {char_id: 名}、{equip_id: 模组名}（缺的用接口自带的 charInfoMap / equipmentInfoMap，再缺就留 id）。"""
+    """player/info 的 data → {名: {...}}：精英化、等级、潜能（1–6，同 MAA；接口的 potentialRank 从 0 数）、稀有度（1–6）、
+    技能等级、各技能专精、模组。names：游戏数据表给的 {char_id: 名}、{equip_id: 模组名}、{skill_id: 技能名}
+    （缺的用接口自带的 charInfoMap / equipmentInfoMap，再缺就留 id；技能名缺就是 null）。"""
     names = names or {}
     char_names, equip_names = names.get("chars") or {}, names.get("equips") or {}
+    skill_names = names.get("skills") or {}
     cinfo, einfo = info.get("charInfoMap") or {}, info.get("equipmentInfoMap") or {}
     ops: dict[str, dict] = {}
     for c in info.get("chars") or []:
@@ -197,9 +203,10 @@ def to_box(info: dict, names: dict | None = None) -> dict:
         equipped = c.get("defaultEquipId") or ""
         ops[name] = {
             "id": cid, "rarity": (int(rarity) + 1) if isinstance(rarity, int) else names.get("rarity", {}).get(cid),
-            "elite": c.get("evolvePhase"), "level": c.get("level"), "potential": c.get("potentialRank"),
+            "elite": c.get("evolvePhase"), "level": c.get("level"), "potential": _potential(c.get("potentialRank")),
             "skill_level": c.get("mainSkillLvl"),
-            "skills": [{"index": i + 1, "id": s.get("id"), "mastery": s.get("specializeLevel", 0)}
+            "skills": [{"index": i + 1, "id": s.get("id"), "name": skill_names.get(s.get("id")),
+                        "mastery": s.get("specializeLevel", 0)}
                        for i, s in enumerate(c.get("skills") or [])],
             "modules": [{"id": e.get("id"), "name": equip_names.get(e.get("id")) or (einfo.get(e.get("id")) or {}).get("name")
                          or e.get("id"), "level": e.get("level"), "equipped": e.get("id") == equipped}

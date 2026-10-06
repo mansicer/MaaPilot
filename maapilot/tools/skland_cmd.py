@@ -184,7 +184,7 @@ def cmd_status(args):
 # --- state skland ----------------------------------------------------------------------------------------------------
 
 def _local_names() -> dict:
-    out: dict = {"chars": {}, "rarity": {}, "equips": {}}
+    out: dict = {"chars": {}, "rarity": {}, "equips": {}, "skills": {}}
     try:
         from maapilot.knowledge import gamedata
         for cid, c in gamedata._character_table().items():
@@ -192,6 +192,7 @@ def _local_names() -> dict:
             out["rarity"][cid] = gamedata._rarity_index(c) + 1
         ue = gamedata._uniequip() or {}
         out["equips"] = {k: v.get("uniEquipName") for k, v in (ue.get("equipDict") or {}).items()}
+        out["skills"] = gamedata.skill_names()
     except Exception:                                   # noqa: BLE001 - 没有数据表就用接口自带的名字 / id
         pass
     return out

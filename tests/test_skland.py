@@ -144,14 +144,16 @@ def test_choose_role():
 
 
 def test_to_box_and_sanity():
-    names = {"chars": {"char_002_amiya": "阿米娅"}, "equips": {"uniequip_001_amiya": "证章"}}
+    names = {"chars": {"char_002_amiya": "阿米娅"}, "equips": {"uniequip_001_amiya": "证章"},
+             "skills": {"skchr_amiya_2": "精神爆发"}}
     ops = skland.to_box(INFO, names)
     a = ops["阿米娅"]
-    assert a["elite"] == 2 and a["level"] == 80 and a["potential"] == 5 and a["rarity"] == 5 and a["skill_level"] == 7
-    assert [s["mastery"] for s in a["skills"]] == [0, 3, 1] and a["skills"][1] == {"index": 2, "id": "skchr_amiya_2", "mastery": 3}
+    assert a["elite"] == 2 and a["level"] == 80 and a["potential"] == 6 and a["rarity"] == 5 and a["skill_level"] == 7
+    assert [s["mastery"] for s in a["skills"]] == [0, 3, 1] and a["skills"][1] == {"index": 2, "id": "skchr_amiya_2", "name": "精神爆发", "mastery": 3}
+    assert a["skills"][0]["name"] is None
     assert a["modules"] == [{"id": "uniequip_001_amiya", "name": "证章", "level": 1, "equipped": False},
                             {"id": "uniequip_002_amiya", "name": "接口给的模组名", "level": 3, "equipped": True}]
-    assert ops["新干员"]["rarity"] == 6 and ops["新干员"]["modules"] == []
+    assert ops["新干员"]["rarity"] == 6 and ops["新干员"]["modules"] == [] and ops["新干员"]["potential"] == 1
     assert skland.sanity_of(INFO, now_ts=1000 + 360 * 10) == {"current": 110, "max": 135}
     assert skland.sanity_of({"status": {"ap": {"current": 358, "max": 205, "lastApAddTime": 0}}}, 10 ** 9)["current"] == 358
 

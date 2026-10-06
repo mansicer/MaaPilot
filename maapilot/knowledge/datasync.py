@@ -23,6 +23,7 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "character_table", "item_table", "gamedata_const", "building_data",
     "stage_table", "zone_table", "uniequip_table", "activity_table",
 )
+OPTIONAL_TABLES: tuple[str, ...] = ("skill_table",)   # 同步时一起下，缺了不算环境问题（只用来显示技能名）
 REPO = "Kengxxiao/ArknightsGameData"
 EXCEL_DIR = "zh_CN/gamedata/excel"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/master/{EXCEL_DIR}"
@@ -33,7 +34,7 @@ LIVE_OK = ("ok", "skipped")                                  # 其余值是错�
 
 
 def table_files() -> list[str]:
-    return [f"{t}.json" for t in REQUIRED_TABLES]
+    return [f"{t}.json" for t in REQUIRED_TABLES + OPTIONAL_TABLES]
 
 
 def source_url(file: str) -> str:

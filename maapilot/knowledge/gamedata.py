@@ -51,6 +51,16 @@ def _uniequip() -> dict | None:
 
 
 @lru_cache(maxsize=1)
+def skill_names() -> dict[str, str]:
+    """{skill_id: 技能名}（data/skill_table.json；没有这张表就是空的）。"""
+    p = paths.DATA / "skill_table.json"
+    if not p.exists():
+        return {}
+    table = json.load(open(p, encoding="utf-8"))
+    return {sid: s["levels"][0]["name"] for sid, s in table.items() if s.get("levels")}
+
+
+@lru_cache(maxsize=1)
 def _by_name() -> dict[str, dict]:
     return {c["name"]: c for c in _character_table().values()}
 

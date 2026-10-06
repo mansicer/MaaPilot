@@ -274,8 +274,8 @@ token 怎么来：在浏览器登录鹰角官网（https://user.hypergryph.com/l
 `sign = md5(hmac_sha256(签名密钥, 路径 + query + 时间戳 + {"platform","timestamp","dId","vName"} 的紧凑 JSON))`，时间戳按服务器的 `Date` 校准。
 
 `state skland` 的 `data`：`{at, source: "skland", uid, operators, with_modules, mastered, sanity: {current, max}}`（`--op` 另给这些干员的 `operators_detail` 和 `missing`）。
-`box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential, skill_level, skills: [{index, id, mastery}], modules: [{id, name, level, equipped}]}`
-（模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能只有 id）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
+`box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential(1–6), skill_level, skills: [{index, id, name, mastery}], modules: [{id, name, level, equipped}]}`
+（潜能同 MAA 从 1 数，接口的 `potentialRank` 从 0 数、读进来加 1；模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能名取 `skill_table`，没有就是 null）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
 token 失效 → 退出码 3 `token_invalid`（请用户重新取 token、在终端跑 `skland token`）；接口、网络、设备号 → 退出码 1 `skland_api` / `skland_network` / `skland_device`。
 token 不出现在任何输出、日志、报错里；agent 读不了也改不了 `private/skland.json`（权限设置里拒绝）。
 
