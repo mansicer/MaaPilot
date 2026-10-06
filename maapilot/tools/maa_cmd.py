@@ -249,12 +249,31 @@ def _copilot_argv(opts: dict) -> tuple[list[str], dict]:
             raise CliError("not_found", f"作业文件不存在：{p}", exit=BAD_REQUEST)
         uri = str(p.resolve())
     argv = ["copilot", uri]
+    info: dict = {"uri": uri, "formation": bool(opts.get("formation"))}
     if opts.get("formation"):
         argv.append("--formation")
+    if opts.get("formation_index"):
+        argv += ["--formation-index", str(int(opts["formation_index"]))]
+        info["formation_index"] = int(opts["formation_index"])
+    if opts.get("add_trust"):
+        argv.append("--add-trust")
+        info["add_trust"] = True
+    if opts.get("ignore_requirements"):
+        argv.append("--ignore-requirements")
+        info["ignore_requirements"] = True
+    if opts.get("support"):
+        argv += ["--support-unit-usage", str(int(opts["support"]))]
+        info["support"] = int(opts["support"])
+    if opts.get("support_name"):
+        argv += ["--support-unit-name", opts["support_name"]]
+        info["support_name"] = opts["support_name"]
+    if opts.get("raid") and opts["raid"] != "normal":
+        argv += ["--raid", opts["raid"]]
+        info["raid"] = opts["raid"]
     if opts.get("loop_times"):
         argv += ["--loop-times", str(int(opts["loop_times"]))]
     # 不加 --use-sanity-potion：作业不用理智液
-    return argv, {"uri": uri, "formation": bool(opts.get("formation"))}
+    return argv, info
 
 
 def go_home() -> bool | None:
@@ -348,7 +367,8 @@ def run(task: str, **opts) -> dict:
 @common.logged
 def cmd(args):
     opts = {k: getattr(args, k, None) for k in ("stage", "times", "medicine", "expiring_medicine", "params",
-                                                   "formation", "uri", "loop_times")}
+                                                   "formation", "uri", "loop_times", "formation_index", "add_trust",
+                                                   "ignore_requirements", "support", "support_name", "raid")}
     with common.device(f"maa {args.task}", job=f"maa {args.task}") as lk:
         with lk.keepalive():
             return run(args.task, **opts)
@@ -384,5 +404,12 @@ def register(sub) -> None:
     p = gs.add_parser("copilot", help="作业（自动战斗）")
     p.add_argument("uri", help="maa://<编号> 或本地 JSON 文件")
     p.add_argument("--formation", action="store_true", help="自动编队")
+    p.add_argument("--formation-index", type=int, choices=range(1, 5), help="用第几个编队（1–4；默认当前编队）")
+    p.add_argument("--add-trust", action="store_true", help="自动编队时空位按信赖从低到高补人")
+    p.add_argument("--ignore-requirements", action="store_true", help="不管作业写的练度要求，照样编队开打")
+    p.add_argument("--support", type=int, choices=range(0, 4), metavar="0-3",
+                   help="助战：0 不用（默认）；1 只缺一人时借；2 缺一人时借，否则借 --support-name；3 缺一人时借，否则随便借")
+    p.add_argument("--support-name", help="借哪个助战干员")
+    p.add_argument("--raid", choices=("normal", "raid", "both"), help="normal 普通（默认）/ raid 突袭 / both 各打一次")
     p.add_argument("--loop-times", type=int, help="重复几次")
     p.set_defaults(func=cmd, command="maa copilot", task="copilot")

@@ -121,6 +121,22 @@ def test_fight_params_default_zero(cfg):
     assert p["stage"] == "Annihilation" and p["times"] == 1 and p["medicine"] == 1 and p["stone"] == 0
 
 
+def test_copilot_argv_flags():
+    from maapilot.tools import maa_cmd
+    argv, info = maa_cmd._copilot_argv({"uri": "maa://123", "formation": True})
+    assert argv == ["copilot", "maa://123", "--formation"] and info == {"uri": "maa://123", "formation": True}
+    argv, info = maa_cmd._copilot_argv({"uri": "maa://123", "formation": True, "formation_index": 2, "add_trust": True,
+                                        "ignore_requirements": True, "support": 2, "support_name": "棘刺",
+                                        "raid": "raid", "loop_times": 3})
+    assert argv == ["copilot", "maa://123", "--formation", "--formation-index", "2", "--add-trust",
+                    "--ignore-requirements", "--support-unit-usage", "2", "--support-unit-name", "棘刺",
+                    "--raid", "raid", "--loop-times", "3"]
+    assert info["ignore_requirements"] is True and info["support"] == 2 and info["raid"] == "raid"
+    assert "--use-sanity-potion" not in argv
+    argv, _ = maa_cmd._copilot_argv({"uri": "maa://123", "raid": "normal", "support": 0})
+    assert argv == ["copilot", "maa://123"]
+
+
 @needs_data
 def test_fight_not_open(cfg, monkeypatch):
     from maapilot import config
