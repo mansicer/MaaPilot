@@ -48,11 +48,14 @@
 | `data …` | 否（`sync` 联网） | 放行 | A |
 | `calc need / craft / stages` | 否 | 放行 | A |
 | `lock status` / `lock release` | 否 | 放行 / **询问** | A |
+| `news list / show / told` | 否（`list` 联网） | 放行 | A |
+| `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
+| `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
 | `daily watch`、`report seen` | 否（只读 / 记账） | 放行 | B |
 | `reset [--dry-run] [--memory]` | 否 | **询问** | B |
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
-| `goals list / add / update / remove` | 否 | 放行 | B |
+| `goals list / add / update / remove / expire` | 否 | 放行 | B |
 | `op upgrade / mastery`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
 | `daily schedule / unschedule` | 否（改 crontab） | **询问** | B |
@@ -117,12 +120,16 @@
  "next": "setup",
  "unseen_problems": [{"run_id": "20261004-1640", "started_at": "…", "status": "stopped", "report": "…",
                       "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "…"]}],
+ "goals": [{"title": "昨日海", "object": "活动 昨日海", "deadline": "2026-10-30T03:59+08:00", "days_left": 20.5}],
+ "news": {"at": "…", "lines": ["进行中：昨日海（到 10月30日 03:59）"], "due": ["6774:2026-10-09T12:00:00+08:00"]},
  "lines": ["MaaPilot 还没设置：用户一开口就进入 maapilot-setup（…）"]}
 ```
 
 `next`：`"setup"`（没有 `setup.json`，用户一开口 agent 就进入 `maapilot-setup`）、`"guard"`（对账停机中，先告诉用户）或 `null`。
-`lines` 是给会话开头看的 3–5 行中文摘要。`last_daily` 取 `private/reports/` 里最新的 `.json`（读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
-`goals_active` 用 `maapilot.flows.goals.active_count()`。
+`lines` 是给会话开头看的几行中文摘要。`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（`seen.json` 不算；读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
+`goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
+让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有官服、有缓存时才有，否则 `null`）：
+`lines` 同 `news list`，`due` 是到点还没告诉用户的时间点的 key（`lines` 里也写一行，agent 按 `maapilot-events` 去说）。
 
 ## screen —— 截图与识别（只读，不拿锁）
 
@@ -279,6 +286,73 @@ token 怎么来：在浏览器登录鹰角官网（https://user.hypergryph.com/l
 token 失效 → 退出码 3 `token_invalid`（请用户重新取 token、在终端跑 `skland token`）；接口、网络、设备号 → 退出码 1 `skland_api` / `skland_network` / `skland_device`。
 token 不出现在任何输出、日志、报错里；agent 读不了也改不了 `private/skland.json`（权限设置里拒绝）。
 
+## news —— 官方日程（只有官服，不碰模拟器）
+
+官服游戏内公告（游戏里"公告"那一栏，不用登录：`ak-webview.hypergryph.com/api/game/bulletinList`、`bulletin/<cid>`）里的停机维护和活动（`maapilot/knowledge/news.py`）。
+程序只做可靠的事：拉下来、去掉 HTML、按固定写法抽出时间段（`10月09日 12:00 - 10月30日 03:59`、`维护时间：2026年10月09日06:00 ~ 12:00`；没写年份取发布那年，止只写时刻算同一天），
+分成 `活动`（标题有 活动即将开启 / 活动开启 / SideStory / 限时活动）、`维护`（标题有 维护 / 闪断 / 版本更新，或正文开头写了停机维护、闪断更新）、`其他`（只存标题）。
+只看最近 30 天发的公告；抽不出的时间由 agent 读全文自己看。缓存 `private/state/news.json`：`{at, items, told: {<key>: 时间}}`，超过 6 小时算旧。
+
+| 命令 | 做什么 |
+|---|---|
+| `news list [--refresh] [--days N]` | 缓存旧了（或 `--refresh`）先重拉：拉不到而有缓存就用缓存（`refresh_error` 写原因），没缓存退出码 1（`network`）。`--days`：`upcoming` 看几天（默认 3）。`server` 不是官服退出码 2（`unsupported_server`） |
+| `news show <cid>` | 一条公告的全文（`其他` 类现拉）。缓存里没有退出码 2（`not_found`，先 `list --refresh`），拉不到退出码 1（`network`） |
+| `news told <key>…` | 这些时间点已经告诉过用户（记进 `told`）：`daily watch`、启动检查不再因为它们提醒。`{told, due}`；不认识的 key 退出码 2（`unknown_event`） |
+
+```json
+// news list
+{"at": "2026-10-09T16:23:29+08:00", "refresh_error": null,
+ "maintenance_now": {"cid": "5699", "title": "…", "start": "…", "end": "…", "forced_update": true},   // 不在维护时段为 null
+ "upcoming": [{"key": "5699:维护开始", "at": "…", "what": "维护开始", "cid": "5699", "title": "…", "forced_update": true, "end": "…"}],
+ "due": [{"key": "6774:2026-10-09T12:00:00+08:00", "at": "…", "what": "开始", "cid": "6774", "title": "…", "label": "关卡", "end": "…"}],
+ "lines": ["10月9日 12:00 开始：昨日海", "进行中：昨日海（到 10月30日 03:59）"],
+ "items": [{"cid": "6774", "title": "…", "kind": "活动", "published": "2026-10-08", "windows": [{"label": "…", "start": "…", "end": "…"}]},
+           {"cid": "5699", "title": "…", "kind": "维护", "published": "…", "windows": [...], "maintenance": {"label", "start", "end"}, "forced_update": true}],
+ "others": ["…其他公告的标题…"]}
+```
+
+- **时间点**（`upcoming` / `due` 的每一项）：维护公告给 `维护开始`、`维护结束`（key `<cid>:维护开始` / `<cid>:维护结束`；维护时段取标签带"维护"的那段，没有就取第一段）；
+  活动公告每个开始时刻一个 `开始`（key `<cid>:<开始时刻>`；同一刻开始的几段算一个，`end` 取最长的）。`forced_update`：正文写了强制更新 / 重新下载和安装。
+- `upcoming`：接下来 `--days` 天内的时间点。`due`：最近 24 小时内到点、还没 `told` 的 `维护结束` / 活动 `开始`（会话里的 agent 该按 `maapilot-events` 去跟用户说了）。
+- `maintenance_now`：现在在不在某条维护公告的维护时段里。`lines`：正在维护、接下来几天的维护和活动开始、进行中的活动，给启动检查和转述用。
+- `daily run` 开头（缓存旧了重拉、维护中不跑）、`daily watch`（`due` 不空就结束）、`doctor --brief`（只读缓存）都用这份缓存。
+
+## game —— 游戏客户端版本与更新（只有官服）
+
+| 命令 | 做什么 |
+|---|---|
+| `game version` | 装着的版本（`adb shell dumpsys package <包名>`）和官网最新版（跟随 `https://ak.hypergryph.com/downloads/android_lastest` 的跳转，只请求 1 个字节，不下载安装包）。只读，**不拿锁** |
+| `game update [--download-only] [--keep]` | 要更新时：下载安装包到 `private/cache/game/`（断点续传，先写 `.part`；已有完整的同名包直接用），**下载不拿锁**（十几分钟，不挡日常）；再拿模拟器锁 `am force-stop` 关游戏、`adb install -r` 覆盖安装（账号数据不丢）、重读版本核对。不启动游戏：第一次启动由 agent `maa startup` 做（资源下载、公告、用户协议弹窗）。`--download-only` 只下载、不拿锁；`--keep` 装完留着安装包（默认装完删掉缓存里的安装包和 `.part`） |
+
+```json
+// game version
+{"installed": {"version": "2.7.71", "code": 123, "updated_at": "2026-09-20 10:00:00"},   // 没装为 null
+ "latest": {"version": "2.7.81", "url": "https://…/arknights-hg-2781.apk", "size": 2147483648},
+ "update_needed": true,          // 比不出为 null
+ "accept_terms": null}           // config 的 game.accept_terms
+// game update
+{"updated": true, "from": "2.7.71", "to": "2.7.81", "apk_bytes": 2147483648, "duration_s": 812.3}
+{"updated": false, "reason": "已经是最新版 2.7.81", "from": "2.7.81", "to": "2.7.81"}
+{"updated": false, "reason": "只下载，没有安装", "from": "…", "to": "…", "apk": "private/cache/game/…apk", "apk_bytes": …, "duration_s": …}
+```
+
+版本号从安装包文件名来（`arknights-hg-2781.apk` → `2.7.81`），按数字逐段比。下载地址跳转后只认 https 的 `hypergryph.com`、`hycdn.cn`（及子域名）。
+
+| error.code | 退出码 | 什么情况 |
+|---|---|---|
+| `unsupported_server` | 2 | `server` 不是官服（请用户自己更新） |
+| `adb_failed` | 5 | adb 读不了版本、关不了游戏（`doctor`）；没配置、没填地址同样退出码 5 |
+| `network` | 1 | 连不上官网、下载失败或中断、下载中安装包大小变了（官网刚发新版）；再跑一次会接着下 |
+| `unexpected_download` | 1 | 下载地址跳到别的域名：不下载，告诉用户 |
+| `version_unknown` | 1 | 比不出要不要更新（`data` 同 `version`） |
+| `disk_full` | 3 | 电脑磁盘不够（还要下的 + 1 GB 余量；`data.free_bytes`、`need_bytes`、`apk_bytes`）：请用户腾空间 |
+| `download_incomplete` / `bad_apk` | 1 | 下得不全（再跑接着下）；下下来的不是 zip（已删） |
+| `install_failed` | 1 | `adb install` 没成（`data.reason` 是 `INSTALL_FAILED_*`、`adb_output`、`apk`；`hint` 按原因给：模拟器存储不够、签名不一致、版本降级、CPU 架构）；安装包留着 |
+| `verify_failed` | 1 | 装完读到的版本不对 |
+| `busy` | 4 | 安装时模拟器被占用（下载好的包留着，稍后再跑） |
+
+`daily run` 开头用同一个 `version_info()` 查版本（见「daily」）。
+
 ## state —— 读账号状态，存快照
 
 | 命令 | 做什么 | 快照 |
@@ -370,28 +444,40 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 | 命令 | 做什么 |
 |---|---|
 | `goals list [--all]` | goals.md 里的目标（进行中、暂停）；`--all` 另给 `done`（goals-done.md 里的） |
-| `goals add --title <标题> --object <对象> --said <原话> --approved <同意> [--premium 是\|否] [--note <文字>]` | 追加一个目标，状态"进行中"。`--approved` 也可以写成 `--agreed`。`--said` 带日期，如 `把遥练到精2（2026-09-30）`（没写日期就补今天）；`--approved` 如 `2026-09-30 21:40，已报：龙门币约 59 万…`（不以日期开头就在前面补现在的时间）；`--premium` 默认"否" |
-| `goals update <标题> [--status 进行中\|暂停] [--object …] [--approved …] [--premium 是\|否] [--note <文字>] [--rename <新标题>]` | 改固定字段（缺的字段补在最后一个字段后面）；`--note` 在"分解与进展"末尾追加 `- MM-DD：<文字>`（还没有这一块就先加上标题行） |
-| `goals remove <标题> --status 完成\|放弃 --reason <原因>` | 整段挪进 goals-done.md（放在最后），状态改成完成 / 放弃，加一行 `- 结束：<日期> <完成\|放弃>，<原因>` |
+| `goals add --title <标题> --object <对象> --said <原话> --approved <同意> [--premium 是\|否] [--deadline <期限>] [--note <文字>]` | 追加一个目标，状态"进行中"。`--approved` 也可以写成 `--agreed`。`--said` 带日期，如 `把遥练到精2（2026-09-30）`（没写日期就补今天）；`--approved` 如 `2026-09-30 21:40，已报：龙门币约 59 万…`（不以日期开头就在前面补现在的时间）；`--premium` 默认"否"；`--deadline` 写期限（`活动` 目标必填） |
+| `goals update <标题> [--status 进行中\|暂停] [--object …] [--approved …] [--premium 是\|否] [--deadline <期限>\|none] [--note <文字>] [--rename <新标题>]` | 改固定字段（缺的字段补在最后一个字段后面）；`--deadline none`（或空字符串）去掉期限；`--note` 在"分解与进展"末尾追加 `- MM-DD：<文字>`（还没有这一块就先加上标题行） |
+| `goals remove <标题> --status 完成\|放弃 --reason <原因> [--confirmed-by-user]` | 整段挪进 goals-done.md（放在最后），状态改成完成 / 放弃，加一行 `- 结束：<日期> <完成\|放弃>，<原因>（核对结果）`。`--reason` 必填（没写退出码 2 `reason_required`）。完成前先按快照核对（见下） |
+| `goals expire` | 过了期限的目标（进行中、暂停都算）挪进 goals-done.md，状态"到期"，结束行写 `期限 … 已过，自动结束`。`{expired: [...], active}`；`daily run` 开头自动做 |
 
 `<标题>` 精确匹配二级标题，也接受唯一的前缀；找不到或不唯一退出码 2（`unknown_goal` / `ambiguous_goal`）。
-标题重复时 `add` / `update --rename` 退出码 2（`duplicate_goal`）；对象不是 `干员 / 材料 / 关卡 / 其他` 开头退出码 2（`invalid_object`）。
+标题重复时 `add` / `update --rename` 退出码 2（`duplicate_goal`）；对象不是 `干员 / 材料 / 关卡 / 活动 / 其他` 开头退出码 2（`invalid_object`）。
+`--deadline` 写成 `2026-10-30 03:59`（游戏时间 UTC+8，到这一刻到期）或 `2026-10-30`（算到那个游戏日结束，即次日 04:00）；写法不对、日期不存在、已经过了、
+`活动` 目标没写期限都退出码 2（`bad_deadline`）。
+
+**完成前核对**（`remove --status 完成`）：只读 `state/` 快照对照对象。干员：精英化与等级、技能等级、各技能专精、模组逐项比；材料：仓库够不够（同 `calc need` 的 `short`）；
+关卡、活动、其他核对不了。有一项没到 → 退出码 3（`not_achieved`，`data.short` 是 `[{part, target, current}]`、`current`、`depot_at` / `box_at`），不挪：
+只有用户能决定算不算完成，用户说算就加 `--confirmed-by-user` 再跑（结束行记"用户确认：快照里还没到 …"）。核对不了（没快照、快照里没有这一项）不拦，结束行记"没能核对：…"；
+都到了记"已核对快照"。输出多 `verified`（`true` / `false` / `null`；放弃时 `null`）和 `check: {short, why, depot_at, box_at}`。
 
 ```json
 // goals list
 {"goals": [{"title": "遥 精2", "status": "进行中", "object": "干员 遥 → 精2 1级",
             "said": "把遥练到精2（2026-09-30）", "approved": "2026-09-30 21:40，已报：…", "premium": false,
+            "deadline": null, "expired": false,
             "notes": "分解与进展（agent 自由写）：\n- …"}],
  "active": 1,
  "problems": [{"title": "…", "file": "goals.md", "message": "缺少字段：同意"}]}
 // goals add / update / remove
-{"goal": {…同上一项…}, "active": 1}                 // update 另有 "changed": ["状态", "分解与进展"]
+{"goal": {…同上一项…}, "active": 1}                 // update 另有 "changed": ["状态", "分解与进展"]；remove 另有 "verified"、"check"
 ```
 
 `premium` 读不出（不是 是 / 否）时为 `null`，并在 `problems` 里报。goals-done.md 里的目标多一个 `ended`（"结束"那一行）。
+`deadline` 是到期时刻（ISO，到分钟；没写为 `null`），有期限时另有 `days_left`（还剩几天，一位小数）；`expired`：已经过了期限。
+过了期限的目标不算进行中（`active` 不算它，`daily run` 不为它叫 agent），等 `goals expire` 挪走。期限写法不对、`活动` 目标没写期限在 `problems` 里报。
 
 写目标的同意来自对话（用户看过 `calc` 报的数、说了同意），记在"同意"那一行；命令本身不再弹确认。
-程序里 `maapilot.flows.goals.active_goals()` / `active_count()` 给 `daily run`、`doctor --brief` 用。
+程序里 `maapilot.flows.goals.active_goals()` / `active_count()` 给 `daily run`、`doctor --brief` 用；`expire_due()` 是 `goals expire` 的函数版本，
+`snapshot()` / `diff()` 给 `daily run` 比较前后的目标（见「daily」的 `goals_change`）。
 
 ## op / craft —— 快捷操作（碰模拟器）
 
@@ -480,21 +566,31 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 `maapilot daily run [--only <项,…>] [--trigger manual|schedule] [--interactive] [--no-agent]`（碰模拟器，要 20–60 分钟，用 Bash 后台运行）
 
 1. 对账停机中（`private/guard/stop.json` 在）→ 退出码 3（`guard_stop`）。另一个日常在跑 → 退出码 4（`daily_running`）；
-   在无头 agent 里（环境变量 `MAAPILOT_DAILY_RUN`）→ 退出码 2（`nested_daily`）。拿模拟器锁；先 `startup`（配了的话：读仓库要在游戏里），
-   再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）。
-2. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
+   在无头 agent 里（环境变量 `MAAPILOT_DAILY_RUN`）→ 退出码 2（`nested_daily`）。记下目标的快照（结束时比较，见下面 `goals_change`），拿模拟器锁。
+2. 开始前（尽力而为：出错记一条告警，照跑）：
+   - 过了期限的目标挪走（同 `goals expire`，挪走的记在 `goals_expired`）；
+   - 官方公告缓存旧了重拉（见「news」；拉不到用旧缓存）。**正在停机维护**（`maintenance_now`）→ MAA 项、对账都不跑，`status: maintenance`、`ok: true`、
+     `data.maintenance`（`{cid, title, start, end, forced_update}`），退出码 0；定时运行另叫一个不碰模拟器的无头 agent（最长 10 分钟）看看维护对目标的影响，总结进汇报（`tasks` 里的 `maintenance` 一项）；
+   - 游戏版本（同 `game version`，结果在 `game_version: {installed, latest, update_needed}`；查不了照跑）。要更新时：定时运行当场叫无头 agent
+     （`game update` → `maa startup` 处理第一次启动；用户协议弹窗按 `game.accept_terms`；时限同 `recovery_timeout_min`），之后对账、再查一次版本核实，
+     记一项 `game_update`（`version: {from, to}`）；没更新成 → `status: update_failed`、`failed` 里是 `game_update`，后面都不跑（旧客户端进不了游戏），退出码 1（`daily_incomplete`）。
+     会话里（`manual` 或 `--no-agent`）→ 停下交给在场的 agent：退出码 1（`handoff`），`handoff = {task: "game_update", error, rest, version}`，`rest` 是全部还没跑的项；agent 按 `maapilot-events` 更新好再 `daily run --only <rest>`。
+3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）。
+4. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
    - `--trigger schedule`：当场启动无头 `claude -p`（加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
      再 `guard check`，然后接着跑下一项；
    - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
      `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
    - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
-3. 识别干员练度（`box`；接了森空岛先 `state skland`，没成记一条告警、不算失败，再用 `maapilot state box`（继承锁））：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
-   读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 2 步（会话里停下交出、定时里叫 agent，提示里的重跑命令是 `maapilot state box`）；失败不改 `box.json`。
+5. 识别干员练度（`box`；接了森空岛先 `state skland`，没成记一条告警、不算失败，再用 `maapilot state box`（继承锁））：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
+   读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 4 步（会话里停下交出、定时里叫 agent，提示里的重跑命令是 `maapilot state box`）；失败不改 `box.json`。
    放在刷理智、目标部分之前，让它们看到今天的练度。
-4. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
+6. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 `claude -p`（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
    `manual` 时交回在场的 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
-   agent 做完目标部分自己 `maa award`、`guard check`、`report write <run_id> --append …`。没有进行中的目标 → `maa fight <default_stage>`（失败同第 2 步）。
-5. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
+   agent 做完目标部分自己 `maa award`、`guard check`、`report write <run_id> --append …`。没有进行中的目标 → `maa fight <default_stage>`（失败同第 4 步）。
+   定时运行里第 2 步有到期挪走的目标：做目标部分的 agent 顺带看（提示里列出）；没有它时另叫一个短的无头 agent（最长 15 分钟，不刷理智、不花东西、不改目标）
+   看看还有没有没做完的（活动商店没换完之类），总结进汇报（`tasks` 里 `goals` 一项，`expired_only: true`），之后对账。
+7. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
 剿灭在一周里连续 2 次没做成（接管也没救回来，多半是还不能代理）→ 这周的日常不再打（`skipped`），汇报里告警；下周一 04:00 清零。
@@ -513,11 +609,21 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
            {"task": "goals", "ok": true, "agent": {…}}],
  "failed": [], "goals_active": 0, "goals_pending": false, "farm": {"stage": "1-7", "times_done": 12, …},
  "depot_change": [{"id": "4001", "name": "龙门币", "delta": 12000}],
- "guard": {"ok": true}, "alerts": [], "agents": 1, "report": "private/reports/2026-09-30-0440.md"}
+ "guard": {"ok": true}, "alerts": [], "agents": 1, "report": "private/reports/2026-09-30-0440.md",
+ "game_version": {"installed": {"version": "2.7.81", …}, "latest": {"version": "2.7.81", …}, "update_needed": false},
+ "goals_expired": [{…同 goals list 的一项…}],                                    // 有到期挪走的才有
+ "goals_change": {"removed": [{"title": "…", "fields": {…}, "done_entry": {"status": "完成", "ended": "…"}}],
+                  "added": [{"title": "…", "fields": {…}}], "changed": [{"title": "…", "field": "deadline", "before": null, "after": "…"}]},
+ "lines": ["9 月 30 日 04:40 的定时日常跑完了，都做成了。", "目标移除：遥 精2（完成，…）"]}
 ```
 
-`status`：`running` / `done` / `stopped`（对账停下）/ `aborted`（没跑完）。`guard.ok` 为 `null` 表示对账命令本身没做成（汇报里告警）。
+`status`：`running` / `done` / `stopped`（对账停下）/ `aborted`（没跑完）/ `handed_off`（停下交给在场的 agent）/ `maintenance`（赶上停机维护，没跑）/
+`update_failed`（游戏没更新成，后面没跑）。`guard.ok` 为 `null` 表示对账命令本身没做成（汇报里告警；`maintenance` 不对账，不算）。
 `depot_change` 来自 guard snapshot / check 顺手更新的 `state/depot.json` 前后两份；读不到为 `null`。
+`goals_change`：结束时（不论怎么结束）把 goals.md 里进行中、暂停的目标和开头的快照比（`fields` 是固定 6 行的原文，`field` 用输出名 `status` / `object` / `deadline`…）；
+没变就没有这个字段。`removed` 的 `done_entry` 是 goals-done.md 里同名那段的状态与结束行，`null` 表示没经过 `goals remove` / 到期就没了；改标题算一删一加。
+汇报里写成「目标变动」一节，`lines` 里也有（目标变动不算问题，但要告诉用户）。
+`lines`：每次都给的几句中文（同 `daily watch` 的 `lines`：怎么结束的、维护时段、目标变动、到期要看的、没做成的项……），agent 照着转述。
 
 无头 agent：`<tools.claude> -p "<提示>" --output-format stream-json --verbose --settings <仓库>/.claude/settings.json --permission-mode default --permission-prompts none`，
 工作目录是仓库根目录（运行时由安装位置推出），显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝），
@@ -546,21 +652,24 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 `daily status`：`{"running": {run_id, step, started_at, …} | null, "last": {run_id, at, ok, status, report} | null,
 "schedule": {"installed": true, "times": [...], "old_entries": [...]}, "next_at": "…"}`。
 
-`daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果。
+`daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果；
+或者等到官方日程到点（维护结束、活动开始，还没 `news told` 的）。
 会话里的 agent 一直在后台挂着一个（`CLAUDE.md`「盯着日常」），结束就告诉用户、`report seen`、再挂一个。每 20 秒看一次汇报（`private/reports/*.json` 的 `status`、`finished_at`）和运行标记；
 只认命令开始之后跑完的（`finished_at` 晚于开始时间）。等着的那次进程没了而汇报还写着 `running` → 当成 `aborted`（`alerts` 里写明）。
+每次也看一眼官方日程（只有官服；有缓存而旧了顺手重拉，没缓存不拉；出错当没有）：`news` 的 `due` 不空 → 退出码 0，
+`data: {kind: "news", due: [时间点…], lines: [...], seen: false}`（时间点同「news」），agent 按 `maapilot-events` 跟用户说、`news told <key>…`、再挂一个。
 默认最多等 110 分钟（Claude Code 的后台 Bash 最长 2 小时），到时退出码 1、`watch_timeout`（`data: {running, next_at}`），agent 再挂一个就行。
 
 ```json
-{"run_id": "20261004-1640", "trigger": "schedule", "started_at": "…", "finished_at": "…", "status": "stopped", "ok": false,
+{"kind": "daily", "run_id": "20261004-1640", "trigger": "schedule", "started_at": "…", "finished_at": "…", "status": "stopped", "ok": false,
  "failed": [{"task": "infrast", "label": "基建", "error": "…", "code": "maa_failed"}], "alerts": [],
  "guard_stop": {"reason": "日常之后发现合成玉 / 源石有没经同意的减少", "before": {…}, "after": {…}, "unexplained": {"orundum": -866}},
  "report": "private/reports/2026-10-04-1640.md", "seen": false,
  "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "对账：…（合成玉 -866）"]}
 ```
 
-顺利（`status: done`、`ok` 不是 `false`、没有 `failed`）退出码 0；有问题（没做成的项、对账停下、没跑完、交给 agent）退出码 1、`daily_problem`，`data` 同上。
-`handoff` 只在停下交给 agent 时有；`guard_stop` 只在 `stopped` 时有。`seen`：这次已经 `report seen` 过（告诉过用户）。
+顺利（`status: done`、`ok` 不是 `false`、没有 `failed`）和赶上维护（`maintenance`，不算问题）退出码 0；有问题（没做成的项、对账停下、没跑完、交给 agent、游戏没更新成）退出码 1、`daily_problem`，`data` 同上。
+`handoff` 只在停下交给 agent 时有；`guard_stop` 只在 `stopped` 时有；`maintenance` 只在赶上维护时有。`seen`：这次已经 `report seen` 过（告诉过用户）。
 程序里 `maapilot.flows.daily.schedule_info()`、`maapilot.flows.report.latest()` 给 `doctor` 用。
 
 ## reset —— 从头设置
@@ -601,7 +710,8 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 | `report write <run_id> --append <文字>` | 在这次运行的汇报后面追加一段"补充"（运行还没结束也可以，结束时保留） |
 | `report seen [<run_id>]` | 记下这次运行的结果已经告诉过用户（默认最近一次）：写进 `private/reports/seen.json`（`{run_id: 时间}`）。`{"run_id", "seen_at"}`；没有这次运行退出码 2（`unknown_run`） |
 
-"有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
+汇报的 Markdown：开头一句（按 `status`）、「做了什么」、「仓库变化」（维护没跑时不写）、「目标变动」（有 `goals_change` 或 `goals_expired` 时）、「要注意」（告警）、「补充」（`report write`）。
+"有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的、赶上维护的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
 `doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
 
 ---
@@ -616,7 +726,8 @@ private/
   setup.json         setup 完成的标记
   goals.md           进行中的目标
   goals-done.md      完成或放弃的目标
-  state/             depot.json  box.json  sanity.json（最新快照）  annihilation.json（本周剿灭）
+  state/             depot.json  box.json  sanity.json（最新快照）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
+  cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  cron.log
                      daily-<run_id>.jsonl（一次日常的每一步）  agent-<run_id>-<序号>-<项>.jsonl（无头 agent 的输出）
   reports/           <YYYY-MM-DD-HHMM>.md / .json（每次日常的汇报）
@@ -645,6 +756,7 @@ private/
 | `daily.agent_timeout_min` | 做目标部分的无头 agent 最长跑多久（分钟） | `90` |
 | `daily.recovery_timeout_min` | 接管失败项的无头 agent 最长跑多久（分钟） | `30` |
 | `daily.task_timeout_min` | 一个 MAA 日常项最长跑多久（分钟） | `90` |
+| `game.accept_terms` | 游戏更新后弹出《用户协议》《隐私政策》更新时 agent 能不能直接点同意：`null` 还没问过（每次问用户）、`true` 直接点、`false` 每次问；别的值当 `null`（`game version` 的 `accept_terms`） | `null` |
 
 企鹅物流的服务器代码由 `server` 推出（Official/Bilibili → CN，YoStarEN → US，YoStarJP → JP，YoStarKR → KR，txwy → CN）。
 
@@ -660,7 +772,7 @@ setup 最后一步由 agent 用文件工具写：
 
 ### goals.md —— 目标清单
 
-半结构化 Markdown：每个目标一个二级标题，下面**固定 5 行字段**，程序只读这 5 行；再往下是 agent 自由写的"分解与进展"。
+半结构化 Markdown：每个目标一个二级标题，下面**固定 5 行字段**（限时的另有第 6 行"期限"），程序只读这几行；再往下是 agent 自由写的"分解与进展"。
 缺多少、刷几天这类会变的数不存，每次用 `calc` 现算。
 
 ```markdown
@@ -680,12 +792,14 @@ setup 最后一步由 agent 用文件工具写：
 
 - 标题：`## ` 开头的一行，去掉首尾空白；文件里唯一。`## ` 之前的内容（文件说明）原样保留。
 - 固定字段：标题下 `- <键>：<值>` 形式（全角冒号，也接受半角 `:`），键是 `状态`、`对象`、`原话`、`同意`、`花合成玉/源石` 五个，顺序不限；缺字段在 `goals list` 的 `problems` 里报，不报错退出。
-- `状态`：`进行中` / `暂停`（goals-done.md 里是 `完成` / `放弃`）。只有"进行中"算"有进行中的目标"。
+- `期限`（可选，`活动` 目标必填）：`2026-10-30 03:59`（游戏时间 UTC+8，到这一刻到期）或 `2026-10-30`（算到次日 04:00）；后面可以跟括号说明，如 `2026-10-30 03:59（昨日海结束）`。
+  过了期限就"到期"：不算进行中，`goals expire`（`daily run` 开头自动做）把它挪进 goals-done.md。
+- `状态`：`进行中` / `暂停`（goals-done.md 里是 `完成` / `放弃` / `到期`）。只有"进行中"且没过期限的算"有进行中的目标"。
 - `花合成玉/源石`：`是` / `否`。"是"的目标，每次执行到花合成玉、源石的那一步都要再问用户（`guard allow` 仍然弹确认）。
 - 固定字段之后到下一个 `## ` 之前都是"分解与进展"，程序原样保留，只在 `--note` 时往末尾追加一行。
 - 程序改文件时只改动涉及的那一段，其余字节不变；写入用临时文件 + 替换。
 
-goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥已精2` 放在固定字段之后，新挪来的放在文件最后。
+goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥已精2（已核对快照）` 放在固定字段之后，新挪来的放在文件最后。到期的是 `- 结束：2026-10-30 到期，期限 2026-10-30 03:59 已过，自动结束`。
 
 #### 对象的写法
 
@@ -701,9 +815,10 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 | 同一干员多个目标用 `，` 连 | `干员 遥 → 精2 60级，技能 7级，技能3 专3` |
 | `材料 <名> × <N>` | `材料 聚酸酯组 × 10` |
 | `关卡 <编号>`（三星通关） | `关卡 12-17` |
-| `其他 <文字>`（程序算不了的，如模组任务、活动） | `其他 泥岩模组X的模组任务` |
+| `活动 <名>`（限时活动：刷活动商店、活动关三星……，要写期限） | `活动 昨日海` |
+| `其他 <文字>`（程序算不了的，如模组任务） | `其他 泥岩模组X的模组任务` |
 
-`calc need` 对 `关卡` 和 `其他` 退出码 2（`not_computable`），由 agent 自己分解。
+`calc need` 对 `关卡`、`活动` 和 `其他` 退出码 2（`not_computable`），由 agent 自己分解。
 
 ### state/
 
@@ -759,6 +874,11 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
       "Bash(maapilot skland status:*)",
+      "Bash(maapilot news list:*)",
+      "Bash(maapilot news show:*)",
+      "Bash(maapilot news told:*)",
+      "Bash(maapilot game version:*)",
+      "Bash(maapilot game update:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
@@ -805,7 +925,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 }
 ```
 
-- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
+- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`news …` 只联网、写自己的缓存；`game update` 要下载、覆盖安装游戏，
+  但只装官网的包（地址只认官方域名），无头运行里日常要靠它更新，所以都放行。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
 - `reset` 在 **ask** 里：挪走用户的全部设置和数据，用户在确认框里点同意才做；无头运行里一律被拒（命令自己也拒绝）。
 - `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。

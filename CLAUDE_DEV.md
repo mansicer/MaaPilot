@@ -4,6 +4,7 @@
 
 ## 项目
 - 设计：`docs/design.md`；命令契约：`docs/cli.md`。思路是"程序薄、agent 厚"：工具只做可靠的事，做法写进 skill。
+- 大小事情都让用户的 agent 知道：程序遇到情况（出错、维护、到期、跳过）不自己悄悄处理掉，要叫起或告诉 agent，说明发生了什么，由它判断、告诉用户。
 - 代码：`maapilot/tools/`（工具命令）、`maapilot/flows/`（目标、日常、定时）、`maapilot/crew/`（设备与 MAA，旧项目搬来的）、`maapilot/knowledge/`（游戏数据）。
 - 测试：`.venv/bin/python -m pytest -q`，改完要全过。
 
