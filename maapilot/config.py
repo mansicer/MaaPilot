@@ -18,6 +18,7 @@ DEFAULTS = {
     "daily": {"tasks": ["startup", "recruit", "infrast", "mall", "annihilation", "award"],
               "default_stage": "1-7", "params": {}, "agent_timeout_min": 90, "recovery_timeout_min": 30,
               "task_timeout_min": 90},
+    "game": {"accept_terms": None},
 }
 
 
@@ -96,3 +97,11 @@ def tool(name: str, cfg: dict | None = None) -> str:
     """tools.<name>（maa / claude）：定时任务里 PATH 很短，setup 写绝对路径。"""
     cfg = cfg if cfg is not None else load_or_defaults()
     return str((cfg.get("tools") or {}).get(name) or name)
+
+
+def accept_terms(cfg: dict | None = None) -> bool | None:
+    """game.accept_terms：游戏更新后弹出用户协议 / 隐私政策更新时，agent 能不能直接点同意。
+    None（默认）= 还没问过用户，每次都问；True = 可以直接点同意；False = 每次都问。写成别的值当作 None。"""
+    cfg = cfg if cfg is not None else load_or_defaults()
+    v = (cfg.get("game") or {}).get("accept_terms") if isinstance(cfg.get("game"), dict) else None
+    return v if isinstance(v, bool) else None

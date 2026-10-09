@@ -14,6 +14,12 @@ tools:
   maa: maa
   claude: claude
 
+# 游戏客户端更新（maapilot game version / update，目前只支持官服）。
+game:
+  # 更新后弹出《用户协议》《隐私政策》更新时，agent 能不能直接替你点"同意"：
+  #   留空（null）= 还没问过，每次都问你；true = 可以直接点同意；false = 每次都问你
+  accept_terms: null
+
 # 每天定时跑日常的时间（本机时间，24 小时制）。改完要重新 `maapilot daily schedule` 才生效。
 # 游戏每天 04:00 换日，别把时间点放在 04:00 前后几分钟。
 schedule:
