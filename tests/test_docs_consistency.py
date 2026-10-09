@@ -19,7 +19,7 @@ from maapilot import cli
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md")) + [ROOT / "CLAUDE.md", ROOT / "README.md"]
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
-          "daily", "guard", "lock", "reset", "skland")
+          "daily", "guard", "lock", "reset", "skland", "news", "game")
 # 要用户在确认框里点同意的命令（design.md 第 7 节、docs/cli.md 命令总览）
 ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release", "reset")
 # 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）

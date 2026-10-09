@@ -453,7 +453,8 @@ def goals_active() -> int | None:
 
 def last_daily() -> dict | None:
     try:
-        reports = sorted(paths.REPORTS.glob("*.json"))
+        reports = sorted(r for r in paths.REPORTS.glob("*.json")       # 只看运行的汇报（seen.json 不是）
+                         if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", r.stem))
     except OSError:
         return None
     if not reports:
@@ -479,8 +480,34 @@ def brief(probe: Probe | None = None) -> dict:
                                    for p in report.unseen_problems()]
     except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
         data["unseen_problems"] = []
+    data["goals"] = goals_brief()
+    data["news"] = news_brief()
     data["lines"] = brief_lines(data)
     return data
+
+
+def goals_brief() -> list[dict] | None:
+    """进行中的目标（标题、对象、期限）：每次会话一开始 agent 就知道有哪些目标，做别的事时别挪用它们要的材料。"""
+    try:
+        from maapilot.flows.goals import active_goals
+        return [{k: g.get(k) for k in ("title", "object", "deadline", "days_left")} for g in active_goals()]
+    except Exception:                                   # noqa: BLE001 - 目标读不了不影响启动检查（goals_active 那行还在）
+        return None
+
+
+def news_brief() -> dict | None:
+    """缓存里的官方日程（不联网；只有官服）：正在维护、3 天内的维护和活动、到点还没告诉用户的。"""
+    try:
+        from maapilot import config
+        from maapilot.knowledge import news
+        if config.server(config.load_or_defaults()) != "Official":
+            return None
+        d = news.load()
+        if not d.get("items"):
+            return None
+        return {"at": d.get("at"), "lines": news.lines(d), "due": [e["key"] for e in news.due(d)]}
+    except Exception:                                   # noqa: BLE001 - 日程读不了不影响启动检查
+        return None
 
 
 def brief_lines(d: dict) -> list[str]:
@@ -491,7 +518,13 @@ def brief_lines(d: dict) -> list[str]:
         u = d["guard_stop"].get("unexplained") or {}
         what = "、".join(f"{'源石' if k == 'originite' else '合成玉'}少了 {-v}" for k, v in u.items())
         lines.append(f"对账停机中：{what}，没经用户同意。先告诉用户、问清楚。")
-    lines.append(f"进行中的目标：{d['goals_active'] or 0} 个。")
+    goals = d.get("goals")
+    if goals:
+        lines.append(f"进行中的目标 {len(goals)} 个（做别的事前想想会不会用掉它们要的材料）：" + "；".join(
+            f"{g['title']}（{g.get('object') or '?'}" + (f"，还剩 {g['days_left']} 天" if g.get("days_left") is not None else "")
+            + "）" for g in goals))
+    else:
+        lines.append(f"进行中的目标：{d['goals_active'] or 0} 个。")
     ld = d["last_daily"]
     if ld:
         lines.append(f"上次日常：{ld.get('at') or '时间不明'}，{'成功' if ld.get('ok') else '有失败'}。")
@@ -499,6 +532,11 @@ def brief_lines(d: dict) -> list[str]:
         lines.append("还没跑过日常。")
     s = d["schedule"]
     lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
+    n = d.get("news") or {}
+    for l in n.get("lines") or []:
+        lines.append(f"官方日程：{l}")
+    if n.get("due"):
+        lines.append("维护结束 / 活动开始了、还没跟用户说（maapilot-events）：" + "、".join(n["due"]))
     for p in d.get("unseen_problems") or []:
         lines.append("还没告诉用户的问题：" + " ".join(p.get("lines") or [p.get("run_id") or "?"])
                      + f"（运行 {p.get('run_id')}；告诉用户后 report seen {p.get('run_id')}）")

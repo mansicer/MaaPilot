@@ -28,6 +28,8 @@ GROUPS = [
     "maapilot.tools.lock_cmd",
     "maapilot.tools.guard",
     "maapilot.tools.skland_cmd",
+    "maapilot.tools.game",
+    "maapilot.tools.news_cmd",
     "maapilot.flows.goals",
     "maapilot.flows.daily",
     "maapilot.flows.op",

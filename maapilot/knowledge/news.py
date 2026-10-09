@@ -1,0 +1,278 @@
+"""官方游戏内公告（只有官服）：活动预告、停机维护、版本更新。契约见 docs/cli.md「news」。
+
+接口就是游戏里"公告"那一栏（不用登录）：列表 `bulletinList`，全文 `bulletin/<cid>`（HTML）。
+程序只做可靠的事：拉下来、去掉 HTML、按固定写法抽出时间段（"10月09日 12:00 - 10月30日 03:59"、"维护时间：2026年10月09日06:00 ~ 12:00"），
+分成 活动 / 维护 / 其他 三类。正文原样给 agent 读，抽不出的时间由 agent 自己看。
+缓存在 private/state/news.json：`{at, items: [...], told: {<事件键>: 时间}}`。
+"""
+from __future__ import annotations
+
+import html
+import json
+import re
+import urllib.request
+from datetime import datetime, timedelta
+
+from maapilot import paths
+from maapilot.knowledge.calendar import GAME_TZ
+
+LIST_URL = "https://ak-webview.hypergryph.com/api/game/bulletinList?target=Android"
+ITEM_URL = "https://ak-webview.hypergryph.com/api/game/bulletin/{cid}"
+STALE_H = 6                     # 缓存超过几小时，日常开头再拉一次
+RECENT_DAYS = 30                # 只看最近多少天发的公告（常驻的说明类公告很旧，不看）
+
+
+def _path():
+    return paths.STATE / "news.json"
+
+
+# --- 解析（纯函数，测试用） ---------------------------------------------------------------------------------------------
+
+def plain(content: str) -> str:
+    t = re.sub(r"<br\s*/?>|</p>|</div>|</li>", "\n", content or "", flags=re.I)
+    t = html.unescape(re.sub(r"<[^>]+>", "", t))
+    t = re.sub(r"[ \t　]+", " ", t)
+    return re.sub(r"\n\s*\n+", "\n", t).strip()
+
+
+_D = r"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2})\s*[:：]\s*(\d{2})"
+_T = r"(\d{1,2})\s*[:：]\s*(\d{2})"
+# 起 - 止：止可以只写时间（同一天）
+_RANGE = re.compile(_D + r"\s*(?:-|~|～|—|至|到)\s*(?:" + _D + r"|" + _T + r")")
+_LABEL_CUT = re.compile(r"[◆。；;\n】]|开启时间|活动时间|开放时间|维护时间|时间[:：]")
+
+
+def _mk(year: int, mon: int, day: int, h: int, m: int) -> datetime | None:
+    try:
+        return datetime(year, mon, day, h, m, tzinfo=GAME_TZ)
+    except ValueError:
+        return None
+
+
+def windows(text: str, published: datetime) -> list[dict]:
+    """正文里的时间段 [{label, start, end}]（ISO，游戏时区）。年份没写时取发布那年；比发布早半年以上的算下一年。"""
+    out = []
+    for mt in _RANGE.finditer(text):
+        g = mt.groups()
+        y1 = int(g[0]) if g[0] else published.year
+        start = _mk(y1, int(g[1]), int(g[2]), int(g[3]), int(g[4]))
+        if start is None:
+            continue
+        if not g[0] and start < published - timedelta(days=180):
+            start = start.replace(year=start.year + 1)
+        if g[6]:
+            y2 = int(g[5]) if g[5] else start.year
+            end = _mk(y2, int(g[6]), int(g[7]), int(g[8]), int(g[9]))
+            if end is not None and end < start and not g[5]:
+                end = end.replace(year=end.year + 1)
+        else:
+            end = _mk(start.year, start.month, start.day, int(g[10]), int(g[11]))
+            if end is not None and end < start:
+                end += timedelta(days=1)
+        if end is None:
+            continue
+        before = text[max(0, mt.start() - 40):mt.start()]
+        parts = [p.strip(" ：:「」【】") for p in _LABEL_CUT.split(before)]
+        parts = [p for p in parts if p]
+        label = re.sub(r"^[一二三四五六七八九十\d]*[、.．]\s*", "", parts[-1] if parts else "")
+        out.append({"label": label[-24:], "start": start.isoformat(), "end": end.isoformat()})
+    return out
+
+
+def kind_of(title: str, text: str) -> str:
+    """活动 / 维护 / 其他。维护：标题或正文写了停机维护、闪断更新；活动：活动预告、SideStory、限时活动开启。"""
+    t = title.replace("\n", "")
+    if re.search(r"维护|闪断|版本更新", t) or re.search(r"停机维护|闪断更新", text[:300]):
+        return "维护"
+    if re.search(r"活动即将开启|活动开启|SideStory|限时活动", t):     # 只看标题：寻访、通讯的正文里也常有"活动"
+        return "活动"
+    return "其他"
+
+
+def item_from(raw: dict, *, published: datetime | None = None) -> dict:
+    """bulletin/<cid> 的 data → 一条公告。"""
+    title = (raw.get("title") or "").replace("\\n", " ").replace("\n", " ").strip()
+    text = plain(raw.get("content") or "")
+    if published is None:
+        ts = raw.get("updatedAt")
+        published = datetime.fromtimestamp(ts, GAME_TZ) if isinstance(ts, (int, float)) else datetime.now(GAME_TZ)
+    kind = kind_of(title, text)
+    wins = windows(text, published)
+    item = {"cid": str(raw.get("cid")), "title": title, "kind": kind, "published": raw.get("displayTime"),
+            "windows": wins, "text": text}
+    if kind == "维护":
+        mw = [w for w in wins if "维护" in w["label"]] or wins[:1]
+        item["maintenance"] = mw[0] if mw else None
+        item["forced_update"] = bool(re.search(r"强制更新|重新下载和安装", text))
+    return item
+
+
+# --- 联网 --------------------------------------------------------------------------------------------------------------
+
+def _get(url: str, timeout: int = 20) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": "maapilot-news"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.loads(r.read())
+    if d.get("code") not in (0, None):
+        raise RuntimeError(f"公告接口返回 {d.get('code')}：{d.get('msg')}")
+    return d.get("data") or {}
+
+
+def fetch(now: datetime | None = None, get=_get) -> list[dict]:
+    """最近 RECENT_DAYS 天的活动、维护公告（"其他"只留标题）。网络错误直接抛。"""
+    now = now or datetime.now(GAME_TZ)
+    old = load()
+    cache = {i["cid"]: i for i in old.get("items") or []}
+    out = []
+    for b in get(LIST_URL).get("list") or []:
+        try:
+            shown = datetime.strptime(b.get("displayTime") or "", "%Y-%m-%d").replace(tzinfo=GAME_TZ)
+        except ValueError:
+            continue
+        if shown < now - timedelta(days=RECENT_DAYS):
+            continue
+        cid = str(b.get("cid"))
+        title = (b.get("title") or "").replace("\\n", " ").replace("\n", " ").strip()
+        prev = cache.get(cid)
+        if prev and prev.get("updated_at") == b.get("updatedAt"):
+            out.append(prev)
+            continue
+        if kind_of(title, "") == "其他" and b.get("category") not in (1, 2):
+            out.append({"cid": cid, "title": title, "kind": "其他", "published": b.get("displayTime"), "windows": []})
+            continue
+        item = item_from(get(ITEM_URL.format(cid=cid)))
+        item["updated_at"] = b.get("updatedAt")
+        out.append(item)
+    return out
+
+
+# --- 缓存 --------------------------------------------------------------------------------------------------------------
+
+def load() -> dict:
+    try:
+        return json.loads(_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save(d: dict) -> None:
+    p = _path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".part")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
+def refresh(now: datetime | None = None, get=_get) -> dict:
+    now = now or datetime.now(GAME_TZ)
+    d = load()
+    d.update({"at": now.isoformat(timespec="seconds"), "items": fetch(now, get)})
+    save(d)
+    return d
+
+
+def stale(d: dict | None = None, now: datetime | None = None) -> bool:
+    d = load() if d is None else d
+    try:
+        at = datetime.fromisoformat(d["at"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    return (now or datetime.now(GAME_TZ)) - at > timedelta(hours=STALE_H)
+
+
+# --- 从缓存里看日程（不联网） ------------------------------------------------------------------------------------------
+
+def _dt(s: str) -> datetime:
+    return datetime.fromisoformat(s)
+
+
+def maintenance_now(d: dict | None = None, now: datetime | None = None) -> dict | None:
+    """现在是不是在某条维护公告写的维护时段里 → {cid, title, start, end, forced_update} / None。"""
+    d = load() if d is None else d
+    now = now or datetime.now(GAME_TZ)
+    for i in d.get("items") or []:
+        w = i.get("maintenance")
+        if w and _dt(w["start"]) <= now < _dt(w["end"]):
+            return {"cid": i["cid"], "title": i["title"], "start": w["start"], "end": w["end"],
+                    "forced_update": bool(i.get("forced_update"))}
+    return None
+
+
+def events(d: dict | None = None) -> list[dict]:
+    """日程上的"时间点"：维护开始 / 结束、活动（各段）开始 / 结束。每个有唯一的 key（告诉过用户就记在 told 里）。"""
+    d = load() if d is None else d
+    out = []
+    for i in d.get("items") or []:
+        if i.get("kind") == "维护" and i.get("maintenance"):
+            w = i["maintenance"]
+            out.append({"key": f"{i['cid']}:维护开始", "at": w["start"], "what": "维护开始", "cid": i["cid"],
+                        "title": i["title"], "forced_update": bool(i.get("forced_update")), "end": w["end"]})
+            out.append({"key": f"{i['cid']}:维护结束", "at": w["end"], "what": "维护结束", "cid": i["cid"],
+                        "title": i["title"], "forced_update": bool(i.get("forced_update"))})
+        elif i.get("kind") == "活动":
+            starts: dict[str, dict] = {}                   # 同一时刻开始的几段（关卡、商店、寻访）算一个时间点，取最长的那段
+            for w in i.get("windows") or []:
+                e = starts.get(w["start"])
+                if e is None:
+                    starts[w["start"]] = {"key": f"{i['cid']}:{w['start']}", "at": w["start"], "what": "开始",
+                                          "cid": i["cid"], "title": i["title"], "label": w["label"], "end": w["end"]}
+                elif w["end"] > e["end"]:
+                    e["end"] = w["end"]
+            out.extend(starts.values())
+    out.sort(key=lambda e: e["at"])
+    return out
+
+
+def upcoming(d: dict | None = None, now: datetime | None = None, days: float = 3) -> list[dict]:
+    """接下来 `days` 天内的时间点，加上正在进行的维护。"""
+    now = now or datetime.now(GAME_TZ)
+    return [e for e in events(d) if now <= _dt(e["at"]) <= now + timedelta(days=days)]
+
+
+def due(d: dict | None = None, now: datetime | None = None, within_h: float = 24) -> list[dict]:
+    """已经到点（最近 within_h 小时内）、还没告诉过用户的"维护结束 / 活动开始"：会话里的 agent 该去问用户了。"""
+    d = load() if d is None else d
+    now = now or datetime.now(GAME_TZ)
+    told = d.get("told") or {}
+    return [e for e in events(d) if e["what"] in ("维护结束", "开始") and e["key"] not in told
+            and now - timedelta(hours=within_h) <= _dt(e["at"]) <= now]
+
+
+def mark_told(keys: list[str], now: datetime | None = None) -> dict:
+    d = load()
+    told = d.setdefault("told", {})
+    at = (now or datetime.now(GAME_TZ)).isoformat(timespec="seconds")
+    for k in keys:
+        told[k] = at
+    save(d)
+    return told
+
+
+def lines(d: dict | None = None, now: datetime | None = None, days: float = 3) -> list[str]:
+    """给启动检查的几句话：正在维护、3 天内的维护和活动开始、正在进行的活动。"""
+    d = load() if d is None else d
+    now = now or datetime.now(GAME_TZ)
+    out = []
+    m = maintenance_now(d, now)
+    if m:
+        out.append(f"正在维护（到 {_short(m['end'])}）" + ("，维护后要强制更新游戏" if m["forced_update"] else ""))
+    for e in upcoming(d, now, days):
+        if e["what"] == "维护开始":
+            out.append(f"{_short(e['at'])}–{_short(e['end'])} 停机维护" + ("（强制更新）" if e["forced_update"] else ""))
+        elif e["what"] == "开始":
+            out.append(f"{_short(e['at'])} 开始：{_name(e)}")
+    for e in events(d):
+        if e["what"] == "开始" and _dt(e["at"]) <= now < _dt(e["end"]):
+            out.append(f"进行中：{_name(e)}（到 {_short(e['end'])}）")
+    return out
+
+
+def _name(e: dict) -> str:
+    t = re.sub(r"\s*活动即将开启\s*", "", e["title"]).strip(" 【】")
+    lab = e.get("label") or ""
+    return f"{t}（{lab}）" if lab and t not in lab and len(lab) <= 12 else t
+
+
+def _short(iso: str) -> str:
+    t = _dt(iso)
+    return f"{t.month}月{t.day}日 {t:%H:%M}"
