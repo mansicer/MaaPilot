@@ -50,7 +50,7 @@ def test_list_parses_fixed_fields_and_notes(capsys):
     assert g1 == {"title": "遥 精2", "status": "进行中", "object": "干员 遥 → 精2 1级",
                   "said": "把遥练到精2（2026-09-30）",
                   "approved": "2026-09-30 21:40，已报：龙门币约 59 万、经验约 36 万、聚合剂 2、提纯源岩 9…",
-                  "premium": False,
+                  "premium": False, "deadline": None, "expired": False,
                   "notes": "分解与进展（agent 自由写）：\n- 缺辅助芯片，靠 PR-C 刷；合成要换加工站干员\n- 10-01：合成做了一半，差聚合剂 2"}
     # 乱序、半角冒号、全角斜杠、折行都认
     assert g2["status"] == "暂停" and g2["premium"] is False and g2["object"] == "材料 聚酸酯组 × 10"
@@ -149,7 +149,7 @@ def test_remove_moves_section_to_done(capsys):
     assert "遥 精2" not in text and text.startswith("# 目标清单\n\n说明：agent 自己的备注，程序不动。\n\n## 聚酸酯组\n")
     done = paths.GOALS_DONE.read_text(encoding="utf-8")
     assert done.startswith("# 完成或放弃的目标\n\n## 遥 精2\n- 状态：完成\n")
-    assert "- 花合成玉/源石：否\n- 结束：" in done and "完成，遥已精2\n\n分解与进展" in done
+    assert "- 花合成玉/源石：否\n- 结束：" in done and "完成，遥已精2（没能核对：还没有干员识别的快照）\n\n分解与进展" in done
     assert done.endswith("差聚合剂 2\n")
     # 第二个挪到最后
     run(capsys, "goals", "remove", "聚酸酯组", "--status", "放弃", "--reason", "不要了")

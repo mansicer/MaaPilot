@@ -48,7 +48,7 @@ def parse_parts(text: str) -> dict:
 
 
 def parse_object(text: str) -> dict:
-    """对象一行 → {"kind": 干员|材料|关卡|其他, ...}。写法不对抛 CliError(bad_object)。"""
+    """对象一行 → {"kind": 干员|材料|关卡|活动|其他, ...}。写法不对抛 CliError(bad_object)。"""
     t = (text or "").strip()
     if t.startswith("干员"):
         head, parts = _split_arrow(t[2:].strip())
@@ -60,10 +60,10 @@ def parse_object(text: str) -> dict:
         if not m:
             raise _bad(f"材料对象要写成 `材料 <名> × <数量>`：{t}")
         return {"kind": "材料", "item": m.group(1).strip(), "count": int(m.group(2))}
-    for kind in ("关卡", "其他"):
+    for kind in ("关卡", "活动", "其他"):
         if t.startswith(kind):
             return {"kind": kind, "text": t[len(kind):].strip()}
-    raise _bad(f"对象要以 干员 / 材料 / 关卡 / 其他 开头：{t}")
+    raise _bad(f"对象要以 干员 / 材料 / 关卡 / 活动 / 其他 开头：{t}")
 
 
 def _split_arrow(s: str) -> tuple[str, str]:
@@ -229,7 +229,7 @@ def need(obj_text: str, from_text: str | None = None) -> dict:
     depot, depot_at = depot_snapshot()
     box, box_at = box_snapshot()
     assumed: list[str] = []
-    if obj["kind"] in ("关卡", "其他"):
+    if obj["kind"] in ("关卡", "活动", "其他"):
         raise CliError("not_computable", f"{obj['kind']}目标算不了材料，要自己分解（先看要哪些干员练度）",
                        exit=BAD_REQUEST, data={"object": obj_text})
     if obj["kind"] == "材料":
