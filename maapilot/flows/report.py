@@ -15,7 +15,8 @@ from maapilot.flows._common import now, rel
 
 LABELS = {"startup": "启动游戏", "recruit": "公开招募", "infrast": "基建", "mall": "信用商店与访问好友",
           "annihilation": "剿灭", "award": "领任务奖励与邮件", "farm": "刷理智", "box": "识别干员练度", "goals": "目标",
-          "closedown": "关游戏"}
+          "closedown": "关游戏", "game_update": "更新游戏",
+          "maintenance": "停机维护"}
 _RUN_ID = re.compile(r"^(\d{4})(\d{2})(\d{2})-(\d{4,6})$")
 
 
@@ -133,7 +134,7 @@ def mark_seen(run_id: str | None) -> dict:
 def has_problem(d: dict) -> bool:
     """跑完了但不顺利：没做成的项、对账停下、没跑完、交给 agent 的。还在跑的不算。"""
     st = d.get("status")
-    if st in (None, "running"):
+    if st in (None, "running", "maintenance"):         # 停机维护没跑：不算问题（启动检查会单独提维护）
         return False
     return st != "done" or d.get("ok") is False or bool(d.get("failed"))
 
@@ -151,18 +152,26 @@ def problem_brief(d: dict) -> dict:
                                                                 for k in ("before", "after", "unexplained")}}
     if d.get("handoff"):
         out["handoff"] = {k: d["handoff"].get(k) for k in ("task", "error", "rest")}
+    if d.get("maintenance"):
+        out["maintenance"] = d["maintenance"]
     return out
 
 
 STATUS_WORDS = {"done": "跑完了", "stopped": "因为货币对账停下了", "aborted": "没跑完", "handed_off": "停下交给了 agent",
-                "running": "还在跑"}
+                "running": "还在跑", "maintenance": "赶上官方停机维护，没跑",
+                "update_failed": "因为游戏没更新成停下了"}
 
 
 def summary_lines(d: dict) -> list[str]:
     """给 agent 转述用的几句中文。"""
     who = "定时日常" if d.get("trigger") == "schedule" else "日常"
     lines = [f"{_when(d.get('started_at'))} 的{who}{STATUS_WORDS.get(d.get('status'), d.get('status') or '?')}"
-             + ("，都做成了。" if not has_problem(d) else "，有问题。")]
+             + ("。" if d.get("status") == "maintenance" else "，都做成了。" if not has_problem(d) else "，有问题。")]
+    if d.get("maintenance"):
+        lines.append(maintenance_line(d["maintenance"]))
+    lines += [f"目标{x}" for x in goals_change_lines(d)]       # 不算问题，但要告诉用户
+    if d.get("goals_expired") and d.get("trigger") != "schedule":  # 定时运行里 agent 已经看过、写进总结了
+        lines.append("有限时目标到期被挪走了：看看还有没有没做完的（例如活动商店没换完），告诉用户")
     b = problem_brief(d)
     for f in b["failed"]:
         lines.append(f"没做成：{f['label']}" + (f"（{f['error']}）" if f.get("error") else ""))
@@ -236,6 +245,57 @@ def _agent_line(a: dict) -> str:
     return f"agent 接手（{how}）：{s}"
 
 
+def _gtitle(g) -> str:
+    return str(g.get("title") if isinstance(g, dict) else g)
+
+
+GOAL_FIELDS = {"status": "状态", "object": "对象", "said": "原话", "approved": "同意", "premium": "花合成玉/源石",
+               "deadline": "期限"}
+
+
+def _done_how(entry) -> str:
+    """goals-done.md 里那一段 → "到期，期限 … 已过，自动结束" 这类说明；没有那一段 → 没经过 goals remove 就没了。"""
+    if isinstance(entry, str):
+        return entry
+    if not isinstance(entry, dict):
+        return "已完成清单里没有它：不是通过移除目标挪走的"
+    ended = entry.get("ended") or entry.get("完成") or ""
+    status = entry.get("status") or entry.get("状态") or ""
+    if ended:                                           # "2026-10-09 到期，期限 … 已过" → 去掉日期
+        return re.sub(r"^\d{4}-\d{2}-\d{2}\s*", "", str(ended))
+    return str(status)
+
+
+def goals_change_lines(d: dict) -> list[str]:
+    """这次日常里目标的变动（汇报「目标变动」、summary_lines 用）。没有 goals_change 时用开头到期挪走的。"""
+    ch = d.get("goals_change")
+    if not ch and d.get("goals_expired"):
+        ch = {"removed": [{"title": _gtitle(g), "done_entry": {"status": "到期"}} for g in d["goals_expired"]]}
+    if not ch:
+        return []
+    out = []
+    for g in ch.get("removed") or []:
+        how = _done_how(g.get("done_entry") if isinstance(g, dict) else None)
+        out.append(f"移除：{_gtitle(g)}" + (f"（{how}）" if how else ""))
+    for g in ch.get("added") or []:
+        out.append(f"新加：{_gtitle(g)}")
+    for c in ch.get("changed") or []:
+        f = GOAL_FIELDS.get(c.get("field"), c.get("field"))
+        out.append(f"改了：{c.get('title')} 的{f}：{c.get('before') or '（空）'} → {c.get('after') or '（空）'}")
+    return out
+
+
+def maintenance_line(m: dict) -> str:
+    """{start, end, forced_update} → "官方停机维护中（10月9日 06:00–12:00），这次没跑。"。"""
+    try:
+        s, e = datetime.fromisoformat(m["start"]), datetime.fromisoformat(m["end"])
+        end = f"{e:%H:%M}" if e.date() == s.date() else f"{e.month}月{e.day}日 {e:%H:%M}"
+        when = f"（{s.month}月{s.day}日 {s:%H:%M}–{end}）"
+    except (KeyError, TypeError, ValueError):
+        when = ""
+    return f"官方停机维护中{when}，这次没跑。" + ("维护后要强制更新游戏。" if m.get("forced_update") else "")
+
+
 def render(d: dict) -> str:
     trig = {"schedule": "定时", "manual": "手动"}.get(d.get("trigger"), d.get("trigger") or "")
     out = [f"# 日常汇报：{_when(d.get('started_at'))}（{trig}）", ""]
@@ -245,6 +305,12 @@ def render(d: dict) -> str:
         out.append("还在跑。")
     elif status == "aborted":
         out.append("没跑完（原因见下面「要注意」）。")
+    elif status == "maintenance":
+        out.append(maintenance_line(d.get("maintenance") or {}))
+    elif status == "update_failed":
+        out.append("游戏客户端要更新，没更新成，后面的都没跑（旧版本进不了游戏）。")
+    elif status == "handed_off" and (d.get("handoff") or {}).get("task") == "game_update":
+        out.append(f"{(d.get('handoff') or {}).get('error') or '游戏客户端要更新'}：停下交给在场的 agent 更新，更新完接着跑后面的。")
     elif status == "handed_off":
         h = d.get("handoff") or {}
         out.append(f"停在{label(h.get('task', ''))}：没做成，交给在场的 agent 处理，处理完接着跑后面的。")
@@ -274,8 +340,8 @@ def render(d: dict) -> str:
             if f.get("medicine_used"):
                 bits.append(f"用了 {f['medicine_used']} 瓶理智液")
             out.append(f"- 刷理智：{'，'.join(bits)}")
-        elif t.get("task") == "goals":
-            out.append(f"- 目标：{_agent_line(t.get('agent')) or t.get('note', '')}")
+        elif t.get("task") in ("goals", "maintenance"):
+            out.append(f"- {name}：{_agent_line(t.get('agent')) or t.get('note', '')}")
             continue
         elif t.get("ok"):
             out.append(f"- {name}：完成（{_dur(t.get('duration_s'))}）")
@@ -287,9 +353,12 @@ def render(d: dict) -> str:
         out.append(f"- 目标：有 {d.get('goals_active', '?')} 个进行中的目标，留给会话里的 agent 接着做")
     if d.get("award_pending"):
         out.append("- 领奖励：等目标部分刷完理智再领（会话里的 agent 做）")
-    out += ["", "## 仓库变化", ""]
     change = d.get("depot_change")
-    if change:
+    if status != "maintenance":                         # 维护没跑：不写仓库变化
+        out += ["", "## 仓库变化", ""]
+    if status == "maintenance":
+        pass
+    elif change:
         spent = [c for c in change if c["delta"] < 0]
         got = [c for c in change if c["delta"] > 0]
         if spent:
@@ -302,12 +371,15 @@ def render(d: dict) -> str:
         out.append("没有变化。")
     else:
         out.append("这次没读到前后的仓库，算不出花了多少。")
+    gl = goals_change_lines(d)
+    if gl:
+        out += ["", "## 目标变动", ""] + [f"- {x}" for x in gl]
     g = d.get("guard") or {}
     alerts = list(d.get("alerts") or [])
     if g.get("ok") is False:
         alerts.insert(0, "合成玉 / 源石有没经同意的减少：" + json.dumps(g.get("unexplained") or {}, ensure_ascii=False)
                       + "。日常暂停，等用户说明。")
-    elif g.get("ok") is None and status != "running":
+    elif g.get("ok") is None and status not in ("running", "maintenance"):
         alerts.append("这次没能核对合成玉、源石（对账没做成）。")
     if alerts:
         out += ["", "## 要注意", ""] + [f"- {a}" for a in alerts]

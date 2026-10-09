@@ -1,7 +1,10 @@
 """`maapilot daily run / status / schedule / unschedule`：日常与定时。契约见 docs/cli.md「daily」，设计见 docs/design.md 第 6 节。
 
 daily run 只做编排，每一步都调别的命令（子进程 `python -m maapilot.cli …`，继承本进程的模拟器锁）：
-  startup（配了的话）→ guard snapshot（上次之后有人动过就改做对账）→ 其余 MAA 日常项（award 留到最后）
+  开始前：限时目标到期、官方公告（旧了重拉；停机维护中 → MAA 项、对账都不跑，status maintenance；
+  定时运行叫一个不碰模拟器的 agent 看看对目标的影响）、
+  游戏版本（旧了：定时运行叫无头 agent 更新，会话里交给在场的 agent）
+  → startup（配了的话）→ guard snapshot（上次之后有人动过就改做对账）→ 其余 MAA 日常项（award 留到最后）
   → 刷理智（有进行中的目标交给 agent，没有就刷默认关）→ award → guard check → 汇报。
 定时运行（--trigger schedule）里某项失败，当场起一个无头 `claude -p`（skill maapilot-recovery）接管这一项，
 等它结束（超时杀掉整个进程组）再接着跑；每个 agent 结束后换一次锁的 token（它留下的命令不能再进来）、对一次账。
@@ -35,6 +38,8 @@ from maapilot.flows._common import journal, now, rel
 DAILY_ENV = "MAAPILOT_DAILY_RUN"          # 无头 agent 的环境里带着它：agent 里不能再起一次 daily run
 AGENT_TIMEOUT_MIN = 90                    # 做目标部分的无头 agent 最长跑多久（config: daily.agent_timeout_min）
 RECOVERY_TIMEOUT_MIN = 30                 # 接管失败项的无头 agent 最长跑多久（config: daily.recovery_timeout_min）
+MAINTENANCE_AGENT_MIN = 10                # 停机维护时叫起来看一眼的无头 agent 最长跑多久
+EXPIRED_AGENT_MIN = 15                    # 只有到期目标要看时叫起来的无头 agent 最长跑多久
 TASK_TIMEOUT_MIN = 90                     # 一个 MAA 日常项最长跑多久（config: daily.task_timeout_min）
 FARM = "farm"                             # 刷理智（不在 daily.tasks 里；--only 里可以写）
 BOX = "box"                               # 识别干员练度（state box；每个游戏日一次，config: daily.read_box；--only 里可以写）
@@ -133,10 +138,13 @@ def parse_transcript(path: Path) -> dict:
             "cost_usd": res.get("total_cost_usd"), "turns": res.get("num_turns")}
 
 
-def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: bool = False) -> dict:
+def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: bool = False,
+              timeout_min: float | None = None) -> dict:
     """起一个无头 claude -p 并等它结束。→ {ok, summary, recovered, timed_out, transcript, duration_s, …}。"""
     dcfg = cfg.get("daily") or {}
-    if recovery:
+    if timeout_min:
+        timeout_s = float(timeout_min) * 60
+    elif recovery:
         timeout_s = float(dcfg.get("recovery_timeout_min") or RECOVERY_TIMEOUT_MIN) * 60
     else:
         timeout_s = float(dcfg.get("agent_timeout_min") or AGENT_TIMEOUT_MIN) * 60
@@ -196,19 +204,94 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
     ]).replace("\n\n", "\n")
 
 
-def goals_prompt(run_id: str, active: list[dict], tasks: list[dict]) -> str:
+def _titles(goals: list) -> str:
+    return "、".join(f"「{g.get('title') if isinstance(g, dict) else g}」" for g in goals or [])
+
+
+def expired_line(expired: list) -> str:
+    """开头到期挪走的目标 → 给 agent 的一句话。"""
+    return (f"这些限时目标到期，程序已挪进已完成（goals-done.md）：{_titles(expired)}；"
+            "看一眼还有没有没做完的（例如活动商店没换完、活动关没三星），写进总结告诉用户。")
+
+
+def goals_prompt(run_id: str, active: list[dict], tasks: list[dict], expired: list | None = None) -> str:
     done = "、".join(f"{reportmod.label(t['task'])}{'' if t.get('ok') else '（没做成）'}" for t in tasks) or "无"
     titles = "；".join(f"{g['title']}（{g.get('object') or '?'}）" for g in active)
     return "\n".join([
         f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
         f"MAA 日常项已经跑完：{done}。",
         f"private/goals.md 里有 {len(active)} 个进行中的目标：{titles}。",
+        *([expired_line(expired)] if expired else []),
         "加载 skill maapilot-daily，做目标部分：用剩下的理智刷目标缺的材料，材料够了就养成，"
         "在 goals.md 里更新分解与进展，做完的目标移除。",
         "用户不在场：目标之外的花费、要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令在前台跑、Bash 超时设 600000 毫秒，不放后台；刷图按 skill 里说的分批（--times 每批几次）。",
         "结束时用几句中文写做了什么、花了什么、目标进展到哪，以及要用户决定的事；最后一行单独写「结果：完成」或「结果：没做成」。",
+    ])
+
+
+def expired_prompt(run_id: str, expired: list, tasks: list[dict]) -> str:
+    """没有进行中的目标、只有开头到期挪走的目标：叫一个短的 agent 看一眼，告诉用户。"""
+    done = "、".join(f"{reportmod.label(t['task'])}{'' if t.get('ok') else '（没做成）'}" for t in tasks) or "无"
+    return "\n".join([
+        f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
+        f"日常已经跑完：{done}。没有进行中的目标。",
+        expired_line(expired),
+        "maapilot goals list --all 看它们的记录（goals-done.md 里）；要看游戏里的情况就截图看（maapilot screen shot），"
+        "不刷理智、不兑换、不花任何东西、不改目标，要用户决定的事写进总结。",
+        "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作模拟器，只看文件。",
+        "结束时用几句中文写给用户看的总结；最后一行单独写「结果：完成」。",
+    ])
+
+
+def maintenance_prompt(run_id: str, window: dict, info: dict | None = None, expired: list | None = None) -> str:
+    """官方停机维护中：日常什么都没跑，叫无头 agent 知道这件事、想想对目标的影响。info：查到的游戏版本（可能没有）。"""
+    from datetime import datetime
+    try:
+        s, e = datetime.fromisoformat(window["start"]), datetime.fromisoformat(window["end"])
+        when = f"{s.month}月{s.day}日 {s:%H:%M} 到 " + (f"{e:%H:%M}" if e.date() == s.date()
+                                                      else f"{e.month}月{e.day}日 {e:%H:%M}")
+    except (KeyError, TypeError, ValueError):
+        when = "时间不明"
+    ver = ""
+    if info and (info.get("installed") or info.get("latest")):
+        ver = f"现在模拟器上的游戏是 {_ver(info.get('installed'))}，官方最新 {_ver(info.get('latest'))}。"
+    return "\n".join([
+        f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
+        f"官方正在停机维护（{when}，公告「{window.get('title') or '?'}」），这次日常的 MAA 项都没跑（进不了游戏）。",
+        ("维护后要强制更新游戏：下次日常会先更新，或者会话里的 agent 按 skill maapilot-events 处理；你现在不用更新。" + ver)
+        if window.get("forced_update") else ver,
+        "维护期间进不了游戏：不要操作模拟器（不跑 maa、input、game、state 这类命令）。"
+        "可以 maapilot news list / maapilot news show <cid> 看公告，maapilot goals list 看进行中的目标。",
+        "想想这次维护对进行中的目标有什么影响（例如活动什么时候开始、限时目标的期限、维护期间理智满了会浪费多少），"
+        "写成给用户看的几句中文总结；要用户决定的事写清楚。不改目标、不花任何东西。",
+        (f"这些限时目标到期，程序已挪进已完成（goals-done.md）：{_titles(expired)}；"
+         "看看记录里还有没有没做完的，写进总结告诉用户。") if expired else "",
+        "最后一行单独写「结果：完成」。",
+    ]).replace("\n\n", "\n")
+
+
+def _ver(v: dict | None) -> str:
+    return str((v or {}).get("version") or "?")
+
+
+def update_prompt(run_id: str, info: dict) -> str:
+    """游戏客户端旧了：叫无头 agent 更新、第一次启动。"""
+    terms = ("用户协议 / 隐私政策更新的弹窗：直接点「同意」，写进总结。" if info.get("accept_terms") else
+             "用户协议 / 隐私政策更新的弹窗：不要点同意，停下，写进总结（要用户决定的事），最后写「结果：没做成」。")
+    return "\n".join([
+        f"你是 MaaPilot 的无头 agent，被定时日常（运行 {run_id}）叫醒，用户不在场。",
+        f"模拟器上的游戏客户端旧了（装的是 {_ver(info.get('installed'))}，最新是 {_ver(info.get('latest'))}），"
+        "不更新什么日常都做不了。你只做更新游戏这一件事。",
+        "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
+        "1. 跑 maapilot game update（前台跑、Bash 超时设 600000 毫秒，不放后台）。可能超过 10 分钟：Bash 超时了就再跑一次同一条命令，"
+        "它会接着下载，直到它说装好了。",
+        "2. 跑 maapilot maa startup，处理第一次启动：加载 skill maapilot-recovery，截图看停在哪，游戏里要下载资源的提示点确认、"
+        "公告弹窗关掉，直到回到游戏首页。",
+        terms,
+        "不做别的日常项、不刷理智、不改目标。别的要用户决定或确认的事一律不做，写进总结。",
+        "结束时用几句中文写做了什么、现在是哪个版本、停在哪；最后一行单独写「结果：完成」或「结果：没做成」。",
     ])
 
 
@@ -357,6 +440,11 @@ def run(only: list[str] | None, trigger: str, no_agent: bool) -> dict:
     _take_marker(run_id, trigger)
     t0 = time.monotonic()
     r = _Run(run_id, trigger)
+    try:
+        goals_before = goals_snapshot()                  # 最开头（到期挪走之前）：结束时比一比目标变了什么
+    except Exception as e:                               # noqa: BLE001
+        goals_before = None
+        r.data["alerts"].append(f"没能记下日常开始时的目标（{_err(e)}）")
     code = 0
     try:
         with cliutil.device("daily run", job="daily") as lk:
@@ -371,6 +459,8 @@ def run(only: list[str] | None, trigger: str, no_agent: bool) -> dict:
         raise
     finally:
         r.data["finished_at"] = now().isoformat(timespec="seconds")
+        if goals_before is not None:
+            _goals_change(r, goals_before)
         if r.data["status"] == "running":
             r.data["status"] = "done"
         r.save()
@@ -383,9 +473,17 @@ def run(only: list[str] | None, trigger: str, no_agent: bool) -> dict:
 
 def _finish(r: _Run) -> dict:
     d = r.data
+    d["lines"] = reportmod.summary_lines(d)          # 给 agent 转述：维护时段、到期和变动的目标……
     if d["status"] == "stopped":
         raise CliError("currency_decreased", d.get("stop_reason") or "合成玉 / 源石有没经同意的减少，日常停下了",
                        hint="把这笔减少告诉用户，等用户说明（guard status）", exit=NEEDS_USER, data=d)
+    if d.get("handoff") and d["handoff"].get("task") == UPDATE:
+        h = d["handoff"]
+        raise CliError("handoff", f"{h['error']}，日常停在这里交给你",
+                       hint="先 maapilot game update（前台跑，可能超过 10 分钟；Bash 超时就再跑一次，会接着下载），再 "
+                            "maapilot maa startup，按 maapilot-recovery 处理第一次启动的下载提示和公告；用户协议 / 隐私政策"
+                            "更新要先问用户。更新好再 maapilot daily run --only " + ",".join(h["rest"]) + " 接着跑",
+                       exit=FAILED, data=d)
     if d.get("handoff"):
         h = d["handoff"]
         raise CliError("handoff", f"{reportmod.label(h['task'])}没做成，日常停在这里交给你：{h['error']}",
@@ -647,6 +745,185 @@ def _annihilation_failed(r: _Run) -> None:
                                 "多半是这张图还不能代理（没 400 杀满过），要用户决定怎么办")
 
 
+# --- 开始前：目标到期、官方公告、游戏版本（都是尽力而为：出错记一条告警，日常照跑） ---------------------------------------
+
+UPDATE = "game_update"                    # 更新游戏（汇报里的一项；会话里交给在场 agent 时 handoff.task 是它）
+
+
+def _err(e: BaseException) -> str:
+    return e.message if isinstance(e, CliError) else f"{type(e).__name__}: {e}"
+
+
+def expire_goals() -> list:
+    """过期的限时目标挪到 goals-done.md（goals.expire_due；没有这个函数就什么都不做）。"""
+    f = getattr(goalsmod, "expire_due", None)
+    return list(f() or []) if f else []
+
+
+def goals_snapshot() -> dict | None:
+    """goals.md + goals-done.md 的快照（goals.snapshot；没有这个函数 → None）。"""
+    f = getattr(goalsmod, "snapshot", None)
+    return f() if f else None
+
+
+def goals_diff(before: dict | None, after: dict | None) -> dict | None:
+    """两份快照的差 {removed, added, changed}；什么都没变、少一份 → None。"""
+    f = getattr(goalsmod, "diff", None)
+    if f is None or before is None or after is None:
+        return None
+    d = f(before, after) or {}
+    return d if any(d.get(k) for k in ("removed", "added", "changed")) else None
+
+
+def _goals_change(r: _Run, before: dict | None) -> None:
+    """日常结束时：和开头的快照比，目标有变动就记进 data.goals_change（到期挪走的也在 removed 里）。"""
+    try:
+        ch = goals_diff(before, goals_snapshot())
+    except Exception as e:                               # noqa: BLE001
+        r.data["alerts"].append(f"没能比较这次日常前后的目标（{_err(e)}）")
+        return
+    if ch:
+        r.data["goals_change"] = ch
+        r.event("goals_change", **ch)
+
+
+def refresh_news() -> bool:
+    """官方公告缓存旧了就重拉。→ 拉了没有。"""
+    from maapilot.knowledge import news
+    if not news.stale():
+        return False
+    news.refresh()
+    return True
+
+
+def maintenance_now() -> dict | None:
+    from maapilot.knowledge import news
+    return news.maintenance_now()
+
+
+def version_info() -> dict:
+    """模拟器上装的游戏版本与官方最新版本（tools.game.version_info）。测试里替换掉。"""
+    from maapilot.tools import game
+    return game.version_info()
+
+
+def _preflight(r: _Run) -> bool:
+    """目标到期、公告、维护。→ True：正在维护，这次什么都不跑。"""
+    try:
+        moved = expire_goals()
+        if moved:
+            r.data["goals_expired"] = moved
+            r.event("goals_expired", goals=moved)
+    except Exception as e:                               # noqa: BLE001
+        r.data["alerts"].append(f"没能检查限时目标到期（{_err(e)}）")
+    try:
+        if refresh_news():
+            r.event("news_refreshed")
+    except Exception as e:                               # noqa: BLE001 - 联网失败：用旧的缓存
+        r.data["alerts"].append(f"官方公告没拉下来（{_err(e)}），按上次的缓存看维护时间")
+        r.event("news_failed", error=_err(e))
+    try:
+        m = maintenance_now()
+    except Exception as e:                               # noqa: BLE001
+        r.data["alerts"].append(f"看不了维护时间（{_err(e)}）")
+        m = None
+    if m:
+        r.data["maintenance"] = m
+        r.data.update(status="maintenance", ok=True)
+        r.event("maintenance", **m)
+        cliutil.log(f"[daily] {reportmod.maintenance_line(m)}")
+        return True
+    return False
+
+
+def _maintenance_agent(r: _Run, cfg: dict, env: dict, lk) -> None:
+    """停机维护中叫一个短的无头 agent（不碰模拟器）：它的总结写进汇报。起不来只记告警。"""
+    _set_step("maintenance:agent")
+    lk.heartbeat(step="maintenance")
+    r.data["agents"] += 1
+    try:
+        info = run_agent(cfg, maintenance_prompt(r.data["run_id"], r.data["maintenance"],
+                                                 expired=r.data.get("goals_expired")), env,
+                         paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-maintenance.jsonl",
+                         timeout_min=MAINTENANCE_AGENT_MIN)
+        _after_agent(r, env, lk)
+    except Exception as e:                               # noqa: BLE001
+        r.data["alerts"].append(f"维护期间叫 agent 没叫起来（{_err(e)}）")
+        return
+    r.data["tasks"].append({"task": "maintenance", "ok": bool(info.get("ok")), "agent": info})
+    r.event("agent", task="maintenance", **{k: info.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
+    if info.get("error"):
+        r.data["alerts"].append(f"维护期间叫 agent 没叫起来：{info['error']}")
+
+
+def _expired_agent(r: _Run, cfg: dict, env: dict, lk, expired: list) -> None:
+    """开头有限时目标到期、又没有目标部分的 agent：叫一个短的 agent 看一眼还有没有没做完的，总结写进汇报。"""
+    _set_step("goals_expired:agent")
+    lk.heartbeat(step="goals_expired")
+    r.data["agents"] += 1
+    info = run_agent(cfg, expired_prompt(r.data["run_id"], expired, r.data["tasks"]), env,
+                     paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-goals.jsonl",
+                     timeout_min=EXPIRED_AGENT_MIN)
+    _after_agent(r, env, lk)
+    r.data["tasks"].append({"task": "goals", "ok": bool(info.get("ok")), "agent": info, "expired_only": True})
+    r.event("agent", task="goals_expired", **{k: info.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
+    if info.get("error"):
+        r.data["alerts"].append(f"叫 agent 看到期的目标没叫起来：{info['error']}")
+    r.save()
+    _guard(r, "check", env, "看到期的目标")
+
+
+def _game_version(r: _Run, cfg: dict, headless: bool, env: dict, lk, order: list[str]) -> None:
+    """游戏客户端旧了：定时运行当场叫 agent 更新（没更新成整个日常停下）；会话里交给在场的 agent。"""
+    try:
+        info = version_info()
+    except Exception as e:                               # noqa: BLE001
+        r.data["alerts"].append(f"没查到游戏版本（{_err(e)}），照常跑")
+        r.event("version_failed", error=_err(e))
+        return
+    info = info or {}
+    r.data["game_version"] = {k: info.get(k) for k in ("installed", "latest", "update_needed")}
+    r.event("game_version", **r.data["game_version"])
+    if info.get("update_needed") is not True:
+        return
+    msg = f"游戏客户端要更新（{_ver(info.get('installed'))} → {_ver(info.get('latest'))}）"
+    cliutil.log(f"[daily] {msg}")
+    if not headless:
+        r.data["handoff"] = {"task": UPDATE, "error": msg, "log": None, "evidence": None, "rest": list(order),
+                             "version": r.data["game_version"]}
+        r.data["status"] = "handed_off"
+        raise _Stop()
+    _set_step(f"{UPDATE}:agent")
+    lk.heartbeat(step=UPDATE)
+    r.data["agents"] += 1
+    t0 = time.monotonic()
+    agent = run_agent(cfg, update_prompt(r.data["run_id"], info), env,
+                      paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{UPDATE}.jsonl", recovery=True)
+    _after_agent(r, env, lk)
+    ok = bool(agent.get("recovered"))
+    if ok:                                               # 它说更新好了：再查一次版本核实（查不了就信它）
+        try:
+            again = version_info() or {}
+            if again.get("update_needed") is True:
+                ok = False
+                r.data["alerts"].append("agent 说更新好了，但再查版本还是旧的")
+            r.data["game_version"] = {k: again.get(k) for k in ("installed", "latest", "update_needed")}
+        except Exception as e:                           # noqa: BLE001
+            r.event("version_failed", error=_err(e), after=UPDATE)
+    row = {"task": UPDATE, "ok": ok, "duration_s": round(time.monotonic() - t0, 1), "agent": agent,
+           "version": {"from": _ver(info.get("installed")), "to": _ver(info.get("latest"))}}
+    if not ok:
+        row["error"] = msg + "，没更新成"
+    r.data["tasks"].append(row)
+    r.event("agent", task=UPDATE, **{k: agent.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
+    r.save()
+    _guard(r, "check", env, "agent 更新游戏")
+    if not ok:                                           # 旧客户端上什么都跑不了
+        r.data["failed"].append(UPDATE)
+        r.data["status"] = "update_failed"
+        raise _Stop()
+
+
 def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headless: bool, env: dict, lk) -> None:
     dcfg = cfg.get("daily") or {}
     want = (lambda t: t in only) if only else (lambda t: True)
@@ -668,7 +945,14 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
         r.data["status"] = "handed_off"
         raise _Stop()
 
+    _set_step("preflight")
+    if _preflight(r):                                   # 官方停机维护中：不跑 MAA、不对账
+        if headless:                                    # 定时运行：叫 agent 知道这件事、想想对目标的影响
+            _maintenance_agent(r, cfg, env, lk)
+        r.save()
+        return
     try:
+        _game_version(r, cfg, headless, env, lk, order)
         if "startup" in tasks and want("startup"):      # 先把游戏开到首页：读仓库（对账）要在游戏里
             handoff(_maa_task(r, cfg, "startup", ["startup"], headless, env, lk))
         _set_step("guard")
@@ -696,6 +980,7 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
             elif not _box_from_skland(r, env):            # 接了森空岛就从那里读（快、不碰模拟器），不行再用 MAA 识别
                 bt = float(dcfg.get("box_timeout_min") or BOX_TIMEOUT_MIN) * 60
                 handoff(_maa_task(r, cfg, BOX, [], headless, env, lk, timeout_s=bt, cli=["state", "box"]))
+        expired = r.data.get("goals_expired") if headless else None
         if want(FARM):
             active = goalsmod.active_goals()
             r.data["goals_active"] = len(active)
@@ -704,8 +989,9 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
             elif active:
                 _set_step("goals:agent")
                 r.data["agents"] += 1
-                info = run_agent(cfg, goals_prompt(r.data["run_id"], active, r.data["tasks"]), env,
+                info = run_agent(cfg, goals_prompt(r.data["run_id"], active, r.data["tasks"], expired), env,
                                  paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-goals.jsonl")
+                expired = None                           # 到期的目标它一起看过了
                 _after_agent(r, env, lk)
                 row = {"task": "goals", "ok": bool(info.get("ok")), "agent": info}
                 r.data["tasks"].append(row)
@@ -726,6 +1012,8 @@ def _steps(r: _Run, cfg: dict, tasks: list[str], only: list[str] | None, headles
                 row["timeout"] = finfo
                 handoff(row)
                 r.data["farm"] = row.get("result") or {"stage": stage, "ok": False}
+        if expired:                                     # 没有目标 agent 可以顺带看：单独叫一个短的
+            _expired_agent(r, cfg, env, lk, expired)
         if "award" in tasks and want("award"):
             if r.data["goals_pending"]:                  # award 要在刷理智之后：交给在场的 agent 做完目标再领
                 r.data["award_pending"] = True
