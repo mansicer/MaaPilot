@@ -43,6 +43,7 @@
 | `input tap / swipe / back / text` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
 | `maa why` | 否（只读 MAA 的日志） | 放行 | A |
+| `copilot find / show / strip` | 否（联网查作业站） | 放行 | A |
 | `state depot / box / sanity` | 只读（要进页面） | 放行 | A |
 | `state show` | 否 | 放行 | A |
 | `data …` | 否（`sync` 联网） | 放行 | A |
@@ -55,7 +56,7 @@
 | `reset [--dry-run] [--memory]` | 否 | **询问** | B |
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
-| `goals list / add / update / remove / expire` | 否 | 放行 | B |
+| `goals list / add / update / remove / move / expire` | 否 | 放行 | B |
 | `op upgrade / mastery`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
 | `daily schedule / unschedule` | 否（改 crontab） | **询问** | B |
@@ -184,11 +185,13 @@
 | `award` | | Award（任务奖励、邮件、免费单抽） |
 | `fight <关卡>` | `[--times N] [--medicine N] [--expiring-medicine [天]]` | Fight（刷关；`--times` 默认打到理智用完；`--medicine` 默认 0；`--expiring-medicine` 只用 N 天内过期的，不写天数为 2） |
 | `annihilation` | `[--stage <剿灭关>] [--times N] [--medicine N]` | Fight（剿灭；默认当期剿灭、打 1 次；`--stage` 也可写 龙门外环 / 龙门市区 / 切尔诺伯格） |
-| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`maa://<id>` 或本地 JSON；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
+| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`maa://<id>` 或本地 JSON，如 `copilot strip` 存的；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
 | `closedown` | | CloseDown（关游戏） |
 
 `config.yaml` 的 `daily.params.<任务>` 会先合进默认参数，`--params` 最后合。理智液（`--medicine N`）：用户第一次同意后按记忆办。
 认得出的资源本 / 芯片本今天不开时不跑 MAA，直接退出码 1（`not_open`，`data.open_weekdays`）。
+活动关按 MAA 的活动列表判断（见「data」的活动关）：MAA 导航不了的（列表里还没有这期活动、这期只支持别的几关、活动没开始或已结束）不跑 MAA，
+退出码 1（`maa_unsupported_stage`，`data: {stage, stage_id, reason}`；hint：MAA 一般活动开始后一两天更新，或手动进关卡页用代理）。数据表里认不出的编号原样交给 MAA。
 
 maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFIG_DIR` 传给 maa-cli，不动用户原有的 maa-cli 配置）；
 任务文件每次生成为 `private/maa-config/tasks/maapilot-<任务>.toml`，maa-cli 的日志在 `private/log/maa/<YYYYmmdd-HHMMSS>-<任务>.log`。
@@ -206,11 +209,13 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 `fight` / `annihilation` 结束时用日志里最后一次的理智更新 `private/state/sanity.json`（`source: "maa-log"`）。
 `annihilation` 另有 `orundum_gained`（这次掉的合成玉）、`week`（本游戏周累计 `{runs, orundum}`）和 `weekly_capped`（本周合成玉已经拿满：打了、认出了掉落却没有合成玉，或累计到 1800）。
-每周记录在 `private/state/annihilation.json`（`{week, runs, orundum, capped, failures, blocked?}`，周一 04:00 清零）；`weekly_capped` 之后 `daily run` 跳过剿灭（`tasks` 里这一项 `skipped`）。
+每周记录在 `private/state/annihilation.json`（`{week, runs, orundum, capped, failures, blocked?, progress?}`，周一 04:00 清零）；`weekly_capped` 之后 `daily run` 跳过剿灭（`tasks` 里这一项 `skipped`）。
+接了森空岛时，游戏里的本周剿灭合成玉（`{current, total}`，比自己累加的准）以它为准覆盖 `orundum`、拿满就 `capped`，记在 `progress: {current, total, source: "skland", at}`：
+`state skland` 每次顺手记；`daily run` 判断要不要跳过剿灭前（自己的记录还没拿满时）也只为这个读一次森空岛（不碰模拟器、不改 `box.json`；读不到按自己的记录）。
 日常里剿灭连续 2 次没做成（接管也没救回来）记 `blocked`，这周的日常也跳过；打成一次 `failures` 清零。
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
-重登或稍后重试，不用接管）、`not_open`（关卡今天不开）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
+重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
 
 **失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
 再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
@@ -262,6 +267,34 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 程序里 `maapilot.tools.maa_cmd.run(task, **opts)` 是不拿锁的版本（`daily run` 已经持锁时直接调；失败抛同样的 CliError）。
 
+## copilot —— MAA 作业站（不碰模拟器）
+
+查 MAA 作业站（`prts.maa.plus`）的作业，对照自己的干员练度（`private/state/box.json`）：**只摆事实**（缺谁、差多少），不判断打不打得过。不拿锁。
+森空岛来源的快照有技能等级、专精、模组；MAA 识别来源只有精英化、等级、潜能，读不出的项算"不知道"（`unknown`），不算差距。
+
+| 命令 | 做什么 |
+|---|---|
+| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、热度高 |
+| `copilot show <作业编号>` | 一份作业（编号或 `maa://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
+| `copilot strip <作业编号>` | 去掉作业里所有干员的练度要求（`requirements`），存成 `private/cache/copilot/<编号>_noreq.json`（`maa copilot --ignore-requirements` 还被 MAA 拒绝时，把这个文件交给 `maa copilot`）。`{id, path, removed}` |
+
+```json
+// copilot find
+{"stage": "YW-8", "stage_id": "act…_08", "keyword": "act…_08", "count": 20, "box_at": "…", "box_source": "skland",
+ "plans": [{"id": 64408, "uri": "maa://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
+            "views": 1200, "hot": 35, "like": 40, "dislike": 1, "rating": 9,
+            "opers": [{"name": "能天使", "skill": 3, "required": {"elite": 2, "level": 60, "skill_level": 10},
+                       "have": true, "current": {"elite": 2, "level": 90, "potential": 1, "skill_level": 7, "mastery": 2, "modules": [...]},
+                       "gaps": ["要技能3 专3，现在专2"], "unknown": []}],
+            "groups": [{"name": "…", "opers": [...], "have": true, "best": "…", "gaps": 0}],
+            "missing_ops": ["…", "群攻（任选：…/…）"], "gap_count": 1, "all_owned": false}]}
+```
+
+- `required` 是作业的 `requirements`（MAA 作业协议：`skill_level` 1–7 是技能等级、8–10 是专精 1–3；`module` 1 χ、2 γ、3 α、4 Δ；`potentiality` 从 1 数）。
+- `gaps`：精英化与等级、技能等级、专精、模组、潜能没到的项（中文）；没有这个干员是 `["没有这个干员"]`。森空岛把没解锁的模组也列出来：有 `locked` 照它，没有就按"没精2 → 没有、等级 ≥2 或装着 → 有、其余不知道"推。
+- `groups` 是可选位（任选一名）：`best` 是有的里面差距最少的，`gaps` 是它的差距数。没有 `box.json` 时 `have`、`current`、`gap_count`、`all_owned` 都是 `null`。
+- `rating`：评分人数不够时为 `null`。连不上作业站退出码 1（`network`）；没有这份作业退出码 2（`not_found`）；编号不是数字退出码 2（`bad_arguments`）；`strip` 读不出作业内容退出码 1（`bad_plan`）。
+
 ## skland —— 森空岛（非官方接口）
 
 从森空岛直接读账号数据，比 MAA 识别快、准、全（技能、专精、模组都有），不碰模拟器。要用户的**鹰角账号 token**，只存在本机。
@@ -280,9 +313,10 @@ token 怎么来：在浏览器登录鹰角官网（https://user.hypergryph.com/l
 → `GET zonai.skland.com/api/v1/game/player/binding`（明日方舟的绑定角色）→ `GET …/api/v1/game/player/info?uid=`。后两个要签名：
 `sign = md5(hmac_sha256(签名密钥, 路径 + query + 时间戳 + {"platform","timestamp","dId","vName"} 的紧凑 JSON))`，时间戳按服务器的 `Date` 校准。
 
-`state skland` 的 `data`：`{at, source: "skland", uid, operators, with_modules, mastered, sanity: {current, max}}`（`--op` 另给这些干员的 `operators_detail` 和 `missing`）。
-`box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential(1–6), skill_level, skills: [{index, id, name, mastery}], modules: [{id, name, level, equipped}]}`
-（潜能同 MAA 从 1 数，接口的 `potentialRank` 从 0 数、读进来加 1；模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能名取 `skill_table`，没有就是 null）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
+`state skland` 的 `data`：`{at, source: "skland", uid, operators, with_modules, mastered, sanity: {current, max}, annihilation}`（`--op` 另给这些干员的 `operators_detail` 和 `missing`）。
+`annihilation`：`{current, total, max_kills: {<campaignId>: {name, kills}}}`（本周剿灭合成玉、每张剿灭图的最高击杀，400 = 能代理；接口没给为 `null`），顺手记进本周剿灭记录（见「maa」）。
+`box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential(1–6), skill_level, skills: [{index, id, name, mastery}], modules: [{id, name, level, equipped, locked}]}`
+（`locked` 照接口原样，森空岛把没解锁的模组也列出来；潜能同 MAA 从 1 数，接口的 `potentialRank` 从 0 数、读进来加 1；模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能名取 `skill_table`，没有就是 null）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
 token 失效 → 退出码 3 `token_invalid`（请用户重新取 token、在终端跑 `skland token`）；接口、网络、设备号 → 退出码 1 `skland_api` / `skland_network` / `skland_device`。
 token 不出现在任何输出、日志、报错里；agent 读不了也改不了 `private/skland.json`（权限设置里拒绝）。
 
@@ -391,9 +425,17 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 |---|---|
 | `data sync [--check]` | 从 ArknightsGameData 同步数据表、刷新企鹅物流掉率与一图流价值；`--check` 只看要不要更新。`{updated, to_update, missing, recipes_rebuilt, live, ages: {matrix_age_h, values_age_d}}`；联网失败退出码 1（`sync_failed`） |
 | `data operator <干员>`（别名 `op`） | `{name, id, rarity, profession, levels: [{elite, max_level, to_max: {exp, lmd}}], elite: [{elite, lmd, items, needs_level}], skill_levels: [{to, items}], mastery: [{skill, ranks: [{rank, items, hours}]}], modules: [{type, name, levels: [{level, lmd, items}]}] \| null}` |
-| `data item <物品>`（别名 `drops`） | `{id, name, rarity, type, craftable, recipe, stages: [{stage, ap, rate, sanity_per_item, open_days, open_today}], drops_source}`：掉落最好的几关（常驻主线 / 资源本 / 芯片本，按每件期望理智排） |
+| `data item <物品>`（别名 `drops`） | `{id, name, rarity, type, craftable, recipe, stages: [{stage, ap, rate, sanity_per_item, open_days, open_today, event_end?}], drops_source}`：掉落最好的几关（常驻主线 / 资源本 / 芯片本，加上 MAA 现在能导航的活动关，按每件期望理智排；活动关带 `event_end`：活动什么时候结束） |
 | `data recipe <物品>` | `{tree, shop}`：合成树（加工站 / 制造站），每一步的材料与龙门币、叶子的主掉落关；能在商店兑换的另给 `shop` |
-| `data stage <关卡>` | `{code, stage_id, name, ap, navigable, kind, open_days, open_today, drops: [{id, name, rate, samples}], listed_drops}` |
+| `data stage <关卡>` | `{code, stage_id, name, ap, navigable, kind, nav_kind, maa_value, open_days, open_today, drops: [{id, name, rate, samples}], listed_drops, not_navigable_reason?, maa_activity?}` |
+
+`data stage` 的 `nav_kind`（`kind` 同值）：`main` / `resource` / `chip` / `annihilation` / `ss_current`（当期活动）/ `ss_reopen`（复刻）/ `not_navigable`；`maa_value` 是给 MAA 的关卡值（导航不了为 `null`）。
+
+**活动关**：MAA 只能导航它活动列表里、当期开放的活动关。列表是 maa-cli 缓存的 `StageActivityV2.json`（macOS `~/Library/Caches/com.loong.maa/`，其他 `$XDG_CACHE_HOME/maa/`；
+MAA 一般在活动开始后一两天的资源热更新里加上这期），能导航的是这期列出的关，加上 MAA 任务表（同目录 `resource/tasks/tasks.json`）里有 `<编号>@SideStoryStage` 导航任务的同前缀关。
+测试用环境变量 `MAAPILOT_MAA_ACTIVITY_FILE`、`MAAPILOT_MAA_TASKS_FILE` 换掉这两个文件。没有列表文件时活动关一律不可导航（也没有原因）。
+导航不了的活动关有 `not_navigable_reason`（MAA 还没加这期活动 / 只支持哪几关 / 活动没开始或已结束）；活动关另有
+`maa_activity`：`{in_maa_list, name, start, end, listed, supported, reopen, open_now, min_maa}`（列表里没有这期时只有 `in_maa_list: false`）。
 
 名字认不出退出码 2（`unknown_name`，`data.suggestions` 给相近的名字）；关卡编号重名退出码 2（`ambiguous_stage`，写成 `活动名/编号`）。
 数据表不全退出码 5（`no_game_data`，先 `data sync`）。没有企鹅物流缓存时掉率为空，只列数据表里的主掉落关。
@@ -402,9 +444,12 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 
 读 `private/state/` 的快照做对照；快照的时间放在输出里（`depot_at`），太旧的由 agent 决定要不要先 `state depot`。
 
-`maapilot calc need "<对象>" [--from "<当前>"]`
-一个养成目标要多少：`<对象>` 的写法同[目标清单的"对象"行](#对象的写法)。当前练度默认取 `state box`（精英化、等级），
-技能等级 / 专精 / 模组快照里没有，要用 `--from` 给（如 `--from "技能 4级"`），不给就按最低算并在 `assumed` 里说明。
+`maapilot calc need "<对象>" [--from "<当前>"] [--goal <标题>] [--ignore-goals]`
+一个养成目标要多少：`<对象>` 的写法同[目标清单的"对象"行](#对象的写法)。当前练度取干员快照：精英化、等级都有；技能等级、专精、模组只有森空岛来源的快照（`state skland`）才有，
+`--from` 给的优先（如 `--from "技能 4级"`）；都没有就按最低算并在 `assumed` 里说明。
+
+默认还对照别的进行中目标（干员、材料目标；按优先级）还要用的材料：干员目标从快照里的当前练度算起，材料目标按写的数量；
+`--goal <标题>` 说明算的就是这个目标（不算它自己占的；不给就排除对象写法相同的目标），`--ignore-goals` 不对照（`goals remove` 核对时就不对照）。
 
 ```json
 {"object": "干员 遥 → 精2 1级", "from": {"elite": 1, "level": 70}, "assumed": [],
@@ -415,13 +460,20 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
  "craftable": [{"id": "31014", "name": "聚合剂", "count": 2, "fully": true, "uses": [{"id": "…", "name": "…", "count": 2}],
                 "lmd": 800, "missing": []}],
  "farm": [{"id": "3272", "name": "辅助芯片组", "count": 2}],
- "depot_at": "…", "box_at": "…"}
+ "depot_at": "…", "box_at": "…",
+ "reserved": {"31014": {"name": "聚合剂", "count": 4, "goals": [{"title": "能天使 技能3专3", "priority": 1, "count": 4}]}},
+ "conflicts": [{"id": "31014", "name": "聚合剂", "need": 2, "have": 5, "short_after_reserve": 1,
+                "reserved_by_others": [{"goal": "能天使 技能3专3", "priority": 1, "count": 4}]}],
+ "short_after_goals": {"lmd": 0, "exp": 0, "items": [{"id": "31014", "name": "聚合剂", "count": 1}, …]},
+ "reserved_skipped": [{"title": "…", "why": "…"}]}                  // 有算不了的目标才有
 ```
 
 - `have.exp` 是仓库里作战记录折成的经验。`craftable` 是缺的材料里能合成的：`fully` 为假时 `missing` 是合成也补不上的原料。
   `farm` 是合成之后还要去刷的（可以直接交给 `calc stages`）。
 - 要专精但还没精2 时自动算上练到精2 1级；技能等级不知道时，专精按已到 7 级算、升技能按 1 级算，都写进 `assumed`。
 - 快照不存在时按空仓库 / 精0 1级算，也写进 `assumed`。对象写错退出码 2（`bad_object`）。
+- `short` 仍只按仓库算；`reserved` 是别的目标还要的（按物品，带是哪几个目标）；`short_after_goals` 是先给别的目标留够之后还缺的；
+  `conflicts` 是这样之后不够、而且有别的目标占着的物品（谁占了多少）。要不要动别的目标的材料由 agent 按优先级问用户。`--ignore-goals` 时这几项都没有。
 
 `maapilot calc craft <物品> [--count N]`
 用仓库现有材料再合成 N 个要做什么（仓库里已有的不算）：先合哪些中间材料、每步材料与龙门币、还缺什么基础材料、加工站心情消耗。
@@ -429,7 +481,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 `{"item", "count", "steps": [{"item", "id", "count", "times", "station": "WORKSHOP|MANUFACTURE|SHOP", "costs": [...], "lmd": n, "mood"?: n}], "lmd": n, "short": [...], "spend": [...], "mood": n, "depot_at"}`
 
 `maapilot calc stages <物品>[=数量] …`
-缺的材料去哪刷最省理智：每种物品给几关（每件期望理智、掉率、今天开不开，只看常驻主线 / 资源本 / 芯片本），再给一个合并的建议
+缺的材料去哪刷最省理智：每种物品给几关（每件期望理智、掉率、今天开不开；同 `data item`：常驻主线 / 资源本 / 芯片本和 MAA 能导航的活动关），再给一个合并的建议
 （每种物品挑每件期望理智最低的一关，次数 = 数量 ÷ 掉率向上取整；同一关服务几种物品时取最多的次数；不算副产物）。
 `days` 按每天自然恢复 240 理智算。
 `{"per_item": [...], "plan": [{"stage": "PR-C-2", "times": 8, "ap": 36, "sanity": 288, "open_days": "…", "open_today": true, "for": ["辅助芯片组"]}], "sanity_total": 540, "days": 2.3, "daily_sanity": 240, "note": "…", "no_stage"?: [...]}`
@@ -439,6 +491,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 ## goals —— 目标清单（不碰模拟器）
 
 读写 `private/goals.md` 的固定字段；完成或放弃时整段挪进 `private/goals-done.md`。格式见[目标清单](#goalsmd-目标清单)。
+**目标的先后就是优先级**：goals.md 里越靠前越高（进行中、暂停的按顺序从 1 数，`priority`），材料不够分时先给前面的；`add` 加在最后，用 `goals move` 调。
 "分解与进展"是 agent 的工作笔记：可以用 `goals update --note` 追加一行，也可以直接用文件工具编辑。
 
 | 命令 | 做什么 |
@@ -447,6 +500,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 | `goals add --title <标题> --object <对象> --said <原话> --approved <同意> [--premium 是\|否] [--deadline <期限>] [--note <文字>]` | 追加一个目标，状态"进行中"。`--approved` 也可以写成 `--agreed`。`--said` 带日期，如 `把遥练到精2（2026-09-30）`（没写日期就补今天）；`--approved` 如 `2026-09-30 21:40，已报：龙门币约 59 万…`（不以日期开头就在前面补现在的时间）；`--premium` 默认"否"；`--deadline` 写期限（`活动` 目标必填） |
 | `goals update <标题> [--status 进行中\|暂停] [--object …] [--approved …] [--premium 是\|否] [--deadline <期限>\|none] [--note <文字>] [--rename <新标题>]` | 改固定字段（缺的字段补在最后一个字段后面）；`--deadline none`（或空字符串）去掉期限；`--note` 在"分解与进展"末尾追加 `- MM-DD：<文字>`（还没有这一块就先加上标题行） |
 | `goals remove <标题> --status 完成\|放弃 --reason <原因> [--confirmed-by-user]` | 整段挪进 goals-done.md（放在最后），状态改成完成 / 放弃，加一行 `- 结束：<日期> <完成\|放弃>，<原因>（核对结果）`。`--reason` 必填（没写退出码 2 `reason_required`）。完成前先按快照核对（见下） |
+| `goals move <标题> (--top \| --before <标题> \| --after <标题>)` | 调整先后（= 优先级）：整段挪到最前 / 某个目标前面 / 后面，段落内容一字不改。三个参数要且只要一个，相对自己挪退出码 2。`{moved, order: [{title, status, priority}]}` |
 | `goals expire` | 过了期限的目标（进行中、暂停都算）挪进 goals-done.md，状态"到期"，结束行写 `期限 … 已过，自动结束`。`{expired: [...], active}`；`daily run` 开头自动做 |
 
 `<标题>` 精确匹配二级标题，也接受唯一的前缀；找不到或不唯一退出码 2（`unknown_goal` / `ambiguous_goal`）。
@@ -463,7 +517,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 // goals list
 {"goals": [{"title": "遥 精2", "status": "进行中", "object": "干员 遥 → 精2 1级",
             "said": "把遥练到精2（2026-09-30）", "approved": "2026-09-30 21:40，已报：…", "premium": false,
-            "deadline": null, "expired": false,
+            "deadline": null, "expired": false, "priority": 1,
             "notes": "分解与进展（agent 自由写）：\n- …"}],
  "active": 1,
  "problems": [{"title": "…", "file": "goals.md", "message": "缺少字段：同意"}]}
@@ -476,7 +530,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 过了期限的目标不算进行中（`active` 不算它，`daily run` 不为它叫 agent），等 `goals expire` 挪走。期限写法不对、`活动` 目标没写期限在 `problems` 里报。
 
 写目标的同意来自对话（用户看过 `calc` 报的数、说了同意），记在"同意"那一行；命令本身不再弹确认。
-程序里 `maapilot.flows.goals.active_goals()` / `active_count()` 给 `daily run`、`doctor --brief` 用；`expire_due()` 是 `goals expire` 的函数版本，
+程序里 `maapilot.flows.goals.active_goals()`（按优先级，带 `priority`）/ `active_count()` 给 `daily run`、`doctor --brief`、`calc need` 用；`expire_due()` 是 `goals expire` 的函数版本，
 `snapshot()` / `diff()` 给 `daily run` 比较前后的目标（见「daily」的 `goals_change`）。
 
 ## op / craft —— 快捷操作（碰模拟器）
@@ -594,6 +648,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
 剿灭在一周里连续 2 次没做成（接管也没救回来，多半是还不能代理）→ 这周的日常不再打（`skipped`），汇报里告警；下周一 04:00 清零。
+本周合成玉拿满也跳过：自己的记录还没拿满时先问一次森空岛（接了的话，见「maa」），跳过的原因里写 `（current/total）`。
 会话里跑停下交给 agent → 退出码 1（`handoff`）；定时运行里有没做成（agent 也没处理好）的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`。
 
 `--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`、识别干员练度写 `box`，不列就不跑）；`--no-agent` 不启动无头 agent（失败只记下）。
@@ -629,7 +684,7 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
 工作目录是仓库根目录（运行时由安装位置推出），显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝），
 环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
 agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
-（程序据此判断 `recovered`）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
+（程序据此判断 `recovered`）；每个提示都要求全程用中文、**不要** `report write --append`（最后的回复就是总结，程序放进汇报）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。刷理智（`farm`）的时限按理智算：先读理智（`private/state/sanity.json` 1 小时内的直接用，
 没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity` 回首页读；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
@@ -658,7 +713,8 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 只认命令开始之后跑完的（`finished_at` 晚于开始时间）。等着的那次进程没了而汇报还写着 `running` → 当成 `aborted`（`alerts` 里写明）。
 每次也看一眼官方日程（只有官服；有缓存而旧了顺手重拉，没缓存不拉；出错当没有）：`news` 的 `due` 不空 → 退出码 0，
 `data: {kind: "news", due: [时间点…], lines: [...], seen: false}`（时间点同「news」），agent 按 `maapilot-events` 跟用户说、`news told <key>…`、再挂一个。
-默认最多等 110 分钟（Claude Code 的后台 Bash 最长 2 小时），到时退出码 1、`watch_timeout`（`data: {running, next_at}`），agent 再挂一个就行。
+默认最多等 110 分钟（Claude Code 的后台 Bash 最长 2 小时），等满了没有日常跑完是正常结束：退出码 0，
+`data: {kind: "timeout", waited_min, running, next_at, seen: true}`，agent 什么都不说、再挂一个。
 
 ```json
 {"kind": "daily", "run_id": "20261004-1640", "trigger": "schedule", "started_at": "…", "finished_at": "…", "status": "stopped", "ok": false,
@@ -710,7 +766,9 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 | `report write <run_id> --append <文字>` | 在这次运行的汇报后面追加一段"补充"（运行还没结束也可以，结束时保留） |
 | `report seen [<run_id>]` | 记下这次运行的结果已经告诉过用户（默认最近一次）：写进 `private/reports/seen.json`（`{run_id: 时间}`）。`{"run_id", "seen_at"}`；没有这次运行退出码 2（`unknown_run`） |
 
-汇报的 Markdown：开头一句（按 `status`）、「做了什么」、「仓库变化」（维护没跑时不写）、「目标变动」（有 `goals_change` 或 `goals_expired` 时）、「要注意」（告警）、「补充」（`report write`）。
+汇报的 Markdown：开头一句（按 `status`）、「做了什么」（每项一行；MAA 项失败时 agent 接手的总结缩进挂在下面；`game_update`、`maintenance` 各一行带 agent 的总结；
+目标部分只写一行"见下面"）、「目标部分」（做目标部分的 agent 的总结全文）、「仓库变化」（维护没跑时不写）、「目标变动」（有 `goals_change` 或 `goals_expired` 时）、
+「要注意」（告警）、「补充」（`report write`；和某个 agent 总结几乎一样的不再重复写）。agent 总结最后的「结果：…」一行（给程序判断用）不写进汇报。
 "有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的、赶上维护的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
 `doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
 
@@ -728,6 +786,7 @@ private/
   goals-done.md      完成或放弃的目标
   state/             depot.json  box.json  sanity.json（最新快照）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
+  cache/copilot/     copilot strip 存的去掉练度要求的作业
   log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  cron.log
                      daily-<run_id>.jsonl（一次日常的每一步）  agent-<run_id>-<序号>-<项>.jsonl（无头 agent 的输出）
   reports/           <YYYY-MM-DD-HHMM>.md / .json（每次日常的汇报）
@@ -827,7 +886,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 ### log/
 
-`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "error"?, "run_id"?, "depot_change"?, "shot_now"?}`（`shot_now`：maa 任务失败时当场截的图）。
+`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "error"?, "message"?, "stage"?, "run_id"?, "depot_change"?, "shot_now"?}`
+（失败时 `error` 是 `error.code`、`message` 是原话，快捷操作另有 `stage`：做到哪一步；`shot_now`：maa 任务失败时当场截的图）。
 `depot_change` 只在命令本身读过仓库时有（`state depot`）；`run_id` 取环境变量 `MAAPILOT_RUN_ID`（`daily run` 给子进程设）。
 写记录用 `maapilot.tools.common.logged`（包住处理函数）或 `common.record()`。`maa/` 下是每次 maa-cli 调用的完整日志。
 
@@ -879,6 +939,9 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maapilot news told:*)",
       "Bash(maapilot game version:*)",
       "Bash(maapilot game update:*)",
+      "Bash(maapilot copilot find:*)",
+      "Bash(maapilot copilot show:*)",
+      "Bash(maapilot copilot strip:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/goals.md)",
