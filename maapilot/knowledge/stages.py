@@ -6,7 +6,8 @@
 - main：主线 / 别传（MAA 支持全部主线编号；第 9 章起标准/磨难分档时加 -NORMAL / -HARD 后缀）
 - resource：CE-6 LS-6 CA-5 AP-5 SK-5；chip：PR-A/B/C/D-1/2
 - annihilation：常驻剿灭三图（ANNIHILATION_MAA_VALUES）；当期剿灭在 MAA 里写 "Annihilation"
-- ss_current / ss_reopen：活动关只有在给定的 `events` 里当前开放时才可导航（值为完整编号）
+- ss_current / ss_reopen：活动关只有在给定的 `events` 里当前开放时才可导航（值为完整编号）。
+  没给 events 时用 MAA 的活动列表（knowledge/maa_activity：MAA 能导航的当期活动关）；不能导航的活动关 reason 里写原因
 - not_navigable：教程 TR-x、突袭 #f# / 六星 #s、简单模式 easy_、保全 LT-x、其他一切
 """
 from __future__ import annotations
@@ -53,6 +54,7 @@ class StageRef:
     ap_cost: int
     maa_value: str | None
     nav_kind: str
+    reason: str | None = None  # 不能导航的活动关：为什么（MAA 还没加这期活动、只支持哪几关……）
 
     @property
     def navigable(self) -> bool:
@@ -187,9 +189,24 @@ def _nav(s: dict, events=None, at=None) -> tuple[str, str | None]:
 
 def _ref(s: dict, events=None, at=None) -> StageRef:
     kind, value = _nav(s, events, at)
+    reason = None
+    if kind == "not_navigable" and s.get("stageType") == "ACTIVITY" and hasattr(events, "why_not"):
+        try:
+            reason = events.why_not(s, at)
+        except Exception:                                # noqa: BLE001
+            reason = None
     return StageRef(stage_id=s["stageId"], code=s.get("code") or "", name=s.get("name") or "",
                     zone_id=s["zoneId"], difficulty=s.get("difficulty") or "NORMAL",
-                    ap_cost=int(s.get("apCost") or 0), maa_value=value, nav_kind=kind)
+                    ap_cost=int(s.get("apCost") or 0), maa_value=value, nav_kind=kind, reason=reason)
+
+
+def default_events():
+    """没给 events 时用的：MAA 的活动列表（有文件才有）；读不了 → None。"""
+    try:
+        from maapilot.knowledge import maa_activity
+        return maa_activity.events()
+    except Exception:                                    # noqa: BLE001
+        return None
 
 
 # --- 解析 --------------------------------------------------------------------------
@@ -222,10 +239,15 @@ def _pick(code: str, cands: list[dict], events=None, at=None) -> dict:
 
 def resolve_stage(text: str, events=None, at=None) -> StageRef:
     """接受 stageId（main_01-07、main_01-07#f#）、编号（1-7、AP-5、PR-C-2）、`活动名/编号`、剿灭中文名（龙门外环）。
-    编号重名时优先 `events`（Events 对象，鸭子类型）里 `at` 时刻开放的活动，仍有多个抛 AmbiguousStageError。"""
+    编号重名时优先 `events`（Events 对象，鸭子类型）里 `at` 时刻开放的活动，仍有多个抛 AmbiguousStageError。
+    events 不给 → MAA 的活动列表（default_events）；明确不要活动信息就传 events=False。"""
     key = (text or "").strip()
     if not key:
         raise UnknownStageError(text)
+    if events is None:
+        events = default_events()
+    elif events is False:
+        events = None
     st = _stage_table()
     if key in st:
         return _ref(st[key], events, at)

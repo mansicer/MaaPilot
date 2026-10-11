@@ -36,8 +36,12 @@ description: 明日方舟官方日程 via MaaPilot —— 看官方公告里的�
 
 1. **查清楚**（先做完上一节的更新）：
    - 公告全文（`news show <cid>`）：活动时间、分几段开放、活动干员、商店里的东西、签到和任务奖励。
-   - 活动关：`maapilot data stage <编号>` 看理智和掉落（新关的掉率要过几天才有统计，没有就说没有）。
-     能不能自动刷：先 `maapilot maa fight <编号> --times 1` 试一次（花一次的理智），不行就说 MAA 还不支持，过几天再试。
+   - 活动关：`maapilot data stage <编号>` 看理智、掉落和 `maa_activity`（MAA 认不认这个活动、支持哪几关、活动到哪天）。新关的掉率要过几天才有统计，没有就说没有。
+     **MAA 能导航的活动关**（`nav_kind` 是 `ss_current`）直接 `maapilot maa fight <编号>` 刷，和主线一样。
+     MAA 不支持的（`maa fight` 报 `maa_unsupported_stage`，原因写在 `error.message`）：MAA 一般活动开始后一两天才更新，而且常常只支持其中几关。
+     先挑它支持的关刷；非刷不可的才手动进关卡页、勾代理、点连战（截图一步一步看），把走法记进目标笔记。
+     **每天日常都重新看一次 `data stage`**：MAA 更新以后就改用 `maa fight`，不要一直手动点。
+   - 没打过的活动关：按 `maapilot-battle` 找作业（`maapilot copilot find <编号>`）。
    - 和用户的目标对一对：`maapilot goals list`、`calc need`：活动关掉的、商店里换得到的，有没有目标正缺的。
 2. **跟用户说**（像玩家一样说，不念公告原文）：活动叫什么、到哪天；有什么值得拿的（活动干员、模组材料、商店里的稀缺材料）；
    哪些是免费的（签到、任务奖励）。然后一次问一个问题，给选项和后果，例如：

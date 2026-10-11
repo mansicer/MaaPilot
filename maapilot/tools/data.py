@@ -89,8 +89,31 @@ def open_info(stage_id: str) -> dict:
             "open_today": calendar.game_weekday() in days}
 
 
+NAVIGABLE_FOR_FARM = ("main", "resource", "chip", "ss_current", "ss_reopen")
+
+
+def activity_info(ref) -> dict | None:
+    """活动关：MAA 活动列表里的这期活动 {name, start, end, listed, reopen, open_now}；不是活动关或没有列表 → None。"""
+    if not ref.zone_id.startswith("act") and ref.nav_kind not in ("ss_current", "ss_reopen"):
+        return None
+    try:
+        from maapilot.knowledge import maa_activity, stages
+        if not maa_activity.available():
+            return None
+        a = maa_activity.for_stage(stages._stage_table()[ref.stage_id])
+    except Exception:                                    # noqa: BLE001
+        return None
+    if a is None:
+        return {"in_maa_list": False}
+    d = a.to_dict()
+    return {"in_maa_list": True, "name": d["name"], "start": d["start"], "end": d["end"], "listed": d["listed"],
+            "supported": sorted(maa_activity.supported_values(a)), "reopen": d["reopen"],
+            "open_now": a.open_at(maa_activity._now()), "min_maa": d["min_maa"]}
+
+
 def best_stages(item_id: str, lv=None, limit: int = 5) -> list[dict]:
-    """这件物品掉得最好的几关（常驻、能导航的关）：每件期望理智 = 理智 ÷ 每次期望掉落。"""
+    """这件物品掉得最好的几关（能导航的关：常驻 + MAA 能导航的当期活动关）：每件期望理智 = 理智 ÷ 每次期望掉落。
+    活动关带 event_end（活动什么时候结束）。"""
     from maapilot.knowledge import stages
     lv = lv if lv is not None else live()
     out = []
@@ -104,11 +127,14 @@ def best_stages(item_id: str, lv=None, limit: int = 5) -> list[dict]:
                 ref = stages.resolve_stage(sid)
             except Exception:
                 continue
-            if ref.nav_kind not in ("main", "resource", "chip"):
+            if ref.nav_kind not in NAVIGABLE_FOR_FARM:
                 continue
-            out.append({"stage": ref.code, "stage_id": sid, "ap": ap, "rate": round(rate, 4),
-                        "sanity_per_item": round(ap / rate, 1), "samples": lv.samples.get(sid, {}).get(item_id),
-                        **open_info(sid)})
+            row = {"stage": ref.code, "stage_id": sid, "ap": ap, "rate": round(rate, 4),
+                   "sanity_per_item": round(ap / rate, 1), "samples": lv.samples.get(sid, {}).get(item_id),
+                   **open_info(sid)}
+            if ref.nav_kind in ("ss_current", "ss_reopen"):
+                row["event_end"] = (activity_info(ref) or {}).get("end")
+            out.append(row)
         out.sort(key=lambda r: r["sanity_per_item"])
         return out[:limit]
     from maapilot.knowledge.recipes import obtain       # 没有掉率缓存：只给主掉落关
@@ -232,9 +258,15 @@ def cmd_stage(args):
     main = [{"id": str(r["id"]), "name": _name(str(r["id"])), "type": r.get("dropType")}
             for r in (st.get("stageDropInfo") or {}).get("displayDetailRewards") or []
             if r.get("dropType") in ("NORMAL", "MAIN", "SPECIAL", "ADDITIONAL")]
-    return {"code": ref.code, "stage_id": ref.stage_id, "name": ref.name, "ap": ref.ap_cost,
-            "navigable": ref.navigable, "kind": ref.nav_kind, **open_info(ref.stage_id),
-            "drops": drops, "listed_drops": main}
+    out = {"code": ref.code, "stage_id": ref.stage_id, "name": ref.name, "ap": ref.ap_cost,
+           "navigable": ref.navigable, "kind": ref.nav_kind, "nav_kind": ref.nav_kind, "maa_value": ref.maa_value,
+           **open_info(ref.stage_id), "drops": drops, "listed_drops": main}
+    if ref.reason:
+        out["not_navigable_reason"] = ref.reason
+    act = activity_info(ref)
+    if act is not None:
+        out["maa_activity"] = act
+    return out
 
 
 def register(sub) -> None:
