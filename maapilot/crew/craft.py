@@ -55,8 +55,11 @@ class CraftError(RuntimeError):
 
 
 def goto_workshop(g: Game) -> None:
-    """State-aware: works from the crafting screen, the room, the base overview or anywhere else."""
-    for attempt in range(6):
+    """State-aware: works from the crafting screen, the room, the base overview or anywhere else.
+    进加工站用 nav.goto_room（和训练室同一条路：抽屉 → 基建 → 进驻总览）；以前这里自己点左上角 (270,38) 当抽屉，
+    2026-10 版本更新后首页那个位置变成了别的图标，就进不去了。"""
+    from maapilot.crew import nav
+    for attempt in range(4):
         if g.find(r"离开罗德岛基建", (300, 260, 700, 80)):     # "leave the base?" prompt: stay
             g.tap(443, 495, delay=2.0)
         if g.find(r"加工份数", (1040, 400, 140, 50)):
@@ -66,24 +69,10 @@ def goto_workshop(g: Game) -> None:
             g.tap_hit(hit, delay=3)
             g.wait(r"加工份数", (1040, 400, 140, 50))
             return
-        if g.find(r"设施信息", (10, 170, 120, 50)) and not g.find(r"点击进行加工", (0, 660, 200, 50)):
-            g.back(delay=2.5)                                 # inside another room: back to the overview
+        try:
+            nav.goto_room(g, r"加工站")
+        except RuntimeError:
             continue
-        hit = g.find(r"加工站", (0, 60, REF_W, 620))
-        if hit and g.find(r"进驻总览", (20, 95, 140, 50)):   # base overview
-            g.tap_hit(hit, delay=3)
-            continue
-        # anywhere else: drawer -> 基建
-        for _ in range(3):
-            g.tap(270, 38, delay=1.5)
-            try:
-                g.wait(r"基建", (640, 90, 120, 50), timeout=4)
-                g.tap(688, 150, delay=6)
-                break
-            except TimeoutError:
-                continue
-        if g.find(r"进驻总览", (20, 95, 140, 50)) and not g.find(r"加工站", (0, 60, REF_W, 620)):
-            g.swipe(900, 400, 500, 400, duration_ms=500, delay=1.5)   # overview may be scrolled
     g.save("goto_workshop_fail")
     raise CraftError("could not reach the workshop crafting screen")
 

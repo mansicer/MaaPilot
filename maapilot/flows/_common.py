@@ -82,6 +82,7 @@ def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: 
     body 抛出的非 CliError 异常 → 退出码 1 shortcut_failed，data 带 stage / shot / done（异常上的 reached、made 等也带上）。"""
     t0 = time.monotonic()
     code = 0
+    err: dict = {}
     try:
         with cliutil.device(command):
             pr = Progress()
@@ -114,6 +115,7 @@ def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: 
                                exit=FAILED, data=data) from e
     except CliError as e:
         code = e.exit
+        err = {"error": e.code, "message": e.message, "stage": (e.data or {}).get("stage") if isinstance(e.data, dict) else None}
         raise
     finally:
-        journal(command, args, code == 0, code, time.monotonic() - t0)
+        journal(command, args, code == 0, code, time.monotonic() - t0, **err)   # 失败原因也记下（以后排查不用翻对话）

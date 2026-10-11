@@ -44,10 +44,32 @@ def _skill_costs(name: str, skill: int) -> list[list[tuple[str, int]]]:
     return out
 
 
+DONE_OK = (802, 583)          # "技能 X 已完成专精等级N" 弹窗下面的对勾
+
+
+def dismiss_done(g: Game, wait_s: float = 8.0) -> str | None:
+    """上一阶专精练完后（训练位显示"训练完成"），点训练位会先弹"技能 X 已完成专精等级N"（整屏，有几秒动画），点对勾关掉。
+    等到出现训练计划页（协助者）或这个弹窗为止，最多 wait_s 秒。返回弹窗文字 / None（没有弹窗）。"""
+    deadline = time.time() + wait_s
+    text = None
+    while time.time() < deadline:
+        hit = g.find(r"已完成专精等级", (300, 480, 800, 80))
+        if hit:
+            text = hit.text
+            g.tap(*DONE_OK, delay=2.5)
+            continue
+        if text or g.find(r"协助者", (60, 350, 150, 50)):
+            return text
+        time.sleep(0.8)
+    return text
+
+
 def open_plan(g: Game) -> str:
     """Open the training plan screen. Returns 'training' or 'idle'."""
     goto_room(g, r"训练室")
     g.tap(*SLOT, delay=3.0)
+    if dismiss_done(g) and not g.find(r"协助者", (60, 350, 150, 50)):   # 上一阶练完：点训练位先弹完成提示
+        g.tap(*SLOT, delay=3.0)
     g.wait(r"协助者", (60, 350, 150, 50))
     time.sleep(1)
     return "training" if g.find(r"训练中", (140, 280, 140, 50)) else "idle"

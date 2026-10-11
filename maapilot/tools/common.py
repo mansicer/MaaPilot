@@ -94,7 +94,7 @@ def logged(handler):
         except CliError as e:
             extra = (e.data or {}).pop("_log", None) if isinstance(e.data, dict) else None
             record(command, _args_dict(args), ok=False, exit=e.exit, duration_s=time.monotonic() - t0,
-                   error=e.code, **(extra or {}))
+                   error=e.code, message=e.message, **(extra or {}))
             raise
         except Exception as e:
             record(command, _args_dict(args), ok=False, exit=FAILED, duration_s=time.monotonic() - t0,
