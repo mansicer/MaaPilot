@@ -70,8 +70,9 @@ def _check_forbidden(params: dict, where: str) -> None:
 
 
 def resolve_stage(code: str) -> tuple[str, dict]:
-    """关卡写法 → (给 MAA 的值, 关卡信息)。数据表里认不出的原样交给 MAA（活动关等）。
-    今天不开的资源本 / 芯片本 → CliError(not_open)。"""
+    """关卡写法 → (给 MAA 的值, 关卡信息)。数据表里认不出的原样交给 MAA（比数据表新的活动关等）。
+    今天不开的资源本 / 芯片本 → CliError(not_open)；MAA 导航不了的活动关（MAA 活动列表里没有这期、
+    或这期只支持别的几关）→ CliError(maa_unsupported_stage)。"""
     info: dict = {"code": code}
     try:
         from maapilot.knowledge import calendar, stages
@@ -80,6 +81,12 @@ def resolve_stage(code: str) -> tuple[str, dict]:
     except Exception:                              # 没有数据表、认不出、重名：交给 MAA 自己认
         return code, info
     info.update({"stage_id": ref.stage_id, "code": ref.code, "ap_cost": ref.ap_cost, "nav_kind": ref.nav_kind})
+    if ref.nav_kind == "not_navigable" and ref.reason:     # 只有读到了 MAA 的活动列表才有 reason
+        not_yet = "活动列表里还没有" in ref.reason
+        raise CliError("maa_unsupported_stage", ref.reason, exit=FAILED,
+                       hint=("MAA 一般活动开始后一两天更新；明天再试，或者手动进关卡页用代理" if not_yet else
+                             "换 MAA 支持的关，或者手动进关卡页用代理"),
+                       data={"stage": ref.code, "stage_id": ref.stage_id, "reason": ref.reason})
     if days is not None:
         wd = calendar.game_weekday()
         info["open_today"] = wd in days
@@ -223,6 +230,17 @@ def record_annihilation(times: int, got: int, *, drops_seen: bool) -> dict:
     d["failures"] = 0
     if (times and not got and drops_seen) or d["orundum"] >= ORUNDUM_WEEKLY_CAP:
         d["capped"] = True
+    common.write_json(paths.STATE / "annihilation.json", d)
+    return d
+
+
+def note_annihilation_progress(current: int, total: int, *, source: str = "skland") -> dict:
+    """游戏里的本周剿灭合成玉（森空岛给的 current/total，准）记进本周记录：以它为准覆盖自己累加的数，拿满了就 capped。"""
+    from maapilot import paths
+    d = annihilation_week()
+    d["orundum"] = int(current)
+    d["capped"] = int(current) >= int(total)
+    d["progress"] = {"current": int(current), "total": int(total), "source": source, "at": common.iso()}
     common.write_json(paths.STATE / "annihilation.json", d)
     return d
 

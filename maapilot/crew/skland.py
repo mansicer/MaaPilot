@@ -209,10 +209,23 @@ def to_box(info: dict, names: dict | None = None) -> dict:
                         "mastery": s.get("specializeLevel", 0)}
                        for i, s in enumerate(c.get("skills") or [])],
             "modules": [{"id": e.get("id"), "name": equip_names.get(e.get("id")) or (einfo.get(e.get("id")) or {}).get("name")
-                         or e.get("id"), "level": e.get("level"), "equipped": e.get("id") == equipped}
+                         or e.get("id"), "level": e.get("level"), "equipped": e.get("id") == equipped,
+                         "locked": e.get("locked")}
                         for e in c.get("equip") or []],
         }
     return ops
+
+
+def annihilation_of(info: dict) -> dict | None:
+    """data.campaign → 本周剿灭合成玉 {current, total} 和每张剿灭图的最高击杀 {campaignId: maxKills}（400 = 能代理）。"""
+    camp = info.get("campaign") or {}
+    reward = camp.get("reward") or {}
+    if "current" not in reward or "total" not in reward:
+        return None
+    names = {k: (v or {}).get("name") for k, v in (info.get("campaignInfoMap") or {}).items()}
+    return {"current": int(reward["current"]), "total": int(reward["total"]),
+            "max_kills": {r.get("campaignId"): {"name": names.get(r.get("campaignId")), "kills": r.get("maxKills")}
+                          for r in camp.get("records") or [] if r.get("campaignId")}}
 
 
 def sanity_of(info: dict, now_ts: float | None = None) -> dict | None:

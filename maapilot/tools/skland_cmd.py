@@ -226,11 +226,37 @@ def read_skland() -> dict:
     san = skland.sanity_of(info)
     if san:
         common.write_json(paths.STATE / "sanity.json", {"at": at, **san, "source": "skland"})
+    ann = _note_annihilation(info)
     _record(store, True)
     return {"at": at, "source": "skland", "uid": uid, "operators": len(ops),
             "with_modules": sum(1 for o in ops.values() if o["modules"]),
             "mastered": sum(1 for o in ops.values() if any(s["mastery"] for s in o["skills"])),
-            "sanity": san}
+            "sanity": san, "annihilation": ann}
+
+
+def _note_annihilation(info: dict) -> dict | None:
+    from maapilot.crew import skland
+    from maapilot.tools import maa_cmd
+    ann = skland.annihilation_of(info)
+    if ann:
+        maa_cmd.note_annihilation_progress(ann["current"], ann["total"])
+    return ann
+
+
+def annihilation_progress() -> dict | None:
+    """只为剿灭读一次森空岛（几秒，不碰模拟器、不改 box.json）：本周合成玉 {current, total, max_kills}，记进本周剿灭记录。
+    没接森空岛 → None；接口出错抛 CliError。"""
+    from maapilot.crew import skland
+    store = load_store()
+    if store is None:
+        return None
+    client = skland.Client(store["token"], did=store.get("did"))
+    try:
+        uid = store.get("uid") or str(skland.choose_role(client.roles(), _server())["uid"])
+        info = client.player_info(uid)
+    except skland.SklandError as e:
+        raise _cli_error(e, store["token"]) from None
+    return _note_annihilation(info)
 
 
 @common.logged

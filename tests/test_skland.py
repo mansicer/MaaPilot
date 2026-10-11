@@ -151,8 +151,8 @@ def test_to_box_and_sanity():
     assert a["elite"] == 2 and a["level"] == 80 and a["potential"] == 6 and a["rarity"] == 5 and a["skill_level"] == 7
     assert [s["mastery"] for s in a["skills"]] == [0, 3, 1] and a["skills"][1] == {"index": 2, "id": "skchr_amiya_2", "name": "精神爆发", "mastery": 3}
     assert a["skills"][0]["name"] is None
-    assert a["modules"] == [{"id": "uniequip_001_amiya", "name": "证章", "level": 1, "equipped": False},
-                            {"id": "uniequip_002_amiya", "name": "接口给的模组名", "level": 3, "equipped": True}]
+    assert a["modules"] == [{"id": "uniequip_001_amiya", "name": "证章", "level": 1, "equipped": False, "locked": None},
+                            {"id": "uniequip_002_amiya", "name": "接口给的模组名", "level": 3, "equipped": True, "locked": None}]
     assert ops["新干员"]["rarity"] == 6 and ops["新干员"]["modules"] == [] and ops["新干员"]["potential"] == 1
     assert skland.sanity_of(INFO, now_ts=1000 + 360 * 10) == {"current": 110, "max": 135}
     assert skland.sanity_of({"status": {"ap": {"current": 358, "max": 205, "lastApAddTime": 0}}}, 10 ** 9)["current"] == 358
@@ -241,3 +241,18 @@ def test_guided_browser_opens_login_then_token_page(monkeypatch, capsys):
     monkeypatch.setattr("webbrowser.open", lambda url, new=0: False)      # 没有图形界面：只提示手动打开
     skland_cmd._guided_browser("https://example.test/token")
     assert "手动打开" in capsys.readouterr().err
+
+
+def test_annihilation_progress_from_campaign(tmp_path, monkeypatch):
+    info = {"campaign": {"reward": {"current": 1215, "total": 1800},
+                         "records": [{"campaignId": "camp_r_33", "maxKills": 370}, {"campaignId": "camp_01", "maxKills": 400}]},
+            "campaignInfoMap": {"camp_r_33": {"name": "默祷圣祠"}}}
+    ann = skland.annihilation_of(info)
+    assert ann["current"] == 1215 and ann["total"] == 1800
+    assert ann["max_kills"]["camp_r_33"] == {"name": "默祷圣祠", "kills": 370}
+    assert skland.annihilation_of({}) is None
+    from maapilot.tools import maa_cmd
+    d = maa_cmd.note_annihilation_progress(1215, 1800)
+    assert d["orundum"] == 1215 and d["capped"] is False and d["progress"]["source"] == "skland"
+    assert maa_cmd.note_annihilation_progress(1800, 1800)["capped"] is True
+    assert maa_cmd.annihilation_week()["capped"] is True
