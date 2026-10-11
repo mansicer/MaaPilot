@@ -47,7 +47,7 @@
 | `state depot / box / sanity` | 只读（要进页面） | 放行 | A |
 | `state show` | 否 | 放行 | A |
 | `data …` | 否（`sync` 联网） | 放行 | A |
-| `calc need / craft / stages` | 否 | 放行 | A |
+| `calc need / craft / stages / event` | 否 | 放行 | A |
 | `lock status` / `lock release` | 否 | 放行 / **询问** | A |
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
@@ -485,6 +485,11 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 （每种物品挑每件期望理智最低的一关，次数 = 数量 ÷ 掉率向上取整；同一关服务几种物品时取最多的次数；不算副产物）。
 `days` 按每天自然恢复 240 理智算。
 `{"per_item": [...], "plan": [{"stage": "PR-C-2", "times": 8, "ap": 36, "sanity": 288, "open_days": "…", "open_today": true, "for": ["辅助芯片组"]}], "sanity_total": 540, "days": 2.3, "daily_sanity": 240, "note": "…", "no_stage"?: [...]}`
+
+`maapilot calc event`
+正开着的活动（MAA 的活动列表，见「data」的活动关）每关：理智、主要掉落（只算材料，不算活动代币）和等级 `tier`（T1–T5）、一图流价值 `value`、
+企鹅物流有掉率时的每点理智价值 `value_per_ap`、MAA 能不能直接刷 `maa_can_fight`。排序：MAA 能刷的在前 → 最高材料等级 `top_tier` 高的在前 → `value_per_ap` 高的在前。只给事实。
+`{"activities": [{"name": "昨日海", "end": "…", "listed": [...], …, "stages": [{"code": "YW-6", "stage_id": "act52side_06", "ap": 21, "maa_can_fight": true, "top_tier": 3, "value_per_ap": null, "drops": [{"id": "30063", "name": "全新装置", "tier": 3, "value": 37.14}]}]}], "note": null}`
 
 程序里 `maapilot.tools.calc.parse_object(text)` 解析"对象"一行（`goals` 可以用它校验），`need()` / `craft()` / `stages()` 是函数版本。
 

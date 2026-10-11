@@ -466,6 +466,56 @@ def cmd_stages(args):
     return stages(args.items)
 
 
+# --- event ------------------------------------------------------------------------------
+
+def _tier(iid: str, items: dict) -> int | None:
+    r = str((items.get(iid) or {}).get("rarity") or "")
+    m = re.search(r"(\d)", r)
+    return int(m.group(1)) if m else None
+
+
+def event_stages(at=None) -> dict:
+    """正开着的活动（MAA 的活动列表）里每一关：理智、主要掉落和它的等级（T1–T5）、一图流价值、MAA 能不能刷。
+    排序：MAA 能刷的在前 → 主要掉落等级高的在前 → 每点理智的价值高的在前。只给事实，刷哪关由 agent 定。"""
+    from maapilot.knowledge import gamedata, maa_activity, stages
+    from maapilot.tools.data import live
+    items = gamedata._items()
+    lv = live()
+    values = (lv.values if lv is not None else None) or {}
+    rows = stages._stage_table()
+    out = []
+    for a in maa_activity.current(at):
+        sup = maa_activity.supported_values(a)
+        st_out = []
+        for sid, st in sorted(rows.items()):
+            if not (st.get("stageType") == "ACTIVITY" and st.get("difficulty") == "NORMAL" and "#" not in sid
+                    and maa_activity._matches(a, st)) or not st.get("apCost"):
+                continue
+            code = st.get("code") or sid
+            drops = []
+            for r in (st.get("stageDropInfo") or {}).get("displayDetailRewards") or []:
+                iid = str(r.get("id"))
+                if r.get("dropType") not in ("NORMAL", "MAIN", "SPECIAL", "ADDITIONAL") or iid not in items:
+                    continue
+                if (items[iid].get("classifyType") or "") != "MATERIAL":
+                    continue                              # 活动代币、家具等不算材料
+                drops.append({"id": iid, "name": items[iid].get("name"), "tier": _tier(iid, items),
+                              "value": round(values[iid], 2) if iid in values else None})
+            eff = lv.efficiency(sid) if lv is not None and sid in (lv.rates or {}) else None
+            top = max((d["tier"] or 0 for d in drops), default=0)
+            st_out.append({"code": code, "stage_id": sid, "ap": st.get("apCost"), "maa_can_fight": code in sup,
+                           "drops": sorted(drops, key=lambda d: -(d["tier"] or 0)), "top_tier": top or None,
+                           "value_per_ap": round(eff, 3) if eff is not None else None})
+        st_out.sort(key=lambda r: (not r["maa_can_fight"], -(r["top_tier"] or 0), -(r["value_per_ap"] or 0), r["code"]))
+        out.append({**a.to_dict(), "stages": st_out})
+    return {"activities": out,
+            "note": None if out else "MAA 的活动列表里现在没有开着的活动（或者 MAA 还没更新这期活动）"}
+
+
+def cmd_event(args):
+    return event_stages()
+
+
 def register(sub) -> None:
     g = sub.add_parser("calc", help="纯计算：需求、合成、刷哪关（只给建议）")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
@@ -479,6 +529,8 @@ def register(sub) -> None:
     p.add_argument("item")
     p.add_argument("--count", type=int, default=1)
     p.set_defaults(func=cmd_craft, command="calc craft")
+    p = gs.add_parser("event", help="正开着的活动每关掉什么、材料等级、MAA 能不能刷（刷活动关时挑关用）")
+    p.set_defaults(func=cmd_event, command="calc event")
     p = gs.add_parser("stages", help="缺的材料去哪刷最省理智")
     p.add_argument("items", nargs="+", metavar="物品[=数量]")
     p.set_defaults(func=cmd_stages, command="calc stages")

@@ -160,3 +160,18 @@ def test_best_stages_includes_navigable_event_stages(maa_file):
     assert [r["stage"] for r in rows] == ["YW-8", "1-7"]               # YW-3 MAA 导航不了，不列
     assert rows[0]["event_end"] == maa_activity.activities()[0].end.isoformat(timespec="minutes")
     assert "event_end" not in rows[1]
+
+
+def test_calc_event_prefers_high_tier_maa_stages(maa_file):
+    """calc event：MAA 能刷的在前，主要掉落等级高的在前；活动代币不算材料。"""
+    from maapilot.tools import calc
+    maa_file({"YW": yw()})
+    out = calc.event_stages()
+    acts = out["activities"]
+    assert acts and acts[0]["name"] == "昨日海"
+    rows = acts[0]["stages"]
+    can = [r for r in rows if r["maa_can_fight"]]
+    assert rows[:len(can)] == can
+    tiers = [r["top_tier"] or 0 for r in can]
+    assert tiers == sorted(tiers, reverse=True)
+    assert all("瞻望镜" not in d["name"] for r in rows for d in r["drops"])
