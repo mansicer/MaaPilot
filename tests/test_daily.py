@@ -247,6 +247,10 @@ def test_active_goals_go_to_goal_agent(capsys, env):
     assert "maapilot-daily" in call["argv"][1] and "遥 精2" in call["argv"][1]
     goals_row = next(t for t in out["data"]["tasks"] if t["task"] == "goals")
     assert goals_row["ok"] is True
+    assert "全程用中文" in call["argv"][1] and "不要用 maapilot report write" in call["argv"][1]
+    md = read_report(out["data"])                     # 目标部分单独一节，不写成"agent 接手"，不带「结果：」那行
+    assert "- 目标部分：做完了" in md and "## 目标部分" in md and "关掉了一个公告弹窗" in md
+    assert "agent 接手" not in md and "结果：完成" not in md
     assert [c["args"][1] for c in env["calls"] if c["args"][0] == "guard"] == ["snapshot", "check", "check"]
 
 

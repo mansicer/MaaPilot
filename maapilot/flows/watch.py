@@ -15,7 +15,7 @@ from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
 
 POLL_S = 20
-# Claude Code 的后台 Bash 最长 2 小时：默认等 110 分钟就结束（watch_timeout），agent 再挂一个
+# Claude Code 的后台 Bash 最长 2 小时：默认等 110 分钟就正常结束（kind: timeout），agent 什么都不说、再挂一个
 DEFAULT_TIMEOUT_MIN = 110
 
 
@@ -65,9 +65,9 @@ def watch(timeout_min: float | None = None, *, poll_s: float = POLL_S, sleep=tim
         if n is not None:
             return n
         if now() >= deadline:
-            raise CliError("watch_timeout", f"等了 {int((deadline - start).total_seconds() // 60)} 分钟，这段时间没有日常跑完",
-                           hint="正常情况：再挂一个 maapilot daily watch（后台）接着等", exit=FAILED,
-                           data={"running": live, "next_at": _next_at()})
+            # 等满了没有日常跑完：正常结束（不是出错），agent 什么都不说、再挂一个（seen: true 也是"不用说"）
+            return {"kind": "timeout", "waited_min": int((deadline - start).total_seconds() // 60),
+                    "running": live, "next_at": _next_at(), "seen": True}
         sleep(max(0.5, min(poll_s, (deadline - now()).total_seconds())))
 
 

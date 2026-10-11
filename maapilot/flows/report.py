@@ -233,16 +233,54 @@ def _num(n: int) -> str:
     return f"{sign}{abs(n):,}"
 
 
-def _agent_line(a: dict) -> str:
-    if not a:
-        return ""
-    if a.get("error"):
-        return f"叫 agent 处理没叫起来：{a['error']}"
-    how = {True: "处理好了", False: "没处理好"}.get(a.get("recovered"), "结果不明")
+_OUTCOME_TAIL = re.compile(r"\n?[ \t>*_-]*结果[：:][^\n]*\s*$")
+
+
+def agent_text(a: dict | None) -> str:
+    """agent 的总结，去掉最后一行「结果：完成 / 没做成」（程序自己用，不给人看）。"""
+    s = ((a or {}).get("summary") or "").strip()
+    return _OUTCOME_TAIL.sub("", s).rstrip()
+
+
+def _lines(text: str) -> list[str]:
+    """多行文字 → 行，连续空行并成一行。"""
+    out: list[str] = []
+    for ln in text.splitlines():
+        ln = ln.rstrip()
+        if ln or (out and out[-1]):
+            out.append(ln)
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def _item(head: str, text: str, indent: str = "  ", sep: str = "——") -> list[str]:
+    """列表的一项：head 后面接文字的第一行，其余行缩进到这一项下面（不让总结里的列表跑出去）。"""
+    ls = _lines(text)
+    if not ls:
+        return [head]
+    return [f"{head}{sep}{ls[0]}"] + [indent + ln if ln else "" for ln in ls[1:]]
+
+
+def _how(a: dict, done: str = "处理好了", undone: str = "没处理好") -> str:
     if a.get("timed_out"):
-        how = "超时被停下"
-    s = (a.get("summary") or "（没有留下总结）").strip()
-    return f"agent 接手（{how}）：{s}"
+        return "超时被停下"
+    return {True: done, False: undone}.get(a.get("recovered"), "结果不明")
+
+
+def _agent_lines(a: dict, indent: str = "  ") -> list[str]:
+    """MAA 项失败、agent 接手：挂在这一项下面的一条。"""
+    if not a:
+        return []
+    if a.get("error"):
+        return [f"{indent}- 叫 agent 处理没叫起来：{a['error']}"]
+    return _item(f"{indent}- agent 接手（{_how(a)}）", agent_text(a) or "（没有留下总结）",
+                 indent=indent + "  ", sep="：")
+
+
+def _agent_dur(a: dict) -> str:
+    d = _dur(a.get("duration_s"))
+    return f"（{d}）" if d else ""
 
 
 def _gtitle(g) -> str:
@@ -283,6 +321,22 @@ def goals_change_lines(d: dict) -> list[str]:
         f = GOAL_FIELDS.get(c.get("field"), c.get("field"))
         out.append(f"改了：{c.get('title')} 的{f}：{c.get('before') or '（空）'} → {c.get('after') or '（空）'}")
     return out
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[\W_]+", "", s or "")
+
+
+def same_text(a: str, b: str, threshold: float = 0.7) -> bool:
+    """两段文字（几乎）是同一段话：去掉空白、标点后，较短那段的大部分字按顺序出现在另一段里。"""
+    from difflib import SequenceMatcher
+    x, y = _norm(a), _norm(b)
+    if not x or not y:
+        return False
+    if x in y or y in x:
+        return True
+    m = sum(blk.size for blk in SequenceMatcher(None, x, y, autojunk=False).get_matching_blocks())
+    return m / min(len(x), len(y)) >= threshold
 
 
 def maintenance_line(m: dict) -> str:
@@ -327,6 +381,7 @@ def render(d: dict) -> str:
         except ValueError:
             pass
     out += ["", "## 做了什么", ""]
+    goal_texts: list[str] = []
     for t in d.get("tasks") or []:
         name = label(t.get("task", "?"))
         if t.get("skipped"):
@@ -340,19 +395,44 @@ def render(d: dict) -> str:
             if f.get("medicine_used"):
                 bits.append(f"用了 {f['medicine_used']} 瓶理智液")
             out.append(f"- 刷理智：{'，'.join(bits)}")
-        elif t.get("task") in ("goals", "maintenance"):
-            out.append(f"- {name}：{_agent_line(t.get('agent')) or t.get('note', '')}")
+        elif t.get("task") == "goals":
+            a = t.get("agent") or {}
+            if a.get("error"):
+                out.append(f"- 目标部分：叫 agent 没叫起来（{a['error']}）")
+            else:
+                out.append(f"- 目标部分：{_how(a, '做完了', '没做完')}{_agent_dur(a)}，见下面「目标部分」")
+                goal_texts.append(agent_text(a) or "（agent 没有留下总结）")
+            continue
+        elif t.get("task") == "maintenance":
+            a = t.get("agent") or {}
+            if a.get("error"):
+                out.append(f"- {name}：叫 agent 没叫起来（{a['error']}）")
+            else:
+                out += _item(f"- {name}：agent 看过了{_agent_dur(a)}", agent_text(a) or t.get("note", ""))
+            continue
+        elif t.get("task") == "game_update":
+            a = t.get("agent") or {}
+            head = (f"- {name}：完成（{_dur(t.get('duration_s'))}）" if t.get("ok")
+                    else f"- {name}：没做成（{t.get('error') or '原因不明'}）")
+            if a.get("error"):
+                out += [head, f"  - 叫 agent 更新没叫起来：{a['error']}"]
+            else:
+                out += _item(head, agent_text(a))
             continue
         elif t.get("ok"):
             out.append(f"- {name}：完成（{_dur(t.get('duration_s'))}）")
         else:
             out.append(f"- {name}：没做成——{t.get('error') or '原因不明'}")
         if t.get("agent"):
-            out.append(f"  - {_agent_line(t['agent'])}")
+            out += _agent_lines(t["agent"])
     if d.get("goals_pending"):
         out.append(f"- 目标：有 {d.get('goals_active', '?')} 个进行中的目标，留给会话里的 agent 接着做")
     if d.get("award_pending"):
         out.append("- 领奖励：等目标部分刷完理智再领（会话里的 agent 做）")
+    if goal_texts:
+        out += ["", "## 目标部分", ""]
+        for i, gt in enumerate(goal_texts):
+            out += ([""] if i else []) + _lines(gt)
     change = d.get("depot_change")
     if status != "maintenance":                         # 维护没跑：不写仓库变化
         out += ["", "## 仓库变化", ""]
@@ -383,8 +463,12 @@ def render(d: dict) -> str:
         alerts.append("这次没能核对合成玉、源石（对账没做成）。")
     if alerts:
         out += ["", "## 要注意", ""] + [f"- {a}" for a in alerts]
+    summaries = [agent_text(t.get("agent")) for t in d.get("tasks") or [] if t.get("agent")]
     for a in d.get("appendix") or []:
-        out += ["", f"## 补充（{_when(a.get('at'))}）", "", a.get("text", "").strip()]
+        text = (a.get("text") or "").strip()
+        if any(same_text(text, s_) for s_ in summaries if s_):   # agent 又追加了一遍自己的总结：只留一份
+            continue
+        out += ["", f"## 补充（{_when(a.get('at'))}）", ""] + _lines(text)
     return "\n".join(out).rstrip() + "\n"
 
 

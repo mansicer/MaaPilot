@@ -166,6 +166,11 @@ def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: 
     return info
 
 
+# 每个无头 agent 的提示都带上：语言、总结怎么交（最后的回复就是总结，程序放进汇报；自己再追加会重复）
+REPORT_RULES = ("全程用中文（包括中间的说明），总结写给用户看。"
+                "不要用 maapilot report write 往汇报里追加：你最后的回复就是总结，程序会把它放进这次的汇报。")
+
+
 def evidence_lines(ev: dict | None, task: str) -> list[str]:
     """失败取证（maa 命令的 data.evidence）→ 给 agent 的几行提示。"""
     if not ev:
@@ -200,6 +205,7 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",
+        REPORT_RULES,
         "结束时用几句中文写做了什么、现在怎样；最后一行单独写「结果：完成」或「结果：没做成」。",
     ]).replace("\n\n", "\n")
 
@@ -227,6 +233,7 @@ def goals_prompt(run_id: str, active: list[dict], tasks: list[dict], expired: li
         "用户不在场：目标之外的花费、要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
         "长命令在前台跑、Bash 超时设 600000 毫秒，不放后台；刷图按 skill 里说的分批（--times 每批几次）。",
+        REPORT_RULES,
         "结束时用几句中文写做了什么、花了什么、目标进展到哪，以及要用户决定的事；最后一行单独写「结果：完成」或「结果：没做成」。",
     ])
 
@@ -241,6 +248,7 @@ def expired_prompt(run_id: str, expired: list, tasks: list[dict]) -> str:
         "maapilot goals list --all 看它们的记录（goals-done.md 里）；要看游戏里的情况就截图看（maapilot screen shot），"
         "不刷理智、不兑换、不花任何东西、不改目标，要用户决定的事写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作模拟器，只看文件。",
+        REPORT_RULES,
         "结束时用几句中文写给用户看的总结；最后一行单独写「结果：完成」。",
     ])
 
@@ -268,6 +276,7 @@ def maintenance_prompt(run_id: str, window: dict, info: dict | None = None, expi
         "写成给用户看的几句中文总结；要用户决定的事写清楚。不改目标、不花任何东西。",
         (f"这些限时目标到期，程序已挪进已完成（goals-done.md）：{_titles(expired)}；"
          "看看记录里还有没有没做完的，写进总结告诉用户。") if expired else "",
+        REPORT_RULES,
         "最后一行单独写「结果：完成」。",
     ]).replace("\n\n", "\n")
 
@@ -291,6 +300,7 @@ def update_prompt(run_id: str, info: dict) -> str:
         "公告弹窗关掉，直到回到游戏首页。",
         terms,
         "不做别的日常项、不刷理智、不改目标。别的要用户决定或确认的事一律不做，写进总结。",
+        REPORT_RULES,
         "结束时用几句中文写做了什么、现在是哪个版本、停在哪；最后一行单独写「结果：完成」或「结果：没做成」。",
     ])
 
@@ -727,8 +737,16 @@ def _annihilation_skip() -> str | None:
         w = annihilation_week()
     except Exception:
         return None
+    if not w.get("capped"):
+        try:                                            # 接了森空岛就问一下游戏里的本周进度（自己累加的数会漏）
+            from maapilot.tools.skland_cmd import annihilation_progress
+            if annihilation_progress() is not None:
+                w = annihilation_week()
+        except Exception:                               # noqa: BLE001 - 读不到就按自己的记录
+            pass
     if w.get("capped"):
-        return "本周剿灭的合成玉已经拿满"
+        p = w.get("progress") or {}
+        return "本周剿灭的合成玉已经拿满" + (f"（{p['current']}/{p['total']}）" if p.get("total") else "")
     if w.get("blocked"):
         return f"这周已经连着 {w.get('failures')} 次没打成（多半是还不能代理），这周先不打"
     return None

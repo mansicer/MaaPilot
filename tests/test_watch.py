@@ -93,7 +93,8 @@ def test_crashed_run_counts_as_aborted(monkeypatch):
 def test_timeout_and_cli(capsys):
     rep("20261004-0440", finished=now() - timedelta(hours=10))
     code, env = run(capsys, "daily", "watch", "--timeout-min", "0")
-    assert code == 1 and env["error"]["code"] == "watch_timeout" and "再挂一个" in env["error"]["hint"]
+    assert code == 0 and env["ok"] and env["error"] is None                # 等满了不算出错
+    assert env["data"]["kind"] == "timeout" and env["data"]["seen"] is True
     assert env["data"]["running"] is None and env["data"]["next_at"]
 
 
