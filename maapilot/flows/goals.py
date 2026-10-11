@@ -2,6 +2,7 @@
 
 半结构化 Markdown：每个目标一个 `## 标题`，下面固定 5 行字段（状态、对象、原话、同意、花合成玉/源石），
 可选的第 6 行"期限"（限时活动用），再往下是 agent 自由写的"分解与进展"。程序只读写固定字段；其余文字（文件开头的说明、分解与进展）原样保留。
+目标的先后就是优先级（第一个最高，`goals move` 调整）。
 agent 也会直接用文件工具改这个文件，所以解析要宽松：键的顺序不限、半角冒号也认、缺字段只报 problems 不报错。
 
 期限：`- 期限：2026-10-30 03:59`（游戏时区 UTC+8，到这一刻就算到期），或只写日期 `- 期限：2026-10-30`
@@ -234,15 +235,31 @@ def problems(sec: Section, done: bool = False) -> list[str]:
     return out
 
 
+def _in_order(sec: Section) -> bool:
+    """排优先级的目标：进行中、暂停（goals.md 里的先后就是优先级，第一个最高）。"""
+    return (sec.value("状态") or "").strip().startswith((ACTIVE, PAUSED))
+
+
+def priorities(gf: GoalsFile) -> dict[int, int]:
+    """id(段) → 优先级（1 起，按文件顺序，只数进行中、暂停的）。"""
+    out = {}
+    for s in gf.sections:
+        if _in_order(s):
+            out[id(s)] = len(out) + 1
+    return out
+
+
 def is_active(sec: Section, now: datetime | None = None) -> bool:
     """进行中、且没过期限。"""
     return (sec.value("状态") or "").strip().startswith(ACTIVE) and not is_expired(sec, now)
 
 
 def active_goals() -> list[dict]:
-    """进行中的目标（daily run、doctor --brief 用）；过了期限的不算。"""
+    """进行中的目标（daily run、doctor --brief、calc need 用），按优先级（文件顺序）；过了期限的不算。"""
     now = _now()
-    return [to_dict(s, now) for s in load().sections if is_active(s, now)]
+    gf = load()
+    pr = priorities(gf)
+    return [{**to_dict(s, now), "priority": pr.get(id(s))} for s in gf.sections if is_active(s, now)]
 
 
 def active_count() -> int:
@@ -510,7 +527,7 @@ def verify(object_text: str | None) -> dict:
         return out
     if obj["kind"] == "材料":
         try:
-            r = calc.need(object_text)
+            r = calc.need(object_text, ignore_goals=True)
         except CliError as e:
             out["why"].append(e.message)
             return out
@@ -625,6 +642,32 @@ def remove(title, status, reason=None, confirmed: bool = False) -> dict:
     return out
 
 
+def move(title, top: bool = False, before: str | None = None, after: str | None = None) -> dict:
+    """调整先后（= 优先级）：整段挪到最前 / 某个目标前面 / 后面，段落内容一字不改。"""
+    if [bool(top), before is not None, after is not None].count(True) != 1:
+        raise CliError("bad_arguments", "--top、--before、--after 要且只要一个", exit=BAD_REQUEST)
+    gf = load()
+    sec = find(gf, title)
+    anchor = find(gf, before if before is not None else after) if not top else None
+    if anchor is sec:
+        raise CliError("bad_arguments", "不能相对自己挪", exit=BAD_REQUEST)
+    secs = [s for s in gf.sections if s is not sec]
+    at = 0 if top else secs.index(anchor) + (1 if after is not None else 0)
+    secs.insert(at, sec)
+    for s in secs:                                   # 每段以空行结束（段与段之间空一行），最后一段不留尾部空行
+        while len(s.lines) > 1 and not s.lines[-1].strip():
+            s.lines.pop()
+    for s in secs[:-1]:
+        s.lines.append("\n")
+    gf.sections = secs
+    if gf.preamble and gf.preamble[-1].strip():
+        gf.preamble.append("\n")
+    save(gf)
+    pr = priorities(gf)
+    return {"moved": sec.title, "order": [{"title": s.title, "status": s.value("状态"), "priority": pr.get(id(s))}
+                                          for s in gf.sections]}
+
+
 # --- 前后对照（daily run 在目标 agent 前后各拍一次） -----------------------------------------------------------------
 
 SNAP_FIELDS = {**FIELDS, DEADLINE_KEY: "deadline"}
@@ -689,8 +732,9 @@ def list_goals(all_: bool = False) -> dict:
     gf = load()
     now = _now()
     goals, probs = [], []
+    pr = priorities(gf)
     for s in gf.sections:
-        goals.append(to_dict(s, now))
+        goals.append({**to_dict(s, now), "priority": pr.get(id(s))})
         probs += [{"title": s.title, "file": "goals.md", "message": m} for m in problems(s)]
     titles = [s.title for s in gf.sections]
     for t in sorted({t for t in titles if titles.count(t) > 1}):
@@ -746,6 +790,14 @@ def register(sub) -> None:
     p.add_argument("--confirmed-by-user", dest="confirmed", action="store_true",
                    help="用户确认算完成（快照核对没过时才用）")
     p.set_defaults(func=lambda a: remove(a.title, a.status, a.reason, a.confirmed), command="goals remove")
+
+    p = gs.add_parser("move", help="调整先后（goals.md 里越靠前优先级越高）")
+    p.add_argument("title")
+    w = p.add_mutually_exclusive_group(required=True)
+    w.add_argument("--top", action="store_true", help="挪到最前（优先级最高）")
+    w.add_argument("--before", metavar="标题", help="挪到这个目标前面")
+    w.add_argument("--after", metavar="标题", help="挪到这个目标后面")
+    p.set_defaults(func=lambda a: move(a.title, a.top, a.before, a.after), command="goals move")
 
     p = gs.add_parser("expire", help="过了期限的目标挪进 goals-done.md（状态：到期）")
     p.set_defaults(func=lambda a: expire(), command="goals expire")

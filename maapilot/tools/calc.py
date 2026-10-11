@@ -95,13 +95,43 @@ def _add(acc: dict, items: dict, times: int = 1) -> None:
 
 # --- need ------------------------------------------------------------------------------
 
+def _current_from_box(name: str, target: dict, current: dict, owned: dict | None) -> dict:
+    """--from 没给的技能等级、专精、模组，从干员快照补（森空岛读的快照才有；MAA 识别只有精英化、等级）。"""
+    if not owned:
+        return current
+    cur = dict(current)
+    cur["mastery"] = dict(current.get("mastery") or {})
+    cur["module"] = dict(current.get("module") or {})
+    if "skill_level" not in cur and owned.get("skill_level") is not None:
+        cur["skill_level"] = int(owned["skill_level"])
+    skills = owned.get("skills")
+    for k in (target.get("mastery") or {}):
+        sk = next((x for x in skills or [] if x.get("index") == k), None)
+        if k not in cur["mastery"] and sk is not None and sk.get("mastery") is not None:
+            cur["mastery"][k] = int(sk["mastery"])
+    mods = owned.get("modules")
+    if mods is not None:
+        from maapilot.knowledge import gamedata as g
+        for t in (target.get("module") or {}):
+            if t in cur["module"]:
+                continue
+            try:
+                mid = g.find_module(name, t).get("uniEquipId")
+            except Exception:                            # noqa: BLE001 - 没有模组表、名字不对：留给下面报
+                continue
+            md = next((x for x in mods if x.get("id") == mid), None)
+            cur["module"][t] = int((md or {}).get("level") or 0)
+    return cur
+
+
 def operator_need(name: str, target: dict, current: dict, box: dict) -> tuple[dict, dict, list[str]]:
-    """(need {lmd, exp, items}, from {…}, assumed [...])。"""
+    """(need {lmd, exp, items}, from {…}, assumed [...])。current（--from）没给的部分按干员快照 box 算。"""
     from maapilot.knowledge import gamedata as g
     op = resolve_op_or_fail(name)
     c = g.character(name)
     assumed: list[str] = []
     owned = box.get(name)
+    current = _current_from_box(name, target, current, owned)
     cur_e = current.get("elite")
     cur_l = current.get("level")
     if cur_e is None:
@@ -222,8 +252,56 @@ def _name(iid: str) -> str:
     return display_name(iid)
 
 
-def need(obj_text: str, from_text: str | None = None) -> dict:
-    """calc need 的函数版本。"""
+# --- 别的目标占着的材料 -----------------------------------------------------------------
+
+def _same_object(a: str | None, b: str | None) -> bool:
+    return re.sub(r"\s+", "", a or "") == re.sub(r"\s+", "", b or "")
+
+
+def _reserved(box: dict, exclude_title: str | None = None, exclude_object: str | None = None
+              ) -> tuple[dict, list[dict]]:
+    """进行中的干员 / 材料目标（按 goals.md 的顺序）各自还要的材料：({id: {name, count, goals: [{title, priority, count}]}},
+    skipped [{title, why}])。干员目标从快照里的当前练度算起；材料目标按写的数量。只用 operator_need，不递归 need()。"""
+    from maapilot.flows import goals as goalsmod
+    out: dict[str, dict] = {}
+    skipped: list[dict] = []
+    for gd in goalsmod.active_goals():
+        title, obj_text = gd["title"], gd.get("object")
+        if (exclude_title is not None and title == exclude_title) or (
+                exclude_object is not None and _same_object(obj_text, exclude_object)):
+            continue
+        try:
+            obj = parse_object(obj_text or "")
+            if obj["kind"] == "材料":
+                items = {resolve_item_or_fail(obj["item"]): obj["count"]}
+            elif obj["kind"] == "干员":
+                items = operator_need(obj["operator"], obj["target"], {}, box)[0]["items"]
+            else:
+                continue                                 # 关卡 / 活动 / 其他：不占材料
+        except CliError as e:
+            skipped.append({"title": title, "why": e.message})
+            continue
+        for iid, n in items.items():
+            if n <= 0:
+                continue
+            r = out.setdefault(iid, {"name": _name(iid), "count": 0, "goals": []})
+            r["count"] += n
+            r["goals"].append({"title": title, "priority": gd.get("priority"), "count": n})
+    return out, skipped
+
+
+def reserved_by_goals(exclude_title: str | None = None, exclude_object: str | None = None) -> dict:
+    """进行中的干员 / 材料目标还要用的材料（不含 exclude_* 那个目标）：{物品id: {name, count, goals: [{title, priority, count}]}}。
+    算不了的目标（名字不对等）跳过。读一次干员快照。"""
+    box, _ = box_snapshot()
+    return _reserved(box, exclude_title, exclude_object)[0]
+
+
+def need(obj_text: str, from_text: str | None = None, ignore_goals: bool = False,
+         exclude_title: str | None = None) -> dict:
+    """calc need 的函数版本。默认还对照别的进行中目标（reserved_by_goals）：
+    reserved、conflicts、short_after_goals；short 仍只按仓库算。ignore_goals=True 不看别的目标。
+    exclude_title：要算的就是这个目标（不算它自己占的）；没给就按对象写法相同来排除。"""
     from maapilot.knowledge.gamedata import EXP_ITEM_IDS, LMD_ID, exp_value
     obj = parse_object(obj_text)
     depot, depot_at = depot_snapshot()
@@ -252,10 +330,29 @@ def need(obj_text: str, from_text: str | None = None) -> dict:
     for i in needed["items"]:                        # 目标本身要用的，不能再拿去合成别的
         stock[i] = max(0, stock.get(i, 0) - needed["items"][i])
     craftable, farm = _crafting(short_items, stock)
-    return {"object": obj_text, "from": frm, "assumed": assumed,
-            "need": {"lmd": needed["lmd"], "exp": needed["exp"], "items": items_out(needed["items"])},
-            "have": have, "short": short, "craftable": craftable, "farm": items_out(farm),
-            "depot_at": depot_at, "box_at": box_at}
+    out = {"object": obj_text, "from": frm, "assumed": assumed,
+           "need": {"lmd": needed["lmd"], "exp": needed["exp"], "items": items_out(needed["items"])},
+           "have": have, "short": short, "craftable": craftable, "farm": items_out(farm),
+           "depot_at": depot_at, "box_at": box_at}
+    if ignore_goals:
+        return out
+    reserved, skipped = _reserved(box, exclude_title, None if exclude_title is not None else obj_text)
+    conflicts, after = [], {}
+    for iid, n in needed["items"].items():
+        r = reserved.get(iid)
+        free = max(0, have_items[iid] - (r["count"] if r else 0))
+        if n > free:
+            after[iid] = n - free
+            if r:                                        # 仓库够、被别的目标占了，或本来就不够又被占
+                conflicts.append({"id": iid, "name": _name(iid), "need": n, "have": have_items[iid],
+                                  "reserved_by_others": [{"goal": x["title"], "priority": x["priority"],
+                                                          "count": x["count"]} for x in r["goals"]],
+                                  "short_after_reserve": n - free})
+    out.update(reserved=reserved, conflicts=conflicts,
+               short_after_goals={"lmd": short["lmd"], "exp": short["exp"], "items": items_out(after)})
+    if skipped:
+        out["reserved_skipped"] = skipped
+    return out
 
 
 def items_out_all(items: dict) -> list[dict]:
@@ -358,7 +455,7 @@ def stages(specs: list[str]) -> dict:
 # --- 命令 ------------------------------------------------------------------------------
 
 def cmd_need(args):
-    return need(args.object, args.from_)
+    return need(args.object, args.from_, ignore_goals=args.ignore_goals, exclude_title=args.goal)
 
 
 def cmd_craft(args):
@@ -375,6 +472,8 @@ def register(sub) -> None:
     p = gs.add_parser("need", help="一个养成目标要多少、缺多少")
     p.add_argument("object", help='对象，如 "干员 遥 → 精2 1级"、"材料 聚酸酯组 × 10"')
     p.add_argument("--from", dest="from_", metavar="当前", help='当前练度，如 "技能 4级，技能3 专1"')
+    p.add_argument("--ignore-goals", action="store_true", help="不对照别的进行中目标占着的材料")
+    p.add_argument("--goal", metavar="标题", help="算的是这个目标（不算它自己占的；默认按对象写法相同排除）")
     p.set_defaults(func=cmd_need, command="calc need")
     p = gs.add_parser("craft", help="用仓库现有材料合成要做什么")
     p.add_argument("item")

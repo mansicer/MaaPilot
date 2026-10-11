@@ -50,7 +50,7 @@ def test_list_parses_fixed_fields_and_notes(capsys):
     assert g1 == {"title": "遥 精2", "status": "进行中", "object": "干员 遥 → 精2 1级",
                   "said": "把遥练到精2（2026-09-30）",
                   "approved": "2026-09-30 21:40，已报：龙门币约 59 万、经验约 36 万、聚合剂 2、提纯源岩 9…",
-                  "premium": False, "deadline": None, "expired": False,
+                  "premium": False, "deadline": None, "expired": False, "priority": 1,
                   "notes": "分解与进展（agent 自由写）：\n- 缺辅助芯片，靠 PR-C 刷；合成要换加工站干员\n- 10-01：合成做了一半，差聚合剂 2"}
     # 乱序、半角冒号、全角斜杠、折行都认
     assert g2["status"] == "暂停" and g2["premium"] is False and g2["object"] == "材料 聚酸酯组 × 10"
