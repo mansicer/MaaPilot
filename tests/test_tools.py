@@ -403,6 +403,21 @@ def test_sanity_parse():
     assert parse_sanity(HOME_HITS) == (22, 205)
 
 
+def test_sanity_merge_ones():
+    """首页理智的"1"按字形认，别的字用 OCR 读出的（真机读法见 tests/test_screens.py）。"""
+    from maapilot.tools.state import merge_ones
+    one, wide = True, False
+    assert merge_ones("O", [one, one, wide]) == 110          # 两个 1 都丢了
+    assert merge_ones("{4", [one, one, wide]) == 114         # 一个读成"{"、一个丢了
+    assert merge_ones("730", [one, wide, wide]) == 130       # 1 读成 7
+    assert merge_ones("47", [wide, one]) == 41
+    assert merge_ones("I3O", [one, wide, wide]) == 130
+    assert merge_ones("205", [wide, wide, wide]) == 205
+    assert merge_ones("29", [one, wide, wide]) == 129
+    assert merge_ones("2", [one, wide, wide]) is None        # 少了一个宽字：对不上，宁可读不到
+    assert merge_ones("11", [wide, wide]) is None            # 宽的字不会是 1
+
+
 def test_topbar_parse_and_merge():
     from maapilot.tools.guard import merge_topbar
     from maapilot.tools.state import parse_topbar

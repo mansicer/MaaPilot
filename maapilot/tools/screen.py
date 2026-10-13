@@ -5,6 +5,7 @@ maatouch / minitouch，也不发任何点击，所以不会和正在跑的任务
 
 截图按 1280×720 参考坐标系存成 PNG（MaaFramework 已把截图缩到短边 720；不是正好 1280×720 时再缩一次），
 放在 private/shots/<YYYYmmdd-HHMMSS>[-<名>].png，输出绝对路径给 agent 用读图工具看。
+`screen ocr --image <图>` 不连模拟器，在已有的截图上跑同一套识别（core.ImageGame），排查识别错误、做回归样本用。
 """
 from __future__ import annotations
 
@@ -85,11 +86,31 @@ def cmd_shot(args):
         return capture(game, args.name)[1]
 
 
+def image_game(path: str):
+    """`--image`：不连模拟器，在这张图上识别（和真机同一套 OCR）。"""
+    from maapilot.cliutil import ENVIRONMENT
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise CliError("bad_image", f"没有这个图片文件：{path}", exit=BAD_REQUEST)
+    try:
+        from maapilot.crew.core import ImageGame, load_image
+        img = load_image(p)
+    except Exception as e:                           # 不是图片、不是 16:9
+        raise CliError("bad_image", f"读不了这张图：{type(e).__name__}: {e}", exit=BAD_REQUEST) from None
+    try:
+        return ImageGame(img), img, p
+    except Exception as e:                           # OCR 模型或资源缺失
+        raise CliError("ocr_unavailable", f"OCR 资源加载不了：{e}", hint="maapilot doctor", exit=ENVIRONMENT) from None
+
+
 @common.logged
 def cmd_ocr(args):
     roi = _roi(args.roi)
     if args.find:
         _check_regex(args.find)
+    if args.image:
+        game, img, p = image_game(args.image)
+        return {"path": common.rel(p), "roi": list(roi), "hits": ocr_hits(game, img, roi, args.find)}
     with cliutil.device_readonly():
         game = common.connect(ocr=True, readonly=True)
         img, meta = capture(game, args.name or "ocr")
@@ -106,4 +127,5 @@ def register(sub) -> None:
     p.add_argument("--roi", nargs=4, type=int, metavar=("X", "Y", "W", "H"), help="只识别这一块（1280×720 坐标）")
     p.add_argument("--find", metavar="正则", help="只返回匹配的文字")
     p.add_argument("--name", help="截图文件名后缀")
+    p.add_argument("--image", metavar="图片", help="不截图、不连模拟器：识别这张已有的截图（排查识别错误用）")
     p.set_defaults(func=cmd_ocr, command="screen ocr")

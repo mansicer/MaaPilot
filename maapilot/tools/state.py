@@ -4,8 +4,8 @@
 - box：MAA 干员识别（OperBox）→ box.json `{at, operators: {名: {id, rarity, elite, level, potential}}}`；
 - op：进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，不存快照）；专精、模组读不了；
 - sanity：接了森空岛先从森空岛读（准、不碰模拟器）；没接或读不到才回首页 OCR 右上角（MaaFramework）
-  → sanity.json `{at, current, max, source}`。OCR 读数比上一份快照推出来的明显低时标 `suspect`（首页数字上压着图标，
-  真机读错过：130 → 29、114 → 4）。`maa fight` 结束时也会用日志里最后一次的理智顺手更新它（source: maa-log）。
+  → sanity.json `{at, current, max, source}`。首页大号数字的"1"OCR 认不好（真机读错过 130 → 29、114 → 4），
+  当前值改为按字形单独认（`home_sanity`）；读数仍比上一份快照推出来的明显低时标 `suspect`。`maa fight` 结束时也会用日志里最后一次的理智顺手更新它（source: maa-log）。
 - show：读快照，不碰模拟器。
 
 `read_depot()` / `read_box()` 是不拿锁的函数版本（guard、daily run 用）。
@@ -138,6 +138,70 @@ def parse_sanity(hits) -> tuple[int, int] | None:
     return None
 
 
+# 理智的大号数字（深灰字，压在浅灰底和白色线框图标上）。OCR 模型认不好这种字体的"1"（读成 7、I、{、亻，或者干脆丢掉：
+# 真机 110 → 0、114 → 4、130 → 29/730、152 → 52），所以单独处理这一块：先把深色像素抠成白底黑字，按列切出每个字，
+# 窄的（宽 / 高 < 0.45，"1" 约 0.33，别的数字 ≥ 0.54）就是"1"，其余的字交给 OCR，再按位置拼回去。见 sanity_from_image。
+SANITY_NUM_ROI = (758, 128, 140, 98)       # 左边是"+"号圆钮（到 x≈757），下面是"理智/上限"的深色底条（从 y≈232）
+SANITY_DARK = 100                          # 字的颜色约 (50,50,50)；底、图标、阴影都在 140 以上
+ONE_RATIO = 0.45
+
+
+def sanity_glyphs(img) -> tuple[object, list[bool]] | None:
+    """首页截图（BGR 数组）→ (只剩理智数字的白底黑字整张图, 从左到右每个字是不是"1")；这一块没有像数字的东西 → None。"""
+    import numpy as np
+    if not isinstance(img, np.ndarray) or img.ndim != 3:
+        return None
+    x, y, w, h = SANITY_NUM_ROI
+    dark = img[y:y + h, x:x + w].max(axis=2) < SANITY_DARK
+    rows = np.flatnonzero(dark.any(axis=1))
+    if rows.size == 0:
+        return None
+    height = rows[-1] - rows[0] + 1
+    if height < 30:                            # 字高约 54–65；太矮的是杂点
+        return None
+    cols = np.append(dark.any(axis=0), False)
+    runs, start = [], None
+    for i, c in enumerate(cols):
+        if c and start is None:
+            start = i
+        elif not c and start is not None:
+            if start > 0 and i - start >= 4:   # 贴着左边的是"+"号圆钮的边，太窄的是杂点
+                runs.append(i - start)
+            start = None
+    if not runs or len(runs) > 3:
+        return None
+    clean = np.full_like(img, 255)
+    clean[y:y + h, x:x + w][dark] = 0
+    return clean, [r / height < ONE_RATIO for r in runs]
+
+
+def merge_ones(text: str, ones: list[bool]) -> int | None:
+    """OCR 读出的字 + 每个字是不是"1" → 数。"1" 的位置一律填 1，别的位置按顺序用 OCR 读出的数字；对不上 → None。"""
+    digits = "".join(c for c in text.translate(_DIGITS) if c.isdigit())
+    wide = ones.count(False)
+    if len(digits) == len(ones):
+        others = [d for d, one in zip(digits, ones) if not one]
+    else:
+        others = list(digits.replace("1", "")) if len(digits) != wide else list(digits)
+        if len(others) != wide:
+            return None
+    if "1" in others:                          # 宽的字不会是 1
+        return None
+    it = iter(others)
+    return int("".join("1" if one else next(it) for one in ones))
+
+
+def sanity_from_image(game, img) -> int | None:
+    """首页截图 → 当前理智（按上面的办法）；这一块认不出数字 → None。"""
+    g = sanity_glyphs(img)
+    if g is None:
+        return None
+    clean, ones = g
+    x, y, w, h = SANITY_NUM_ROI
+    hits = sorted(game.ocr((x - 60, y - 40, w + 120, h + 80), clean), key=lambda c: c.box[0])
+    return merge_ones("".join(c.text for c in hits), ones)
+
+
 def parse_topbar(hits) -> dict | None:
     """首页顶栏 → {lmd, orundum, originite}（精确值，不像仓库识别那样把上万的数取整）。
     按位置取：源石最右、合成玉在它左边；龙门币（最左）读不出时为 None，不影响前两样。少于两个数 → None。"""
@@ -158,8 +222,28 @@ def read_home(game=None) -> tuple[dict | None, tuple[int, int] | None, object]:
         nav.ensure_home(game)
     except Exception:
         pass
-    hits = game.ocr(HOME_ROI, game.screencap())
-    return parse_topbar(hits), parse_sanity(hits), game
+    img = game.screencap()
+    hits = game.ocr(HOME_ROI, img)
+    return parse_topbar(hits), home_sanity(game, img, hits), game
+
+
+def home_sanity(game, img, hits) -> tuple[int, int] | None:
+    """首页的 (理智, 上限)：上限从"理智/上限"那行读；当前值按 sanity_from_image 单独认。
+    那一块切不出数字（页面布局不一样）时退回 parse_sanity；切出了数字但和 OCR 对不上 → None（宁可读不到，不报错数）。"""
+    mx = sanity_max(hits)
+    if mx is None or sanity_glyphs(img) is None:
+        return parse_sanity(hits)
+    cur = sanity_from_image(game, img)
+    return None if cur is None else (cur, mx)
+
+
+def sanity_max(hits) -> int | None:
+    """首页"理智/上限"那行的上限；没有或不在合理范围 → None。"""
+    for h in hits:
+        m = _SANITY_MAX.search(h.text)
+        if m and SANITY_MAX_RANGE[0] <= (mx := int(m.group(1).translate(_DIGITS))) <= SANITY_MAX_RANGE[1]:
+            return mx
+    return None
 
 
 SUSPECT_GAP = 20      # OCR 读数比快照推出来的少这么多以上 → 可疑（也可能是用户自己打过关，所以只提醒、不改数）
