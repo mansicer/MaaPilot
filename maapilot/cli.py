@@ -11,6 +11,7 @@ import argparse
 import importlib
 import os
 import sys
+import time
 import traceback
 
 from maapilot import cliutil
@@ -31,6 +32,7 @@ GROUPS = [
     "maapilot.tools.game",
     "maapilot.tools.copilot_cmd",
     "maapilot.tools.news_cmd",
+    "maapilot.tools.dev_cmd",            # 开发用（dev review），不给用户的 agent
     "maapilot.flows.goals",
     "maapilot.flows.daily",
     "maapilot.flows.op",
@@ -81,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def _main(argv: list[str], out_fd: int | None) -> int:
     command = " ".join(a for a in argv[:2] if not a.startswith("-")) or "maapilot"
+    t0 = time.monotonic()
+    args = None
+    data = None
+    from maapilot.tools import common
+    common._recorded.clear()
     try:
         parser = build_parser()
         args, extra = parser.parse_known_args(argv)
@@ -95,6 +102,7 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         env, code = e.payload, 0
     except CliError as e:
         env, code = cliutil.envelope(command, data=e.data, error=e), e.exit
+        data = e.data
     except KeyboardInterrupt:
         env, code = cliutil.envelope(command, error=CliError("interrupted", "被中断", exit=FAILED)), FAILED
     except SystemExit as e:              # --help 等：argparse 自己打印（到 stderr）后退出
@@ -103,12 +111,39 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         traceback.print_exc(file=sys.stderr)
         err = CliError("internal_error", f"{type(e).__name__}: {e}", exit=FAILED)
         env, code = cliutil.envelope(command, error=err), FAILED
+    _journal(command, argv, args, env, code, data, time.monotonic() - t0)
     if out_fd is None:
         cliutil.emit(env)
     else:
         with os.fdopen(os.dup(out_fd), "w", encoding="utf-8") as out:
             cliutil.emit(env, out)
     return code
+
+
+def _journal(command: str, argv: list[str], args, env: dict, code: int, data, duration_s: float) -> None:
+    """命令自己没记（没包 `@logged`）时补记一行：失败的（包括参数写错、退出码 2）都记，成功的只记有摘要的
+    （calc need、goals 改动等）。参数写错时连同命令行（去掉 token 等）一起记，事后能看出 agent 哪里用错了。"""
+    from maapilot.tools import common
+    from maapilot.tools.log_summary import safe_argv, summarize
+    if not argv or common.recorded(command) or command.split(" ")[0] == "dev":
+        return
+    result = summarize(command, data) if code == 0 else None
+    if code == 0 and not result:
+        return
+    err = env.get("error") if isinstance(env, dict) else None
+    extra = {"result": result}
+    if err:
+        extra.update(error=err.get("code"), message=err.get("message"))
+    if code == cliutil.BAD_REQUEST or args is None:
+        extra["argv"] = safe_argv(argv)
+    try:
+        args_d = common._args_dict(args) if args is not None else {}
+    except TypeError:
+        args_d = {}
+    if extra.get("message") is not None:
+        from maapilot.tools.log_summary import safe_text
+        extra["message"] = safe_text(command, extra["message"], argv)
+    common.record(command, args_d, ok=code == 0, exit=code, duration_s=duration_s, **extra)
 
 
 if __name__ == "__main__":

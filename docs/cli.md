@@ -29,7 +29,7 @@
 - **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
   只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
   （无头 `claude -p`）通过环境变量 `MAAPILOT_LOCK_TOKEN` 继承锁，子进程里的命令不会被挡（见 `maapilot/crew/lock.py`）。
-- **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行（见[文件](#private-文件)）。
+- **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行；别的命令失败（包括参数写错、退出码 2）或有结果摘要的（`calc need`、`goals` 改动）也记一行（见[文件](#private-文件)）。
 - **物品与干员名**：参数里用游戏里的中文名；输出里物品同时给 `id` 与 `name`。
 - **长命令**：`daily run` 要 20–60 分钟，`maa fight`、`state box` 等可能几分钟。Claude Code 的 Bash 超时最长 10 分钟：
   预计超过几分钟的用 Bash 的后台运行（`run_in_background`），结束时会收到通知。
@@ -783,6 +783,29 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 "有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的、赶上维护的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
 `doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
 
+## dev —— 开发用（不给用户的 agent）
+
+`maapilot dev review [--since 3d|12h|<日期>|<时间>] [--session <编号>]… [--exclude <编号>]… [--include-dev] [--transcripts <目录>] [--limit N]`：
+代替手动翻会话记录，看用户的 agent 和无头 agent 哪里出错、哪里用错了命令。只读，不碰模拟器，自己不写命令记录。默认看最近 3 天。
+
+- 命令记录 `private/log/<日期>.jsonl`（`log`）：`failures` 按命令 + 错误码归类（次数、最后一次、原话、哪几次日常）；`misuse` 参数写错（退出码 2，带 `argv`）；
+  `repeated` 同一条命令（参数也一样）失败两次以上；`shortcut_then_manual` 快捷操作（`op upgrade / mastery`、`craft`、`state op`）失败后 30 分钟内接着手动 `input …` 的。
+- 会话记录（`transcripts`）：目录按仓库路径推出（Claude Code 的规则：路径里非字母数字的字符换成 `-`，放在 `~/.claude/projects/` 下；在 git worktree 里跑时用主仓库的路径），`--transcripts` 可以改。
+  每个会话：`label`（定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
+  `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
+  （管道、`&&`、`;`、`cat`、`grep`……；引号里的 `|` 不算）、`result` 最后的"结果：…"。
+  不看：`--exclude` 的、当前会话（环境变量 `CLAUDE_CODE_SESSION_ID`）、开发会话（改过 `maapilot/`、`tests/`、`docs/`、skill、`CLAUDE*.md`，跑过 pytest、git commit，
+  或 agent 名以 dev 开头；`--include-dev` 也看）。`--session` 点名的会话照看不误。
+- `data.lines` 是给人看的几行要点。
+
+```json
+{"since": "2026-10-10T16:00+08:00", "lines": ["命令记录 656 行，失败 14", "  失败 craft / shortcut_failed ×3：…", "会话 9 个（排除 7）", "  6aa16058 日常 20261011-1640 goals …：被拒 1、maapilot 失败 6、非标准 Bash 14/64；结果：完成"],
+ "log": {"rows": 656, "failed": 14, "failures": [{"command", "error", "exit", "count", "last_at", "message", "runs"}], "misuse": […], "repeated": […], "shortcut_then_manual": […]},
+ "transcripts": {"dir": "…", "sessions": [{"session", "label", "start", "end", "prompt", "result", "bash", "denied"?, "maapilot_failed"?, "tool_errors"?, "bash_nonstandard"?}], "excluded": [{"session", "why"}]}}
+```
+
+不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
+
 ---
 
 ## private/ 文件
@@ -897,9 +920,14 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 ### log/
 
-`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "error"?, "message"?, "stage"?, "run_id"?, "depot_change"?, "shot_now"?}`
+`<YYYY-MM-DD>.jsonl`，每个碰模拟器的命令一行：`{"at", "command", "args", "ok", "exit", "duration_s", "result"?, "error"?, "message"?, "stage"?, "argv"?, "run_id"?, "depot_change"?, "shot_now"?}`
 （失败时 `error` 是 `error.code`、`message` 是原话，快捷操作另有 `stage`：做到哪一步；`shot_now`：maa 任务失败时当场截的图）。
 `depot_change` 只在命令本身读过仓库时有（`state depot`）；`run_id` 取环境变量 `MAAPILOT_RUN_ID`（`daily run` 给子进程设）。
+`result` 是关键结果的摘要（`maapilot/tools/log_summary.py`，一行要小，不放整个 data）：`state sanity` 的 current / max / source / suspect、
+`state depot` 的物品种数和龙门币、合成玉、源石，`guard snapshot / check` 的前后数和没放行的减少，`maa <任务>` 的关卡、次数、理智、代理失败、掉落种数，
+`op` / `craft` 的前后或状态，`goals add / update / remove / move / expire` 改了哪个目标，`calc need` 缺什么。
+不碰模拟器的命令没包 `logged` 的，由 `cli` 补记：失败的都记（参数写错时另带 `argv`：去掉 token 等的命令行），成功的只记有摘要的。
+森空岛 token、uid、昵称一律不记：`skland …` 的命令行只留子命令名、出错原话不记，`--uid` 之类的值换成 `<略>`，像 token 的长串也换掉。
 写记录用 `maapilot.tools.common.logged`（包住处理函数）或 `common.record()`。`maa/` 下是每次 maa-cli 调用的完整日志。
 
 ### reports/

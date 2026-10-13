@@ -1,7 +1,9 @@
 """tools/ 各命令共用的小东西：命令记录（private/log/<日期>.jsonl）、JSON 文件读写、连模拟器、时间。
 
-命令记录：碰模拟器的命令结束时追加一行 `{at, command, args, ok, exit, duration_s, run_id?, depot_change?}`。
+命令记录：碰模拟器的命令结束时追加一行 `{at, command, args, ok, exit, duration_s, result?, run_id?, depot_change?}`。
 处理函数用 `@logged` 包一下即可（flows/ 的命令也可以用）；`run_id` 取环境变量 MAAPILOT_RUN_ID（`daily run` 给子进程设）。
+`result` 是关键结果的摘要（log_summary.summarize）。没包 `@logged` 的命令失败（含参数写错）或有摘要时，由 cli 补记一行。
+森空岛 token、uid、昵称不进记录（log_summary.scrub_args）。
 """
 from __future__ import annotations
 
@@ -64,9 +66,21 @@ def rel(path: Path | str) -> str:
 
 # --- 命令记录 --------------------------------------------------------------------------
 
+_recorded: set[str] = set()     # 本进程里已经记过的命令（cli 据此决定要不要补记）
+
+
+def recorded(command: str) -> bool:
+    return command in _recorded
+
+
 def record(command: str, args: dict, *, ok: bool, exit: int, duration_s: float, **extra) -> None:
-    """往 private/log/<日期>.jsonl 追加一行；写不了不影响命令本身。"""
-    row = {"at": iso(), "command": command, "args": args, "ok": ok, "exit": exit, "duration_s": round(duration_s, 1)}
+    """往 private/log/<日期>.jsonl 追加一行；写不了不影响命令本身。参数里的 token、uid 等不记。"""
+    from maapilot.tools.log_summary import safe_text, scrub_args
+    _recorded.add(command)
+    if extra.get("message") is not None:
+        extra["message"] = safe_text(command, extra["message"])
+    row = {"at": iso(), "command": command, "args": scrub_args(args), "ok": ok, "exit": exit,
+           "duration_s": round(duration_s, 1)}
     if os.environ.get(RUN_ID_ENV):
         row["run_id"] = os.environ[RUN_ID_ENV]
     row.update({k: v for k, v in extra.items() if v is not None})
@@ -83,10 +97,11 @@ def _args_dict(args) -> dict:
 
 
 def logged(handler):
-    """包住碰模拟器的处理函数：结束时记一行。处理函数可以在返回的 data 里放 `_log`（额外字段，如 depot_change），
-    它会被取出记进日志、不进输出。"""
+    """包住碰模拟器的处理函数：结束时记一行（带 `result` 摘要）。处理函数可以在返回的 data 里放 `_log`
+    （额外字段，如 depot_change），它会被取出记进日志、不进输出。"""
     @functools.wraps(handler)
     def wrapper(args):
+        from maapilot.tools.log_summary import summarize
         t0 = time.monotonic()
         command = getattr(args, "command", "?")
         try:
@@ -94,14 +109,15 @@ def logged(handler):
         except CliError as e:
             extra = (e.data or {}).pop("_log", None) if isinstance(e.data, dict) else None
             record(command, _args_dict(args), ok=False, exit=e.exit, duration_s=time.monotonic() - t0,
-                   error=e.code, message=e.message, **(extra or {}))
+                   error=e.code, message=e.message, result=summarize(command, e.data), **(extra or {}))
             raise
         except Exception as e:
             record(command, _args_dict(args), ok=False, exit=FAILED, duration_s=time.monotonic() - t0,
                    error=f"{type(e).__name__}: {e}")
             raise
         extra = data.pop("_log", None) if isinstance(data, dict) else None
-        record(command, _args_dict(args), ok=True, exit=0, duration_s=time.monotonic() - t0, **(extra or {}))
+        record(command, _args_dict(args), ok=True, exit=0, duration_s=time.monotonic() - t0,
+               result=summarize(command, data), **(extra or {}))
         return data
     return wrapper
 

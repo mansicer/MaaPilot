@@ -98,7 +98,10 @@ def test_upgrade_not_reached(capsys, monkeypatch):
                                   ["遥", "--skill", "8"]])
 def test_upgrade_bad_args(capsys, argv):
     code, out = run(capsys, "op", "upgrade", *argv)
-    assert code == 2 and not paths.LOGS.exists()
+    assert code == 2
+    rows = journal_rows()                     # 参数写错也记一行（事后能查 agent 哪里用错了）
+    assert len(rows) == 1 and rows[0]["command"] == "op upgrade" and rows[0]["exit"] == 2
+    assert rows[0]["argv"] == ["op", "upgrade", *argv] and rows[0]["error"] == "bad_arguments"
 
 
 @pytest.mark.parametrize("status,code,err", [

@@ -26,16 +26,9 @@ def rel(p) -> str | None:
 
 
 def journal(command: str, args: dict, ok: bool, exit: int, duration_s: float, **extra) -> None:
-    """碰模拟器的命令结束时在 private/log/<日期>.jsonl 追加一行。写不了不影响命令本身。"""
-    t = now()
-    row = {"at": t.isoformat(timespec="seconds"), "command": command, "args": args, "ok": ok, "exit": exit,
-           "duration_s": round(duration_s, 1), **{k: v for k, v in extra.items() if v is not None}}
-    try:
-        paths.LOGS.mkdir(parents=True, exist_ok=True)
-        with open(paths.LOGS / f"{t:%Y-%m-%d}.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-    except OSError:
-        pass
+    """碰模拟器的命令结束时在 private/log/<日期>.jsonl 追加一行（同 tools.common.record）。写不了不影响命令本身。"""
+    from maapilot.tools import common
+    common.record(command, args, ok=ok, exit=exit, duration_s=duration_s, **extra)
 
 
 def game_data_error(e: Exception) -> CliError:
@@ -80,6 +73,7 @@ class Progress:
 def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: bool = True) -> dict:
     """拿锁 → 连模拟器（needs_game 时）→ body(g, progress) → 返回 data。
     body 抛出的非 CliError 异常 → 退出码 1 shortcut_failed，data 带 stage / shot / done（异常上的 reached、made 等也带上）。"""
+    from maapilot.tools.log_summary import summarize
     t0 = time.monotonic()
     code = 0
     err: dict = {}
@@ -95,7 +89,9 @@ def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: 
                     raise CliError("device_failed", f"连不上模拟器：{e}", hint="maapilot doctor",
                                    exit=ENVIRONMENT) from None
             try:
-                return body(g, pr)
+                data = body(g, pr)
+                err = {"result": summarize(command, data)}
+                return data
             except CliError:
                 raise
             except Exception as e:                      # noqa: BLE001 - 快捷操作失败都交给 agent 在界面上做
@@ -115,7 +111,8 @@ def run_shortcut(command: str, args: dict, shot_name: str, body, *, needs_game: 
                                exit=FAILED, data=data) from e
     except CliError as e:
         code = e.exit
-        err = {"error": e.code, "message": e.message, "stage": (e.data or {}).get("stage") if isinstance(e.data, dict) else None}
+        err = {"error": e.code, "message": e.message, "stage": (e.data or {}).get("stage") if isinstance(e.data, dict) else None,
+               "result": summarize(command, e.data)}
         raise
     finally:
         journal(command, args, code == 0, code, time.monotonic() - t0, **err)   # 失败原因也记下（以后排查不用翻对话）

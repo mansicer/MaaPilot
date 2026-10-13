@@ -235,7 +235,10 @@ def test_state_depot_and_show(cfg, capsys):
     code, env = run(capsys, "state", "show", "box")
     assert code == 2 and env["error"]["code"] == "no_snapshot"
     rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()]
-    assert rows[-1]["depot_change"]
+    depot = [r for r in rows if r["command"] == "state depot"]
+    assert depot[-1]["depot_change"]
+    assert depot[-1]["result"] == {"items": 3, "lmd": 1500, "orundum": 3200, "changed": 2}
+    assert rows[-1]["command"] == "state show" and rows[-1]["exit"] == 2 and rows[-1]["error"] == "no_snapshot"
 
 
 def test_guard_evaluate_pure():

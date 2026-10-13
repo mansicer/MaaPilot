@@ -210,7 +210,7 @@ def test_state_skland_writes_box_and_sanity(fake, capsys):
     assert json.loads((paths.STATE / "sanity.json").read_text())["source"] == "skland"
     assert TOKEN not in out.out
     log = next(paths.LOGS.glob("*.jsonl")).read_text()
-    assert "state skland" in log and TOKEN not in log
+    assert "state skland" in log and TOKEN not in log and "12345678" not in log     # 不记 token、uid
     assert json.loads(skland_cmd.store_path().read_text())["last"]["ok"] is True
 
 
@@ -268,6 +268,9 @@ def test_state_sanity_prefers_skland(fake, capsys, monkeypatch):
     assert code == 0, env
     assert env["data"]["source"] == "skland" and env["data"]["max"] == 135
     assert json.loads((paths.STATE / "sanity.json").read_text())["source"] == "skland"
+    row = json.loads(next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()[-1])
+    assert row["command"] == "state sanity" and row["result"]["max"] == 135 and row["result"]["source"] == "skland"
+    assert "current" in row["result"]
 
 
 def test_state_sanity_falls_back_to_ocr(fake, capsys, monkeypatch):
@@ -279,3 +282,7 @@ def test_state_sanity_falls_back_to_ocr(fake, capsys, monkeypatch):
     monkeypatch.setattr(state, "read_sanity", lambda: {"at": common.iso(), "current": 50, "max": 135, "source": "ocr"})
     code, env, _ = run(capsys, "state", "sanity")
     assert code == 0 and env["data"]["source"] == "ocr" and env["data"]["skland_error"]
+    log = next(paths.LOGS.glob("*.jsonl")).read_text()
+    row = json.loads(log.splitlines()[-1])
+    assert row["result"] == {"current": 50, "max": 135, "source": "ocr", "skland_error": True}
+    assert TOKEN not in log
