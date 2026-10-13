@@ -7,6 +7,7 @@
 - 大小事情都让用户的 agent 知道：程序遇到情况（出错、维护、到期、跳过）不自己悄悄处理掉，要叫起或告诉 agent，说明发生了什么，由它判断、告诉用户。
 - 代码：`maapilot/tools/`（工具命令）、`maapilot/flows/`（目标、日常、定时）、`maapilot/crew/`（设备与 MAA，旧项目搬来的）、`maapilot/knowledge/`（游戏数据）。
 - 测试：`.venv/bin/python -m pytest -q`，改完要全过。
+- 查用户的 agent 哪里出错、用错命令：`maapilot dev review [--since 3d] [--exclude <会话>]`（读命令记录和 Claude Code 会话记录，见 docs/cli.md「dev」），不用手动翻会话记录。
 
 ## 规矩
 - 这台电脑的模拟器和账号是真实测试环境，也是用户在用的环境：代码、skill、模板不能写死它的设定（模拟器、地址、路径、账号进度）。

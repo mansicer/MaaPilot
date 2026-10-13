@@ -24,6 +24,8 @@ GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", 
 ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release", "reset")
 # 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）
 USER_ONLY = ("skland token",)
+# 开发用的命令：不写进 skill、不给放行规则（用户的 agent 用会弹确认、无头时被拒）
+DEV_ONLY = ("dev",)
 
 # 说明里提到的 maa-cli 自己的命令（setup 装资源用），不是 maapilot
 MAA_CLI = {"maa install", "maa update"}
@@ -166,8 +168,14 @@ def test_skill_command_has_permission_rule(where, cmd, full):
 
 def test_every_subcommand_has_rule():
     missing = [" ".join(c) for c in _all_subcommands()
-               if _rule(c) not in ("allow", "ask") and " ".join(c) not in USER_ONLY]
+               if _rule(c) not in ("allow", "ask") and " ".join(c) not in USER_ONLY and c[0] not in DEV_ONLY]
     assert not missing, f"这些命令没有权限规则（agent 用时会弹确认、无头时被拒）：{missing}"
+
+
+def test_dev_commands_not_for_user_agent():
+    """开发用的命令：skill、CLAUDE.md 里不提，也没有放行规则。"""
+    assert not [c for _, c, _ in INVOCATIONS if c.split(" ", 1)[0] in DEV_ONLY]
+    assert all(_rule([d, "review"]) is None for d in DEV_ONLY)
 
 
 def test_confirm_commands_are_ask():
