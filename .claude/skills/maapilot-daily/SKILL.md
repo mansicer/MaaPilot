@@ -45,7 +45,7 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
    - `maapilot calc need "<对象>"`（技能等级、专精按笔记里记的加 `--from`）：`short` 为空 → 现在就做（`maapilot-training`）；缺的能合成 → `maapilot-base` 合出来再做；
    - `关卡`、`其他` 类目标按笔记里的分解做（`maapilot-battle`）。
 4. 刷理智：把所有目标还缺的基础材料合起来，`maapilot calc stages 固源岩=20 聚酸酯=8 …`，按 `plan` 刷（`maapilot maa fight <关卡> --times N`，只刷 `open_today` 的关）。
-   **分批**：Bash 一条命令最长 10 分钟，一批只打大约 8 分钟的量（一般每批 4–6 次，按 `maa fight` 返回的 `duration_s` 调），Bash 超时设 600000 毫秒，一批一批接着打。
+   **分批**：Bash 一条命令最长 10 分钟，一批只打大约 8 分钟的量（一场 1.5–3 分钟，芯片本、长关更久：第一批先打 3 次，再按 `maa fight` 返回的 `duration_s` 算下一批几次），Bash 超时设 600000 毫秒，一批一批接着打。
    多个目标抢同一种材料时，按目标顺序先满足前面的。目标都在等（训练室在练、材料在路上）、没东西可刷时，刷 `config.yaml` 的 `daily.default_stage`。
    `maa fight` 失败 `not_open` 就换建议里的下一关；打不了代理（没三星通关过）的关换一关，或按 `maapilot-battle` 处理。
 5. 刷到材料够了就回到第 3 步做养成。

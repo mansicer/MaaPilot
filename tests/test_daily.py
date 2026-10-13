@@ -501,6 +501,24 @@ def test_startup_runs_before_guard_snapshot(capsys, env):
     assert firsts == ["maa startup", "guard snapshot"]
 
 
+def test_failed_snapshot_retried_after_startup(capsys, env, monkeypatch):
+    real = daily.maapilot_call
+    fails = [1]
+
+    def fake(args, env_, timeout_s=None):
+        if args == ["guard", "snapshot"] and fails:
+            fails.pop()
+            env["calls"].append({"args": args})
+            return 1, {"ok": False, "data": None, "error": {"code": "depot_failed", "message": "仓库识别失败"}}
+        return real(args, env_, timeout_s)
+    monkeypatch.setattr(daily, "maapilot_call", fake)
+    code, out = run(capsys, "daily", "run")
+    assert code == 0
+    firsts = [" ".join(c["args"]) for c in env["calls"]][:4]
+    assert firsts == ["maa startup", "guard snapshot", "maa startup", "guard snapshot"]
+    assert not any("没能记下" in a for a in out["data"]["alerts"])
+
+
 def test_snapshot_that_turned_into_failed_check_stops_run(capsys, env, monkeypatch):
     real = daily.maapilot_call
 

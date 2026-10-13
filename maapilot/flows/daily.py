@@ -511,6 +511,10 @@ def _guard(r: _Run, which: str, env: dict, after: str) -> None:
     """guard snapshot / check。check 不过 → 记下并 _Stop；命令本身没做成 → 告警，接着跑。"""
     code, env_ = maapilot_call(["guard", which], env, timeout_s=15 * 60)
     r.event(f"guard_{which}", after=after, exit=code, error=env_.get("error"))
+    if which == "snapshot" and code not in (0, NEEDS_USER):   # 读仓库没成（10-12 04:40：换日后首页多半有弹窗）：
+        maapilot_call(["maa", "startup"], env, timeout_s=10 * 60)  # 回首页、关掉弹窗，再读一次
+        code, env_ = maapilot_call(["guard", which], env, timeout_s=15 * 60)
+        r.event(f"guard_{which}", after=after, exit=code, error=env_.get("error"), retry=True)
     if which == "snapshot" and code != NEEDS_USER:       # 退出码 3：上次之后有人动过，改做的对账没过
         if code != 0:
             r.data["alerts"].append(f"开始前没能记下合成玉、源石（{(env_.get('error') or {}).get('message')}），"
@@ -652,7 +656,7 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
     if code == 0:
         if task == FARM:
             row["result"] = {k: (data or {}).get(k) for k in ("stage", "times_done", "sanity_used", "medicine_used",
-                                                               "drops")}
+                                                               "drops", "proxy_failed")}
     else:
         row.update(error=err.get("message") or err.get("code") or f"退出码 {code}", code=err.get("code"),
                    log=(data or {}).get("log"))

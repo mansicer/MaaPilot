@@ -392,6 +392,8 @@ def render(d: dict) -> str:
             bits = [f"{f.get('stage', '?')} 打了 {f.get('times_done', '?')} 次"]
             if f.get("sanity_used") is not None:
                 bits.append(f"用了 {f['sanity_used']} 理智")
+            if f.get("proxy_failed"):
+                bits.append(f"其中 {f['proxy_failed']} 次代理失败（理智退回了）")
             if f.get("medicine_used"):
                 bits.append(f"用了 {f['medicine_used']} 瓶理智液")
             out.append(f"- 刷理智：{'，'.join(bits)}")

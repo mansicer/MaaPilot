@@ -56,6 +56,8 @@ _MASTERY_FAIL = {
     "room busy": ("training_busy", "训练室正在练别的专精", "等它练完，或在游戏里看看是谁在练"),
     "no dialog": ("shortcut_failed", "专精确认框没打开（可能已经专三，或没点中）", "看截图"),
     "rank unknown": ("shortcut_failed", "认不出这次要开的是专几，什么都没开", "看截图里的确认框"),
+    "costs unreadable": ("shortcut_failed", "确认框里的材料数没认全，什么都没开",
+                         "看截图里的确认框：材料都够就手动点开（训练室选人、点技能、点确定），不够再去刷"),
 }
 
 

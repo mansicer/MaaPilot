@@ -207,6 +207,9 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
  "log": "/…/private/log/maa/20260930-214500-fight.log"}
 ```
 
+代理失败（代理指挥没打赢：游戏退回理智、没有掉落，MAA 日志记成掉落"理智 × N"）不算掉落：`drops` 里没有理智，`sanity_used` 扣掉退回的，
+另有 `proxy_failed`（几场）和 `note`；`times_done` 仍算上这几场。`daily run` 刷理智的 `result` 也带 `proxy_failed`，汇报里写一句。
+
 `fight` / `annihilation` 结束时用日志里最后一次的理智更新 `private/state/sanity.json`（`source: "maa-log"`）。
 `annihilation` 另有 `orundum_gained`（这次掉的合成玉）、`week`（本游戏周累计 `{runs, orundum}`）和 `weekly_capped`（本周合成玉已经拿满：打了、认出了掉落却没有合成玉，或累计到 1800）。
 每周记录在 `private/state/annihilation.json`（`{week, runs, orundum, capped, failures, blocked?, progress?}`，周一 04:00 清零）；`weekly_capped` 之后 `daily run` 跳过剿灭（`tasks` 里这一项 `skipped`）。
@@ -565,7 +568,7 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 
 | error.code | 退出码 | 什么情况 |
 |---|---|---|
-| `shortcut_failed` | 1 | 脚本出错、没到目标练度、认不出专精确认框 |
+| `shortcut_failed` | 1 | 脚本出错、没到目标练度、认不出专精确认框；确认框里的材料数没认全（`status: costs unreadable`，`shot` 是确认框截图，不报缺材料） |
 | `training_busy` | 1 | `op mastery`：训练室正在练别的 |
 | `short_materials` | 1 | `op mastery`：材料不够、合成也补不上（`data.short`） |
 | `not_restored` | 1 | `craft` 双芯片：造好了，但制造站没改回原产物（`data.original`、`shot`） |
@@ -634,7 +637,8 @@ agent 用 `guard allow` 补记（弹确认），再 `guard check`：对上了就
      （`game update` → `maa startup` 处理第一次启动；用户协议弹窗按 `game.accept_terms`；时限同 `recovery_timeout_min`），之后对账、再查一次版本核实，
      记一项 `game_update`（`version: {from, to}`）；没更新成 → `status: update_failed`、`failed` 里是 `game_update`，后面都不跑（旧客户端进不了游戏），退出码 1（`daily_incomplete`）。
      会话里（`manual` 或 `--no-agent`）→ 停下交给在场的 agent：退出码 1（`handoff`），`handoff = {task: "game_update", error, rest, version}`，`rest` 是全部还没跑的项；agent 按 `maapilot-events` 更新好再 `daily run --only <rest>`。
-3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）。
+3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）；
+   读仓库没成（换日后首页常有弹窗）就再跑一次 `maa startup` 回首页、再读一次，还不成才在汇报里告警、对账以上一次的记录为准。
 4. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
    - `--trigger schedule`：当场启动无头 `claude -p`（加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
      再 `guard check`，然后接着跑下一项；

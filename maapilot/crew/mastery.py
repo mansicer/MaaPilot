@@ -207,6 +207,10 @@ def start_mastery(g: Game, name: str, skill: int, depot: DepotCounts, dry_run: b
     pairs = dlg["have_need"][-len(need):]           # the last N tokens are the N cost items
     short = {item: n - have for (item, n), (have, _) in zip(need, pairs) if have < n}
     result = {**base, "need": dict(need), "short": short}
+    if short and by_cost is None:                   # OCR missed or misread a token: the pairing is unverified, so the
+        shot = str(g.save(f"mastery_costs_{name}_S{skill}"))   # "short" may be wrong (10-13: 卷3 57/15 read as short)
+        g.tap(*DLG_CANCEL, delay=1.5)
+        return {**result, "short": None, "status": "costs unreadable", "shot": shot}
     if short:
         g.tap(*DLG_CANCEL, delay=1.5)
         cp = plan_crafts(short, dict(depot() if callable(depot) else depot), extra=True)

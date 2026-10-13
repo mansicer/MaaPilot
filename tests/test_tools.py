@@ -72,6 +72,13 @@ FIGHT_LOG = """[2026-09-30 21:45:01 INFO] Current sanity: 82/135
 [2026-09-30 21:47:02 INFO] Drops: 固源岩 × 1, 龙门币 × 72
 [2026-09-30 21:47:05 INFO] Current sanity: 70/135
 """
+PROXY_FAIL_LOG = """[2026-10-13 05:20:43 INFO ] Current sanity: 49/205
+[2026-10-13 05:20:45 INFO ] Mission started (1 times, use 21 sanity)
+[2026-10-13 05:23:45 INFO ] Drops: 理智 × 21
+[2026-10-13 05:23:50 INFO ] Mission started (1 times, use 21 sanity)
+[2026-10-13 05:26:45 INFO ] Drops: 全新装置 × 1, 未来瞻望镜 × 21
+[2026-10-13 05:27:00 INFO ] Current sanity: 28/205
+"""
 
 
 def test_parse_summary_and_timeline(tmp_path):
@@ -83,6 +90,22 @@ def test_parse_summary_and_timeline(tmp_path):
     assert p["fights"] == 2 and p["drops"] == {"固源岩": 3, "龙门币": 144}
     assert p["sanity_first"] == [82, 135] and p["sanity_last"] == [70, 135]
     assert p["offline_seen"] is False
+
+
+def test_proxy_failure_is_not_a_drop(tmp_path):
+    """代理失败：游戏退回理智，MAA 记成掉落"理智 × 21"。不算掉落、不算用掉的理智，单独报出来。"""
+    from types import SimpleNamespace
+    from maapilot.crew import maa
+    from maapilot.tools import maa_cmd
+    log = tmp_path / "x.log"
+    log.write_text(PROXY_FAIL_LOG)
+    p = maa.timeline(log)
+    assert p["fights"] == 2 and p["proxy_failed"] == 1 and p["proxy_refund"] == 21
+    assert p["drops"] == {"全新装置": 1, "未来瞻望镜": 21}
+    run = SimpleNamespace(parsed=p, ok=True, duration_s=400, offline=False, log=log)
+    d = maa_cmd.result("fight", run, {"code": "YW-6", "ap_cost": 21})
+    assert d["times_done"] == 2 and d["sanity_used"] == 21 and d["proxy_failed"] == 1
+    assert "代理失败" in d["note"] and all(x["name"] != "理智" for x in d["drops"])
 
 
 def test_to_toml():

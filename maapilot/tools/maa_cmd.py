@@ -183,10 +183,15 @@ def result(task: str, mrun, info: dict) -> dict:
         times = p.get("fights") or p.get("fight_times") or 0
         first, last = p.get("sanity_first"), p.get("sanity_last")
         ap = info.get("ap_cost")
+        failed, refund = p.get("proxy_failed") or 0, p.get("proxy_refund") or 0
         data.update({"stage": info.get("code"), "times_done": times,
-                     "sanity_used": times * ap if ap else (max(0, first[0] - last[0]) if first and last else None),
+                     "sanity_used": max(0, times * ap - refund) if ap else
+                     (max(0, first[0] - last[0]) if first and last else None),
                      "sanity": {"current": last[0], "max": last[1]} if last else None,
                      "medicine_used": p.get("medicine") or 0, "drops": _drops(p.get("drops") or {})})
+        if failed:                                   # 代理没打赢：理智退回、没掉东西，MAA 照样算"完成"
+            data["proxy_failed"] = failed
+            data["note"] = f"{failed} 场代理失败（理智已退回、没掉东西）"
         _save_sanity(last)
         if task == "annihilation":
             got = sum(d["count"] for d in data["drops"] if d["id"] == "4003" or d["name"] == "合成玉")

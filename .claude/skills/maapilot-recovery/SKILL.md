@@ -24,7 +24,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
    - `screencap_failures` 多 → 模拟器连接有问题。
    - 看不出就说看不出，别编原因；拿不准是不是别的设备登录，就问用户。
 3. 现在停在哪：`maapilot screen shot`，用读图看截图。要找字就 `maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
-4. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件看最后一段）、`data.errors`。
+4. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件工具看最后一段；不用 `cat`/`grep` 接管道，无人值守时这种命令要批准、会被拒）、`data.errors`。
 
 ## 2. 常见情形
 

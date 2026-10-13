@@ -250,12 +250,14 @@ def parse_summary(lines: list[str]) -> list[dict]:
 
 
 def timeline(path: Path) -> dict:
-    """日志里的理智（首、末）、开始行动次数、掉落合计（{中文名: 数量}）、用掉的理智液、有没有掉线。"""
+    """日志里的理智（首、末）、开始行动次数、掉落合计（{中文名: 数量}）、用掉的理智液、有没有掉线、代理失败几次。
+    代理失败（代理指挥没打赢）时游戏把理智全退回，MAA 把这一场记成掉落"理智 × N"：不算掉落，记进 proxy_failed / proxy_refund。"""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}
     sanity, fights, drops, medicine = [], 0, {}, 0
+    proxy_failed, refund = 0, 0
     for ln in text.splitlines():
         if m := SANITY_RE.search(ln):
             sanity.append([int(m.group(1)), int(m.group(2))])
@@ -264,11 +266,16 @@ def timeline(path: Path) -> dict:
         if MISSION_RE.search(ln):
             fights += 1
         if m := DROPS_RE.search(ln):
-            for part in m.group(1).split(","):
-                if mm := DROP_PART_RE.match(part):
-                    drops[mm.group(1).strip()] = drops.get(mm.group(1).strip(), 0) + int(mm.group(2))
+            parts = [mm for part in m.group(1).split(",") if (mm := DROP_PART_RE.match(part))]
+            if parts and all(mm.group(1).strip() == "理智" for mm in parts):
+                proxy_failed += 1
+                refund += sum(int(mm.group(2)) for mm in parts)
+                continue
+            for mm in parts:
+                drops[mm.group(1).strip()] = drops.get(mm.group(1).strip(), 0) + int(mm.group(2))
     return {"sanity_first": sanity[0] if sanity else None, "sanity_last": sanity[-1] if sanity else None,
             "fights": fights, "drops": drops, "medicine": medicine,
+            "proxy_failed": proxy_failed, "proxy_refund": refund,
             "offline_seen": bool(OFFLINE_RE.search(text))}
 
 

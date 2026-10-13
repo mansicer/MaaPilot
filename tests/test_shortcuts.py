@@ -1,5 +1,6 @@
 """op upgrade / mastery、craft：快捷脚本换成假的，Game 换成假的，不碰模拟器。"""
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -102,7 +103,7 @@ def test_upgrade_bad_args(capsys, argv):
 
 @pytest.mark.parametrize("status,code,err", [
     ("started", 0, None), ("reached", 0, None), ("room busy", 1, "training_busy"),
-    ("blocked: need farming {\"x\": 1}", 1, "short_materials"), ("rank unknown", 1, "shortcut_failed"),
+    ("blocked: need farming {\"x\": 1}", 1, "short_materials"), ("rank unknown", 1, "shortcut_failed"), ("costs unreadable", 1, "shortcut_failed"),
 ])
 def test_mastery_statuses(capsys, monkeypatch, status, code, err):
     seen = {}
@@ -174,3 +175,18 @@ def test_busy_device(capsys, monkeypatch):
         monkeypatch.undo()
         held.release()
     assert code == 4 and out["error"]["code"] == "busy"
+
+
+def test_mastery_misread_costs_is_not_a_shortage(monkeypatch, tmp_path):
+    """确认框的材料数没认全（配不上任何一阶的消耗）：不报缺材料，截图交给 agent。10-13 真机：卷3 57/15 被报成差 9。"""
+    taps = []
+    g = SimpleNamespace(tap=lambda *a, **k: taps.append(a), save=lambda n: tmp_path / f"{n}.png")
+    costs = [[("卷2", 8)], [("卷3", 12), ("A", 4)], [("卷3", 15), ("切削原液", 6), ("D32钢", 6)]]
+    monkeypatch.setattr(mastery, "open_plan", lambda g: "idle")
+    monkeypatch.setattr(mastery, "pick_trainee", lambda g, n: None)
+    monkeypatch.setattr(mastery, "_skill_costs", lambda n, s: costs)
+    monkeypatch.setattr(mastery, "open_dialog", lambda g, s: {"target_rank": 3, "hours": 24,
+                                                               "have_need": [(60, 1), (6, 6), (7, 6), (1, 1)]})
+    r = mastery.start_mastery(g, "丰川祥子", 2, {}, max_rank=3)
+    assert r["status"] == "costs unreadable" and r["short"] is None and r["shot"].endswith(".png")
+    assert taps == [mastery.DLG_CANCEL]
