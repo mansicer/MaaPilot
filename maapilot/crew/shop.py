@@ -1,6 +1,6 @@
 """采购中心兑换（凭证交易所）：为养成目标兑换刷不到的材料（芯片助剂），见 docs/concepts/jobs.md「执行」、决策 D135。
 
-页面流程已按真机采集（2026-09-29）写好；用户 2026-09-29 确认凭证规则后放开（`READY = True`，D135）。
+页面流程已按真机采集（2026-09-29）写好；进采购中心走 nav（首页的大按钮），认页面看顶部标签栏（真机 10-05）；用户 2026-09-29 确认凭证规则后放开（`READY = True`，D135）。
 `READY` 为假时 `buy()` 不连模拟器、直接抛 `ShopNotReady`，规划器也不排兑换（`uncalibrated`）。
 
 流程：首页 → 采购中心 → 凭证交易所 → 采购凭证区 → 读顶栏余额 → 横滑找到商品卡 → 点开购买框 → 用"+"设数量 →
@@ -17,9 +17,11 @@ import time
 READY = True                          # 用户 2026-09-29 确认凭证规则后放开（D135）；关掉就不连模拟器、规划器标 uncalibrated
 
 # --- 页面（1280x720 参考坐标系，真机采集 2026-09-29） -------------------------------------------------------------
-STORE_ENTRY = r"^采购中心$"            # 首页右侧的入口按钮文字（首页没单独截图，按导航菜单同名项；待核对）
-STORE_TITLE_ROI = (0, 0, 420, 100)     # 左上角（与 pagerules 的 store 规则同一处）
+# 进采购中心走 nav.goto(g, "采购中心")：首页右边的蓝色大按钮（它的字 OCR 常读成"采购心""采购口心"，按字找不到，真机 10-02～10-05）。
+# 采购中心里没有"采购中心"这几个字（以前拿它认页面，永远认不出），认页面看顶部标签栏（真机 10-05）。
 TABS_ROI = (0, 85, 1280, 45)           # 顶部标签栏 y≈106：可露希尔推荐 / 源石交易所 / 组合包 / 时装商店 / 凭证交易所(x≈836) / 家具商店 / 信用交易所
+TABS = ("可露希尔推荐", "源石交易所", "组合包", "时装商店", "凭证交易所", "家具商店", "信用交易所")
+SUBTABS = ("资质凭证区", "高级凭证区", "通用凭证区", "采购凭证区", "寻访参数模型")
 SUBTABS_ROI = (0, 150, 250, 510)       # 凭证交易所左侧分区 x≈170：资质 y≈193、高级 y≈291、通用 y≈390、采购 y≈488、寻访参数模型 y≈586
 BALANCE_ROI = (1070, 20, 85, 40)       # 顶栏余额 图标+数字：资质 / 高级 / 通用 / 采购凭证(第 4 个，红，数字 x≈1085–1140, y≈40) / 情报
 GOODS_ROI = (255, 140, 1025, 510)      # 商品卡 4×2：顶部名称条、右上"剩余N"、底部价格条
@@ -98,15 +100,39 @@ def read_balance(g) -> int | None:
     return parse_balance(_texts(g, BALANCE_ROI))
 
 
+def on_store(g, img=None) -> bool:
+    """在采购中心：顶部标签栏认得出两个以上的标签（按词认）。"""
+    from maapilot.crew import reading
+    seen = {reading.best_word(h.text, TABS) for h in g.ocr(TABS_ROI, img)}
+    return len(seen - {None}) >= 2
+
+
+def find_tab(g, tab: str, img=None):
+    """顶部标签栏里的某个标签（按词认）。"""
+    return g.find_word(tab, TABS_ROI, img, vocab=TABS)
+
+
 def goto_tab(g, shop: str, tab: str) -> None:
-    """首页 → 采购中心 → shop（凭证交易所）→ tab（采购凭证区）。"""
+    """首页 → 采购中心 → shop（凭证交易所）→ tab（采购凭证区）。进采购中心走 nav（不自己按字找入口）。"""
     from maapilot.crew import nav
-    if not g.find(STORE_ENTRY, STORE_TITLE_ROI):
-        if not nav.ensure_home(g):
-            raise ShopError("回不到首页")
-        g.tap_hit(g.wait(STORE_ENTRY), delay=3.0)
-    g.tap_hit(g.wait(re.escape(shop), TABS_ROI), delay=2.5)
-    g.tap_hit(g.wait(re.escape(tab), SUBTABS_ROI), delay=2.5)
+    if not on_store(g):
+        try:
+            nav.goto(g, "采购中心")
+        except RuntimeError as e:
+            raise ShopError(f"进不了采购中心：{e}") from None
+        for _ in range(4):
+            if on_store(g):
+                break
+            time.sleep(1.5)
+        else:
+            g.save("shop_store_fail")
+            raise ShopError("进不了采购中心（没看到顶部标签栏）")
+    hit = find_tab(g, shop)
+    if hit is None:
+        g.save("shop_tab_fail")
+        raise ShopError(f"采购中心里找不到 {shop}")
+    g.tap_hit(hit, delay=2.5)
+    g.tap_hit(g.wait_word(tab, SUBTABS_ROI, vocab=SUBTABS), delay=2.5)
 
 
 def find_goods(g, item_name: str):

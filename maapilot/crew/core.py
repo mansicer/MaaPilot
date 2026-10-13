@@ -10,8 +10,10 @@ Coordinates: every coordinate and ROI is in the 1280x720 reference space of
 """
 from __future__ import annotations
 
+import json
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
@@ -42,6 +44,27 @@ class OcrHit:
     def center(self) -> tuple[int, int]:
         x, y, w, h = self.box
         return x + w // 2, y + h // 2
+
+
+RECENT_OCR = 12        # 取证 .json 里记最近几次识别
+DEBUG_KEEP = 300       # private/debug 里带时间的取证截图最多留几张（连同 .json）
+_STAMPED = re.compile(r"_\d{8}-\d{6}(-\d+)?\.png$")
+
+
+def _hit_json(h: "OcrHit") -> dict:
+    return {"text": h.text, "box": list(h.box), "score": round(h.score, 3)}
+
+
+def prune_debug(keep: int = DEBUG_KEEP) -> None:
+    """只留最近 keep 张带时间的取证截图（和旁边的 .json）；别的文件（MaaFramework 日志等）不动。"""
+    try:
+        shots = sorted((p for p in paths.DEBUG_DIR.glob("*.png") if _STAMPED.search(p.name)),
+                       key=lambda p: p.stat().st_mtime)
+        for p in shots[:-keep] if len(shots) > keep else []:
+            p.unlink(missing_ok=True)
+            p.with_suffix(".json").unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 class Game:
@@ -101,10 +124,39 @@ class Game:
         return path
 
     def save(self, name: str) -> Path:
+        """失败取证：截图存成 private/debug/<name>_<时间>.png（带时间，同一个干员 / 物品再失败不会盖掉上一次的），
+        旁边的同名 .json 是最近几次识别读到了什么（`recent`）和整张图的识别结果（`screen`）。
+        只留最近 DEBUG_KEEP 张。"""
         img = self._shot if self._shot is not None else self.screencap()
-        p = paths.DEBUG_DIR / f"{name}.png"
+        paths.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        p = paths.DEBUG_DIR / f"{name}_{stamp}.png"
+        n = 1
+        while p.exists():                                  # 同一秒存了两张
+            n += 1
+            p = paths.DEBUG_DIR / f"{name}_{stamp}-{n}.png"
         Image.fromarray(img[:, :, ::-1]).save(p)
+        try:
+            self._save_hits(p.with_suffix(".json"), name, img)
+        except Exception:                                  # noqa: BLE001 - 取证写不了不影响主流程
+            pass
+        prune_debug()
         return p
+
+    def _save_hits(self, path: Path, name: str, img: np.ndarray) -> None:
+        recent = list(self._recent_ocr())
+        screen = None
+        if self.tasker is not None:
+            screen = [_hit_json(h) for h in self.ocr(FULL_ROI, img)]
+        path.write_text(json.dumps({"name": name, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "recent": recent,
+                                    "screen": screen}, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def _recent_ocr(self) -> deque:
+        """最近 RECENT_OCR 次识别 {roi, hits}（存取证时写进 .json）。"""
+        d = self.__dict__.get("_recent")
+        if d is None:
+            d = self.__dict__["_recent"] = deque(maxlen=RECENT_OCR)
+        return d
 
     # ---- ocr --------------------------------------------------------------
     def ocr(self, roi: tuple[int, int, int, int] = FULL_ROI, img: Optional[np.ndarray] = None,
@@ -121,6 +173,7 @@ class Game:
             for r in reco.all_results:
                 raw = r.raw if hasattr(r, "raw") else getattr(r, "__dict__", {})
                 hits.append(OcrHit(text=str(r.text), box=tuple(r.box), score=float(getattr(r, "score", 0.0))))
+        self._recent_ocr().append({"roi": list(roi), "hits": [_hit_json(h) for h in hits]})
         return hits
 
     def find(self, pattern: str, roi=FULL_ROI, img=None) -> Optional[OcrHit]:
@@ -130,15 +183,39 @@ class Game:
                 return h
         return None
 
-    def wait(self, pattern: str, roi=FULL_ROI, timeout: float = 15, interval: float = 0.8) -> OcrHit:
+    def find_word(self, word: str, roi=FULL_ROI, img=None, vocab: Sequence[str] = ()) -> Optional[OcrHit]:
+        """像 find，但按词认：OCR 读错一个字也算（三个字以上的词；`reading.matches`）。
+        vocab 写同一处可能出现的别的词，免得把差一个字的别的词认成 word。"""
+        from maapilot.crew import reading
+        for h in self.ocr(roi, img):
+            if reading.matches(h.text, word, vocab):
+                return h
+        return None
+
+    def wait(self, pattern: str, roi=FULL_ROI, timeout: float = 15, interval: float = 0.8, *,
+             overlays: bool = True) -> OcrHit:
+        """等 pattern 出现。没等到的每一轮先看是不是被认得的遮挡挡住了（专精完成提示、获得物资、公告……，
+        `maapilot.crew.overlays`），是就关掉再看；overlays=False 不管遮挡（等的就是遮挡本身时）。"""
+        return self._wait(lambda: self.find(pattern, roi), repr(pattern), timeout, interval, overlays)
+
+    def wait_word(self, word: str, roi=FULL_ROI, timeout: float = 15, interval: float = 0.8, *,
+                  vocab: Sequence[str] = (), overlays: bool = True) -> OcrHit:
+        """同 wait，按词认（find_word）。"""
+        return self._wait(lambda: self.find_word(word, roi, vocab=vocab), repr(word), timeout, interval, overlays)
+
+    def _wait(self, finder, what: str, timeout: float, interval: float, overlays: bool) -> OcrHit:
         t0 = time.time()
         while time.time() - t0 < timeout:
-            h = self.find(pattern, roi)
+            h = finder()
             if h:
                 return h
+            if overlays:
+                from maapilot.crew import overlays as _ov
+                if _ov.dismiss(self, img=self._shot):
+                    continue
             time.sleep(interval)
         self.save("timeout")
-        raise TimeoutError(f"'{pattern}' not found within {timeout}s (screenshot saved)")
+        raise TimeoutError(f"{what} not found within {timeout}s (screenshot saved)")
 
     # ---- input ------------------------------------------------------------
     def _writable(self) -> None:
