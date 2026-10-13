@@ -323,6 +323,21 @@ def read_rank(g: Game) -> int | None:
     return None
 
 
+SKILL_DLG = (r"等级\d+到等级", (700, 540, 580, 60))     # 升技能确认框上的"等级N到等级N+1"
+SKILL_DLG_WAIT = 8
+
+
+def _rank_on_page(g: Game) -> int | None:
+    """回到干员页读技能等级：关掉认得的遮挡，还在升技能的框里就点返回，最多三次。"""
+    from maapilot.crew import overlays
+    for _ in range(3):
+        overlays.dismiss_all(g)
+        if on_operator_page(g):
+            return read_rank(g)
+        g.back()
+    return None
+
+
 def skill_to(g: Game, target: int) -> int:
     rank = read_rank(g)
     if rank is not None and rank >= target:          # at rank 7 the button becomes 专精 (mastery)
@@ -331,7 +346,15 @@ def skill_to(g: Game, target: int) -> int:
         raise UpgradeError("mastery (专精) is not supported yet")
     g.tap(*BTN_SKILL_UP, delay=1.5)
     for _ in range(12):
-        hit = g.wait(r"等级\d+到等级", (700, 540, 580, 60))
+        try:
+            hit = g.wait(*SKILL_DLG, timeout=SKILL_DLG_WAIT)
+        except TimeoutError:
+            # 升到 7 级后没有"等级7到等级8"了（10-05、10-06 升到 7 级其实成了，却报失败）：回干员页读等级再说
+            rank = _rank_on_page(g)
+            if rank is not None and rank >= target:
+                return rank
+            raise UpgradeError(f"skill upgrade dialog gone; skill rank now {rank if rank is not None else 'unread'}"
+                               f" (target {target})") from None
         m = re.search(r"等级(\d+)到等级", hit.text)
         cur = int(m.group(1))
         if cur >= target:

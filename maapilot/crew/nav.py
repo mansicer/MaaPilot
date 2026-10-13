@@ -4,13 +4,18 @@ from __future__ import annotations
 import re
 import time
 
+from maapilot.crew import overlays
 from maapilot.crew.core import FULL_ROI, REF_W, Game
 
 DRAWER = {"首页": (92, 260), "干员": (308, 260), "编队": (237, 190), "终端": (530, 190),
           "基建": (688, 190), "档案": (450, 260)}
 
 
-HOME_BUTTONS = {"干员": (941, 335), "终端": (960, 190), "基建": (980, 600), "编队": (740, 335), "档案": (395, 625)}
+HOME_BUTTONS = {"干员": (941, 335), "终端": (960, 190), "基建": (980, 600), "编队": (740, 335), "档案": (395, 625),
+                "采购中心": (838, 490)}     # 采购中心：首页右边蓝色大按钮（真机 10-02～10-05；它的字 OCR 常读成"采购心""采购口心"）
+
+# 基建里的房间名（进驻总览上按名字找房间时，免得把差一个字的别的房间认错）
+ROOMS = ("控制中枢", "制造站", "贸易站", "发电站", "宿舍", "会客室", "加工站", "办公室", "训练室")
 
 
 # the home screen's "终端" button, glyphs included whole: the old (880, 100, 160, 80) cut off their lower part and OCR
@@ -56,19 +61,11 @@ def recover_offline(g: Game, timeout: float = 45.0, interval: float = 3.0) -> di
 
 
 def dismiss_dialogs(g: Game) -> None:
-    dismiss_offline(g)                                   # connection fault: ✓ lets the game reconnect (D137)
-    if g.find(r"重置设置", (1000, 20, 260, 60)):                # settings page (opened by a stray tap)
-        g.tap(85, 45, delay=2.0)
-    if g.find(r"活动公告|系统公告|资讯速报", (340, 95, 700, 60)):   # login announcements
-        g.tap(1203, 70, delay=2.5)
-    if g.find(r"月签到", (0, 60, 400, 80)):                # monthly sign-in calendar (opened by the top-left icon)
-        g.tap(1215, 68, delay=2.0)
-    if g.find(r"结束时间", (40, 590, 400, 40)) and g.find(r"LOGIN|DAY", (450, 240, 700, 80)):   # login-event page
-        g.tap(1232, 100, delay=2.0)
+    """关掉认得的遮挡（连接故障、公告、月签到、登录活动页、设置页、角色档案教程……，表在 maapilot.crew.overlays），
+    再确认"离开罗德岛基建"（导航要离开基建时才对，所以不在那张表里）。"""
+    overlays.dismiss_all(g)
     if g.find(r"离开罗德岛基建", (300, 260, 700, 80)):
         g.tap(842, 495, delay=2.5)                       # confirm leaving the base
-    if g.find(r"角色档案", (150, 120, 600, 150)) and g.find(r"关闭", (120, 90, 100, 40)):
-        g.tap(156, 109, delay=1.5)
 
 
 def open_drawer(g: Game) -> bool:
@@ -89,11 +86,19 @@ def open_drawer(g: Game) -> bool:
 
 
 def goto(g: Game, entry: str) -> None:
+    """去抽屉 / 首页上的入口（DRAWER、HOME_BUTTONS）。抽屉里没有的入口（采购中心）先经抽屉回首页，再点首页的按钮。"""
     if open_drawer(g):
-        g.tap(*DRAWER[entry], delay=3.0)
-    else:                                                 # home screen: use its big buttons
-        if entry != "首页":
-            g.tap(*HOME_BUTTONS[entry], delay=3.0)
+        if entry in DRAWER:
+            g.tap(*DRAWER[entry], delay=3.0)
+            dismiss_dialogs(g)
+            return
+        g.tap(*DRAWER["首页"], delay=3.0)
+        dismiss_dialogs(g)
+        if not is_home(g):
+            g.save("goto_home_fail")
+            raise RuntimeError(f"could not reach the home screen on the way to {entry}")
+    if entry != "首页":                                    # home screen: use its big buttons
+        g.tap(*HOME_BUTTONS[entry], delay=3.0)
     dismiss_dialogs(g)
 
 
@@ -138,18 +143,19 @@ def goto_main_stage(g: Game, code: str) -> None:
 
 
 def goto_room(g: Game, room: str) -> None:
-    """Open a base room by its label (训练室 / 加工站 / ...), from anywhere."""
+    """Open a base room by its label (训练室 / 加工站 / ...), from anywhere. 房间名、"进驻总览"、"设施信息"按词认
+    （OCR 读错一个字也认得，`Game.find_word`）。"""
     for _ in range(8):
         dismiss_dialogs(g)
-        if g.find(r"进驻总览", (20, 95, 140, 50)):                    # base overview
-            hit = g.find(room, (0, 60, REF_W, 620))
+        if g.find_word("进驻总览", (20, 95, 140, 50)):                # base overview
+            hit = g.find_word(room, (0, 60, REF_W, 620), vocab=ROOMS)
             if hit:
                 g.tap_hit(hit, delay=3.0)
                 g.wait(r"设施信息", (10, 170, 120, 50), timeout=10)
                 return
             g.swipe(900, 400, 500, 400, duration_ms=500, delay=1.5)
             continue
-        if g.find(r"设施信息", (10, 170, 120, 50)):                    # inside some room
+        if g.find_word("设施信息", (10, 170, 120, 50)):                # inside some room
             g.back(delay=2.5)
             continue
         goto(g, "基建")

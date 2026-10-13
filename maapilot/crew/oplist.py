@@ -7,7 +7,18 @@ CLASS_TAB = {  # right sidebar (1240, y) on the operator list screen
     "ALL": 90, "先锋": 150, "近卫": 225, "重装": 290, "狙击": 360,
     "术师": 430, "医疗": 510, "辅助": 590, "特种": 670,
 }
+_DIGIT_FIX = str.maketrans({"O": "0", "o": "0", "D": "0", "I": "1", "l": "1", "|": "1"})
 NAME_ROWS = [(0, 300, REF_W, 100), (0, 620, REF_W, 100)]  # OCR strips for the two card rows
+
+
+def is_name(text: str, name: str) -> bool:
+    """这段字是不是干员 name：原样相同，或按词认（读错一个字也算，三个字以上的名字；全体干员名做词表，
+    差一个字的别的干员不会认错）。"""
+    if text.strip() == name:
+        return True
+    from maapilot.crew import reading
+    from maapilot.knowledge import gamedata
+    return reading.matches(text, name, gamedata.operators())
 
 
 def _names_on_screen(g: Game, img=None) -> list[OcrHit]:
@@ -26,7 +37,7 @@ def _scroll_to_start(g: Game) -> None:
 def _first_card_level(g: Game) -> int | None:
     """The first card's level, None when unread (then the sort direction is unknown; the scan still works)."""
     for h in g.ocr((20, 295, 80, 60)):
-        t = h.text.strip().replace("O", "0").replace("I", "1").replace("l", "1").replace("|", "1")
+        t = h.text.strip().translate(_DIGIT_FIX)          # "90" 读成 "9o"（小写 o，10-12 真机）
         if t.isdigit():
             return int(t)
     g.save("first_card_level_fail")
@@ -50,7 +61,7 @@ def open_operator(g: Game, name: str, cls: str, sort_asc: bool = True, max_pages
         hits = _names_on_screen(g)
         names = [h.text for h in hits]
         for h in hits:
-            if h.text == name:
+            if is_name(h.text, name):
                 cx, cy = h.center
                 g.tap(cx, cy - 150, delay=2.0)
                 return

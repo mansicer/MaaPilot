@@ -162,6 +162,14 @@ MaaPilot/
    一时修不了的标 `xfail(strict=True, reason=…)` 写清读成了什么；修好了它会报 XPASS，提醒去掉标记。
 4. 改了读法的，合并后还要在模拟器上用只读命令核对一次（固定规则的识别要真机跑过才算数）。
 
+**读法的共用件**（`maapilot/crew/reading.py`，不导入 MaaFramework，`tests/test_reading.py` 离线测）：
+- 中文标签按词认：`Game.find_word(词, roi, vocab=…)` / `wait_word`，在已知词表里找编辑距离最近的（三个字以上差 1 个字也算，
+  最近的不唯一就不认）。词表写同一处可能出现的别的词（全部配方名、全体干员名、训练位的几种状态、房间名），差一个字的别的词不会认错。
+- "有/要"数字：原样读一遍，再二值化（`reading.binarize`，白底黑字）读几遍，`parse_have_need` 认斜杠的形近字，`vote` 投票；
+  专精确认框还拿游戏数据里每一阶的"要"去对齐粘在一起的数字（`mastery.align_by_need`），切出来的"有"只用来认阶数，不用来算缺多少。
+- 认得的遮挡（`maapilot/crew/overlays.py`）：`Game.wait` 等不到时先关掉表里的遮挡再等；只列点了不花东西的。
+  进页面只走 `maapilot/crew/nav.py`（`goto`、`goto_room`），快捷操作里不自己点坐标导航。
+
 ## 11. 外部数据源
 
 程序靠这些外部数据，格式随时会变（`maapilot/knowledge/sources.py`）：
