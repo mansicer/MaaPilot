@@ -145,3 +145,19 @@ MaaPilot/
 2. 自由对话里能做到：重新跑一次日常；练干员（等级、技能、专精）；合成指定材料；复杂任务（模组任务、剿灭）。
 3. 定时日常里 MAA 出错会当场叫 agent 接管，跑完有汇报。
 4. 没经用户确认的合成玉、源石减少会被发现并停下。
+
+## 10. 识别回归测试
+
+别的测试都喂假的 OCR 结果；真机上的错多半出在识别这一层（首页理智 130 读成 29、专精确认框 57/15 读成 5715）。
+`tests/test_screens.py` 在真机截图（`tests/fixtures/screens/`）上跑真的 MaaFramework OCR 和读页面的函数，对照人眼看出的答案。
+不用模拟器：`maapilot.crew.core.ImageGame` 是不连设备的 Game，截图就是给的图片，点击只记在 `actions` 里，
+`state.home_sanity`、`mastery.open_dialog`、`craft.read_count` 这类函数可以原样在图上跑。OCR 模型（`resource/model/ocr/`）不在时整个文件跳过。
+
+**修识别的毛病，先加出错的截图**：
+
+1. 找到出错那一刻的截图（`private/shots/`、`private/debug/`），用 `maapilot screen ocr --image <图> --roi …` 看 OCR 实际读出了什么。
+2. 做成样本：`.venv/bin/python tests/fixtures/screens/make.py <图> <名> --keep X Y W H …`。只留被测函数读的区域，其余涂黑；
+   做完用读图工具看一眼，留下的部分不能有昵称、ID（首页左边）、好友名。文件名带上正确答案（`home_130`、`craft_全新装置_16-16`）。
+3. 在 `tests/test_screens.py` 加一条，断言正确答案，先看它失败；再改读法（不是改测试），全部样本都要过。
+   一时修不了的标 `xfail(strict=True, reason=…)` 写清读成了什么；修好了它会报 XPASS，提醒去掉标记。
+4. 改了读法的，合并后还要在模拟器上用只读命令核对一次（固定规则的识别要真机跑过才算数）。

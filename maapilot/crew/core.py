@@ -1,7 +1,8 @@
 """Thin wrapper around MaaFramework for driving Arknights on an Android device/emulator.
 
 Screenshots, OCR (MAA's PaddleOCR models), clicks and swipes.  Everything the
-higher-level features (operator upgrade, etc.) need, nothing more.
+higher-level features (operator upgrade, etc.) need, nothing more.  `ImageGame` runs the same recognition on an
+image file without a device (screenshot regression tests, `screen ocr --image`).
 
 Coordinates: every coordinate and ROI is in the 1280x720 reference space of
 ``maapilot.crew.screen`` (re-exported here).  Which device to connect to comes from
@@ -180,3 +181,100 @@ class Game:
 
     def back(self, delay: float = 1.2) -> None:
         self.tap(44, 40, delay)
+
+
+# ---- 不连设备：在图片上跑识别 ------------------------------------------------
+def load_image(path: Path | str) -> np.ndarray:
+    """图片文件 → BGR 数组（和 MaaFramework 截图一样的格式），缩到 1280×720 参考坐标系（要求 16:9）。"""
+    im = Image.open(path).convert("RGB")
+    check_aspect(*im.size)
+    if im.size != (REF_W, REF_H):
+        im = im.resize((REF_W, REF_H))
+    return np.ascontiguousarray(np.asarray(im)[:, :, ::-1])
+
+
+def _image_controller(game: "ImageGame"):
+    """MaaFramework 的自定义控制器：截图返回 game 当前的图片，点击之类直接返回成功。
+    （MaaFramework 自带的 DbgController 读图片目录，但 macOS 的 maafw 包里没有它的库。）Tasker 要绑一个控制器才能识别。"""
+    from maa.controller import CustomController
+
+    class Ctrl(CustomController):
+        def connect(self) -> bool: return True
+        def request_uuid(self) -> str: return "maapilot-image"
+        def start_app(self, intent: str) -> bool: return True
+        def stop_app(self, intent: str) -> bool: return True
+        def screencap(self) -> np.ndarray: return game.image
+        def click(self, x, y) -> bool: return True
+        def swipe(self, x1, y1, x2, y2, duration) -> bool: return True
+        def touch_down(self, contact, x, y, pressure) -> bool: return True
+        def touch_move(self, contact, x, y, pressure) -> bool: return True
+        def touch_up(self, contact) -> bool: return True
+        def click_key(self, keycode) -> bool: return True
+        def input_text(self, text) -> bool: return True
+        def key_down(self, keycode) -> bool: return True
+        def key_up(self, keycode) -> bool: return True
+
+    return Ctrl()
+
+
+class ImageGame(Game):
+    """不连设备的 Game：截图就是给定的图片，识别走和真机同一套 MaaFramework OCR（同一份资源、同样的参数）。
+
+    给截图回归测试和 `screen ocr --image` 用。点击、滑动不发到任何地方，只记在 `self.actions` 里（不等待），
+    所以读页面的函数（`state.home_sanity`、`mastery.open_dialog` ……）可以原样在图片上跑。
+    `show(path)` 换下一张图；`log_dir` 是 MaaFramework 写日志的目录（默认 private/debug，和真机一样）。
+    OCR 模型不在（resource/model/ocr 没装）时抛 RuntimeError。"""
+
+    def __init__(self, image: Path | str | np.ndarray, *, log_dir: Path | None = None):
+        if not (paths.OCR_MODEL / "rec.onnx").exists():
+            raise RuntimeError(f"OCR 模型不在 {paths.OCR_MODEL}")
+        log_dir = Path(log_dir) if log_dir else paths.DEBUG_DIR
+        log_dir.mkdir(parents=True, exist_ok=True)
+        Toolkit.init_option(str(log_dir))
+        Tasker.set_stdout_level(LoggingLevelEnum.Off)
+        self.image = image if isinstance(image, np.ndarray) else load_image(image)
+        self.actions: list[tuple] = []
+        self.ctrl = _image_controller(self)
+        if not self.ctrl.post_connection().wait().succeeded:
+            raise RuntimeError("image controller connection failed")
+        self.readonly = False
+        self.res = Resource()
+        if not self.res.post_bundle(str(paths.RESOURCE)).wait().succeeded:
+            raise RuntimeError("resource load failed")
+        self.tasker = Tasker()
+        if not self.tasker.bind(self.res, self.ctrl):
+            raise RuntimeError("tasker bind failed")
+        self.debug = False
+        self._shot = None
+
+    def show(self, image: Path | str | np.ndarray) -> None:
+        """换成下一张图（模拟点击之后页面变了）。"""
+        self.image = image if isinstance(image, np.ndarray) else load_image(image)
+        self._shot = None
+
+    def screencap(self) -> np.ndarray:
+        self._shot = self.image
+        return self._shot
+
+    @property
+    def resolution(self) -> tuple[int, int]:
+        return REF_W, REF_H
+
+    def save(self, name: str) -> Path:
+        self.actions.append(("save", name))
+        return Path(f"{name}.png")
+
+    def tap(self, x: int, y: int, delay: float = 0.8) -> None:
+        self.actions.append(("tap", int(x), int(y)))
+
+    def swipe(self, x1, y1, x2, y2, duration_ms: int = 400, delay: float = 0.8) -> None:
+        self.actions.append(("swipe", int(x1), int(y1), int(x2), int(y2)))
+
+    def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
+        self.actions.append(("long_press", int(x), int(y), int(duration_ms)))
+
+    def key_back(self, delay: float = 0) -> None:
+        self.actions.append(("back",))
+
+    def input_text(self, text: str, delay: float = 0) -> None:
+        self.actions.append(("text", text))

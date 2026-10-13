@@ -144,8 +144,10 @@
 {"path": "/…/private/shots/20260930-214001-home.png", "width": 1280, "height": 720, "at": "…"}
 ```
 
-`maapilot screen ocr [--roi X Y W H] [--find <正则>] [--name <名>]`
+`maapilot screen ocr [--roi X Y W H] [--find <正则>] [--name <名>] [--image <图片>]`
 截图并识别文字（MaaFramework + PaddleOCR）。`--roi` 只识别一块（越界退出码 2 `bad_roi`）；`--find` 只返回匹配的。截图同样存下。
+`--image` 不连模拟器、不截图，在一张已有的截图上跑同一套识别（排查识别错误、做回归样本用，见 design.md「识别回归测试」）；
+`path` 就是这张图。图片不在、读不了或不是 16:9 退出码 2（`bad_image`）；OCR 资源加载不了退出码 5（`ocr_unavailable`）。
 
 ```json
 {"path": "/…/private/shots/….png", "roi": [0, 0, 1280, 720],
