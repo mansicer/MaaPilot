@@ -256,3 +256,26 @@ def test_annihilation_progress_from_campaign(tmp_path, monkeypatch):
     assert d["orundum"] == 1215 and d["capped"] is False and d["progress"]["source"] == "skland"
     assert maa_cmd.note_annihilation_progress(1800, 1800)["capped"] is True
     assert maa_cmd.annihilation_week()["capped"] is True
+
+
+def test_state_sanity_prefers_skland(fake, capsys, monkeypatch):
+    """接了森空岛：state sanity 从森空岛读，不碰模拟器、不拿锁。"""
+    from maapilot.tools import state
+    _configure()
+    monkeypatch.setattr(state, "read_sanity", lambda: pytest.fail("不该回首页 OCR"))
+    monkeypatch.setattr(common, "device", lambda *a, **k: pytest.fail("不该拿模拟器锁"))
+    code, env, _ = run(capsys, "state", "sanity")
+    assert code == 0, env
+    assert env["data"]["source"] == "skland" and env["data"]["max"] == 135
+    assert json.loads((paths.STATE / "sanity.json").read_text())["source"] == "skland"
+
+
+def test_state_sanity_falls_back_to_ocr(fake, capsys, monkeypatch):
+    from maapilot.tools import state
+    _configure()
+    fake.info_code = 10002
+    from contextlib import nullcontext
+    monkeypatch.setattr(common, "device", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(state, "read_sanity", lambda: {"at": common.iso(), "current": 50, "max": 135, "source": "ocr"})
+    code, env, _ = run(capsys, "state", "sanity")
+    assert code == 0 and env["data"]["source"] == "ocr" and env["data"]["skland_error"]

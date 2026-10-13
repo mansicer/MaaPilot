@@ -39,7 +39,7 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 ## 目标部分（定时运行叫起你，或 `goals_pending`）
 
 1. `maapilot goals list`：只看"进行中"的。`problems` 里有写错的目标，照着修好那几行（`goals update`）。
-2. `maapilot state sanity` 看理智；`state show depot` 的时间是今天这次日常之前的，就先 `state depot`。
+2. `maapilot state sanity` 看理智（结果带 `suspect` 时是首页读数可能读错了：看 `shot` 截图核对，以截图为准）；`state show depot` 的时间是今天这次日常之前的，就先 `state depot`。
 3. 逐个目标（按文件里的顺序；"分解与进展"里写了先后的照写的）：
    - 读它的"分解与进展"，接着上次做；
    - `maapilot calc need "<对象>"`（技能等级、专精按笔记里记的加 `--from`）：`short` 为空 → 现在就做（`maapilot-training`）；缺的能合成 → `maapilot-base` 合出来再做；

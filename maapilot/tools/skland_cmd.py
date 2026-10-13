@@ -243,6 +243,27 @@ def _note_annihilation(info: dict) -> dict | None:
     return ann
 
 
+def sanity_now() -> dict | None:
+    """只为理智读一次森空岛（几秒，不碰模拟器、不改 box.json），写 sanity.json（source: skland）。
+    没接森空岛 → None；接口出错抛 CliError；接口里没有理智 → None。"""
+    from maapilot.crew import skland
+    store = load_store()
+    if store is None:
+        return None
+    client = skland.Client(store["token"], did=store.get("did"))
+    try:
+        uid = store.get("uid") or str(skland.choose_role(client.roles(), _server())["uid"])
+        info = client.player_info(uid)
+    except skland.SklandError as e:
+        raise _cli_error(e, store["token"]) from None
+    san = skland.sanity_of(info)
+    if not san:
+        return None
+    snap = {"at": common.iso(), **san, "source": "skland"}
+    common.write_json(paths.STATE / "sanity.json", snap)
+    return snap
+
+
 def annihilation_progress() -> dict | None:
     """只为剿灭读一次森空岛（几秒，不碰模拟器、不改 box.json）：本周合成玉 {current, total, max_kills}，记进本周剿灭记录。
     没接森空岛 → None；接口出错抛 CliError。"""

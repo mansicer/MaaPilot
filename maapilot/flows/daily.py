@@ -591,14 +591,8 @@ def _stage_cost(stage: str) -> tuple[int, bool]:
 
 
 def _sanity_estimate(snap: dict | None) -> int | None:
-    """快照 → 现在大概多少：没到上限的按 6 分钟 1 点往上加（最多加到上限）；超上限的（用了理智液、升级）不会再涨。"""
-    if not snap or snap.get("current") is None:
-        return None
-    cur, cap = int(snap["current"]), int(snap.get("max") or 0)
-    age = _age_min(snap.get("at"))
-    if cap and cur < cap and age:
-        cur = min(cap, cur + age // 6)
-    return cur
+    from maapilot.tools.state import estimate_sanity
+    return estimate_sanity(snap)
 
 
 def _age_min(at: str | None) -> int:

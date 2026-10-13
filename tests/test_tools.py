@@ -633,3 +633,16 @@ def test_main_stage_difficulty_suffix_only_where_tough_exists():
     assert stages.resolve_stage("9-16").maa_value == "9-16"
     assert stages.resolve_stage("10-12").maa_value == "10-12-NORMAL"
     assert stages.resolve_stage("1-7").maa_value == "1-7"
+
+
+def test_ocr_sanity_far_below_estimate_is_suspect(monkeypatch):
+    """首页 OCR 读得比上一份快照推出来的低很多（真机：130 读成 29）：标 suspect，带推算值和截图。"""
+    from maapilot.tools import screen, state
+    common_ = state.common
+    common_.write_json(state.snap_path("sanity"), {"at": common_.iso(), "current": 120, "max": 205, "source": "skland"})
+    monkeypatch.setattr(state, "read_home", lambda game=None: (None, (29, 205), object()))
+    monkeypatch.setattr(screen, "capture", lambda g, n: (None, {"path": "private/shots/x.png"}))
+    snap = state.read_sanity()
+    assert snap["current"] == 29 and snap["suspect"] is True and snap["estimate"] == 120 and snap["shot"]
+    monkeypatch.setattr(state, "read_home", lambda game=None: (None, (110, 205), object()))
+    assert "suspect" not in state.read_sanity()

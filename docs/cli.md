@@ -398,7 +398,7 @@ token 不出现在任何输出、日志、报错里；agent 读不了也改不�
 | `state box` | MAA 干员识别（OperBox）：精英化、等级、稀有度、潜能 | `private/state/box.json` |
 | `state op <干员>` | 进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，约一分钟；不存快照）。专精、模组读不了（`unread` 列出没读到的） | — |
 | `state skland [--op <名>…]` | 从森空岛读（**不碰模拟器、不拿锁**，要先接森空岛，见「skland」）：每名干员的精英化、等级、稀有度、潜能，**加上**技能等级、各技能专精、模组（等级、装没装）；顺手更新理智 | `box.json`（`source: "skland"`）、`sanity.json` |
-| `state sanity` | 回首页，OCR 右上角的理智（大号的当前值 + 下面的"理智/上限"；2026-09 真机核对过） | `private/state/sanity.json` |
+| `state sanity` | 接了森空岛就从森空岛读（准、几秒、**不碰模拟器、不拿锁**，`source: "skland"`）；没接或读不到（`skland_error`）才回首页 OCR 右上角的理智（大号的当前值 + 下面的"理智/上限"，`source: "ocr"`）。OCR 读数比上一份快照推出来的（6 分钟 1 点）少 20 以上时带 `suspect: true`、`estimate`（推算值）、`shot`（首页截图）和 `hint`：首页数字上压着图标，真机读错过（130 → 29、114 → 4）；用户自己打过关时读数低也正常，以截图为准 | `private/state/sanity.json` |
 | `state show [depot\|box\|sanity] [--item <名>…] [--op <名>…]` | 读快照，不碰模拟器；不写种类时给三样里有的 | — |
 
 每次读完覆盖快照，`state depot` 并在 `private/log/` 的命令记录里记下和上一份的差（`depot_change`）。`--item` / `--op` 只筛选输出。
@@ -417,7 +417,9 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 // state op 遥
 {"name": "遥", "rarity": 6, "elite": 1, "level": 70, "skill_level": 7, "at": "…", "shot": "private/debug/…", "unread": ["专精", "模组"]}
 // state sanity
-{"at": "…", "current": 82, "max": 135}
+{"at": "…", "current": 82, "max": 135, "source": "skland", "age_min": 0}
+// state sanity（OCR、读数可疑）
+{"at": "…", "current": 29, "max": 205, "source": "ocr", "suspect": true, "estimate": 130, "shot": "private/shots/…", "hint": "…"}
 ```
 
 `state show` 在快照不存在时退出码 2（`no_snapshot`，hint：先 `state depot`）。
@@ -696,7 +698,7 @@ agent 结束（或超时被杀）后日常换一次锁的 token：它留下还�
 （程序据此判断 `recovered`）；每个提示都要求全程用中文、**不要** `report write --append`（最后的回复就是总结，程序放进汇报）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result` 作为总结进汇报。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。刷理智（`farm`）的时限按理智算：先读理智（`private/state/sanity.json` 1 小时内的直接用，
-没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity` 回首页读；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
+没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity`（森空岛，没接才回首页读）；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
 时限 = 次数 × `daily.farm_min_per_fight`（默认 3）+ `daily.farm_timeout_margin_min`（默认 15）分钟；理智超上限（如 358/205）照算。完全读不到理智才用 `task_timeout_min`。
 算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
 

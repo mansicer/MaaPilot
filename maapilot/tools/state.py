@@ -3,8 +3,9 @@
 - depot：MAA 仓库识别（Depot）→ private/state/depot.json `{at, items: {id: n}}`，并记下与上一份的差；
 - box：MAA 干员识别（OperBox）→ box.json `{at, operators: {名: {id, rarity, elite, level, potential}}}`；
 - op：进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，不存快照）；专精、模组读不了；
-- sanity：回首页 OCR 右上角的理智（MaaFramework）→ sanity.json `{at, current, max, source}`；
-  `maa fight` 结束时也会用日志里最后一次的理智顺手更新它（source: maa-log）。
+- sanity：接了森空岛先从森空岛读（准、不碰模拟器）；没接或读不到才回首页 OCR 右上角（MaaFramework）
+  → sanity.json `{at, current, max, source}`。OCR 读数比上一份快照推出来的明显低时标 `suspect`（首页数字上压着图标，
+  真机读错过：130 → 29、114 → 4）。`maa fight` 结束时也会用日志里最后一次的理智顺手更新它（source: maa-log）。
 - show：读快照，不碰模拟器。
 
 `read_depot()` / `read_box()` 是不拿锁的函数版本（guard、daily run 用）。
@@ -161,15 +162,52 @@ def read_home(game=None) -> tuple[dict | None, tuple[int, int] | None, object]:
     return parse_topbar(hits), parse_sanity(hits), game
 
 
+SUSPECT_GAP = 20      # OCR 读数比快照推出来的少这么多以上 → 可疑（也可能是用户自己打过关，所以只提醒、不改数）
+
+
+def estimate_sanity(snap: dict | None) -> int | None:
+    """快照 → 现在大概多少：没到上限的按 6 分钟 1 点往上加（最多加到上限）；超上限的（用了理智液、升级）不会再涨。"""
+    if not snap or snap.get("current") is None:
+        return None
+    cur, cap = int(snap["current"]), int(snap.get("max") or 0)
+    age = common.age_min(snap.get("at")) or 0
+    if cap and cur < cap and age:
+        cur = min(cap, cur + age // 6)
+    return cur
+
+
 def read_sanity() -> dict:
+    """回首页 OCR 理智（不拿锁）。比上一份快照推出来的少 SUSPECT_GAP 以上 → 带 suspect、estimate、shot。"""
+    prev = load("sanity")
     top, found, game = read_home()
+    from maapilot.tools.screen import capture
     if not found:
-        from maapilot.tools.screen import capture
         shot = capture(game, "sanity")[1]["path"]
         raise CliError("sanity_failed", "首页上没认出理智（当前/上限）", exit=FAILED, data={"shot": shot},
                        hint="看截图确认在首页；也可以跑一次 maa fight，结束时会顺手记下理智")
     snap = {"at": common.iso(), "current": found[0], "max": found[1], "source": "ocr"}
+    est = estimate_sanity(prev)
+    if est is not None and found[0] < est - SUSPECT_GAP:
+        snap.update(suspect=True, estimate=est, shot=capture(game, "sanity")[1]["path"])
     common.write_json(snap_path("sanity"), snap)
+    return snap
+
+
+def sanity_now() -> dict:
+    """`state sanity`：接了森空岛先读森空岛（不拿锁），没接或读不到再拿锁回首页 OCR。"""
+    from maapilot.tools import skland_cmd
+    err = None
+    if skland_cmd.configured():
+        try:
+            snap = skland_cmd.sanity_now()
+            if snap:
+                return snap
+        except CliError as e:
+            err = e.message
+    with common.device("state sanity"):
+        snap = read_sanity()
+    if err:
+        snap["skland_error"] = err
     return snap
 
 
@@ -222,8 +260,11 @@ def cmd_box(args):
 
 @common.logged
 def cmd_sanity(args):
-    with common.device("state sanity"):
-        return _sanity_out(read_sanity())
+    out = _sanity_out(sanity_now())
+    if out.get("suspect"):
+        out["hint"] = (f"读数可能错了：按上一次记下的推算现在约 {out['estimate']}。看截图（shot）里首页右上角的大号数字核对，"
+                       "以截图为准；用户自己打过关的话读数低是正常的")
+    return out
 
 
 def cmd_op(args):
