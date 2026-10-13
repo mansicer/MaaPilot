@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import time
 
+from maapilot.crew import overlays, reading
 from maapilot.crew.core import REF_W, Game
 from maapilot.knowledge import recipes as _recipes
 
@@ -56,8 +57,8 @@ class CraftError(RuntimeError):
 
 def goto_workshop(g: Game) -> None:
     """State-aware: works from the crafting screen, the room, the base overview or anywhere else.
-    进加工站用 nav.goto_room（和训练室同一条路：抽屉 → 基建 → 进驻总览）；以前这里自己点左上角 (270,38) 当抽屉，
-    2026-10 版本更新后首页那个位置变成了别的图标，就进不去了。"""
+    进加工站用 nav.goto_room（和训练室同一条路：抽屉 → 基建 → 进驻总览）。以前这里自己点左上角 (270,38) 当抽屉，
+    从首页出发就进不去：首页没有抽屉，那个位置一直是月签到的图标（nav.open_drawer 一直知道这件事），不是版本更新改的。"""
     from maapilot.crew import nav
     for attempt in range(4):
         if g.find(r"离开罗德岛基建", (300, 260, 700, 80)):     # "leave the base?" prompt: stay
@@ -81,7 +82,14 @@ def _norm(t: str) -> str:
     return t.strip().upper().replace("O", "0").replace("—", "-").replace("–", "-")
 
 
+def _is_formula(text: str, name: str, vocab) -> bool:
+    """列表上的这段字是不是 name 这个配方：原样相同，或按词认（读错一个字也算，"环烽预制体" → 环烃预制体；
+    vocab 是全部精英材料配方名，差一个字的别的配方（异铁组 / 异铁块）不会认错）。"""
+    return _norm(text) == _norm(name) or reading.matches(text, name, vocab)
+
+
 def select_formula(g: Game, name: str, max_pages: int = 20) -> None:
+    vocab = list(_recipes.workshop_by_name())
     g.tap(*FORMULA_CENTER, delay=2.0)
     hit = g.wait(r"精英材料", (60, 190, 180, 60))
     g.tap_hit(hit, delay=1.5)
@@ -93,7 +101,7 @@ def select_formula(g: Game, name: str, max_pages: int = 20) -> None:
         hits = [h for h in g.ocr(LIST_ROI) if h.score > 0.6]
         names = [h.text for h in hits]
         for h in hits:
-            if _norm(h.text) == _norm(name):
+            if _is_formula(h.text, name, vocab):
                 x, y = h.center
                 if any("解锁" in o.text for o in hits if abs(o.box[1] - y) < 120 and abs(o.box[0] - x) < 200):
                     raise CraftError(f"formula {name!r} is locked (needs a stage clear)")
@@ -109,35 +117,83 @@ def select_formula(g: Game, name: str, max_pages: int = 20) -> None:
 
 
 ING_ROI = (520, 280, 180, 60)      # "have/need" label under the top ingredient
+# 标签本身（深色小框，右边缘 x≈654，左边随数字长短）：白字（不够时"有"是红字），细斜杠常丢（16/16 → 6716、8/1 → 8Z1）。
+# 原样读一遍，再按 RGB 最大值 / R、G 较小值二值化、放大两倍读几遍，投票（reading.vote）。
+LABEL_ROI = (550, 292, 107, 30)
+LABEL_READS = (("max", 150), ("max", 170), ("max", 190), ("min_rg", 150))
+TOAST_ROI = (940, 60, 340, 110)    # 右上角的提示条（"材料不足"）
 
 
-def read_count(g: Game, name: str) -> int:
-    """Craft count = need shown under the first ingredient / per-craft cost of that ingredient.
-    (The big yellow count digit OCRs badly; the ingredient label is reliable.)"""
+def read_label(g: Game, img=None) -> tuple[int, int] | None:
+    """第一种原料下面的"有/要" → (有, 要)；几种读法说法不一或都读不出 → None。"""
+    img = img if img is not None else g.screencap()
+    readings = [reading.parse_have_need(h.text) for h in g.ocr(ING_ROI, img)]
+    for channel, th in LABEL_READS:
+        b, roi = reading.binarize(img, LABEL_ROI, threshold=th, channel=channel, scale=2)
+        readings.append(reading.parse_have_need("".join(h.text for h in g.ocr(roi, b))))
+    return reading.vote(readings)
+
+
+def read_count(g: Game, name: str, img=None) -> int:
+    """Craft count = need shown under the first ingredient / per-craft cost of that ingredient; -1 when unread.
+    (The big yellow count digit and the 龙门币 cost OCR badly -- their font's 0 reads as Z; the ingredient label is
+    the one that reads, see read_label.)"""
     per = next(iter(_recipes.workshop_by_name()[name]["costs"].values()))
-    for h in g.ocr(ING_ROI):
-        m = re.search(r"(\d+)\s*/\s*(\d+)", h.text.replace("O", "0"))
-        if m:
-            return int(m.group(2)) // per
-    return -1
+    pair = read_label(g, img)
+    if pair is None or pair[1] % per:
+        return -1
+    return pair[1] // per
+
+
+def toast(g: Game, img=None) -> str | None:
+    """右上角提示条里的"材料不足"之类（STOP_WORDS）；没有 → None。"""
+    for h in g.ocr(TOAST_ROI, img):
+        if any(w in h.text for w in STOP_WORDS):
+            return h.text
+    return None
 
 
 def set_count(g: Game, name: str, n: int) -> None:
+    """把加工份数调到 n。读不出份数、弹了"材料不足"、点了不变，都马上停下报错，不接着点
+    （以前读不出时一直点"+"，10-08 点到弹"材料不足"还在点）。"""
     g.tap(*BTN_MIN, delay=0.8)
     cur = read_count(g, name)
-    if cur < 0:
-        raise CraftError("cannot read craft count")
+    prev, stalls = None, 0
     for _ in range(60):
+        if cur < 0:
+            raise CraftError(f"{name}: cannot read the craft count (ingredient label unread); stopped at the count "
+                             f"shown, wanted {n}")
         if cur == n:
             return
+        msg = toast(g)
+        if msg:
+            raise CraftError(f"{name}: {msg} (count {cur}, wanted {n})")
+        stalls = stalls + 1 if cur == prev else 0
+        if stalls >= 2:
+            raise CraftError(f"{name}: craft count does not change (stuck at {cur}, wanted {n})")
+        prev = cur
         g.tap(*(BTN_PLUS if cur < n else BTN_MINUS), delay=0.4)
         cur = read_count(g, name)
     raise CraftError(f"could not set count to {n} (stuck at {cur})")
 
 
-def craft_once(g: Game, name: str, times: int) -> None:
+def _back_to_workshop(g: Game) -> bool:
+    """加工完回到加工站：关掉"获得物资"（和别的认得的遮挡），看到"加工份数"为止。"""
+    for _ in range(10):
+        if g.find(r"加工份数", (1040, 400, 140, 50)):
+            return True
+        if overlays.dismiss(g):
+            continue
+        g.tap(640, 650, delay=1.5)
+    return False
+
+
+def craft_once(g: Game, name: str, times: int) -> dict:
+    """合 times 份 name。→ {item, times, before, after, verified}：before / after 是第一种原料的(有, 要)，
+    verified 为真 = 原料正好少了这次要用的数（真合成了）；读不出为 None。"""
     select_formula(g, name)
     set_count(g, name, times)
+    before = read_label(g)
     for h in g.ocr((960, 120, 320, 560)):
         if any(w in h.text for w in STOP_WORDS):
             raise CraftError(f"{name}: {h.text}")
@@ -147,19 +203,24 @@ def craft_once(g: Game, name: str, times: int) -> None:
             g.tap(640, 640, delay=2.0)
             break
         time.sleep(1)
-    for _ in range(10):
-        if g.find(r"加工份数", (1040, 400, 140, 50)):
-            return
-        g.tap(640, 650, delay=1.5)
-    raise CraftError("did not return to the workshop screen")
+    if not _back_to_workshop(g):
+        try:
+            goto_workshop(g)                     # 没回来：自己走回加工站，再看原料少没少
+        except CraftError:
+            raise CraftError("did not return to the workshop screen") from None
+    after = read_label(g)
+    verified = None
+    if before and after:
+        verified = after[0] == before[0] - before[1]
+    return {"item": name, "times": times, "before": before, "after": after, "verified": verified}
 
 
 def run_crafts_in_session(g: Game, batches: list[tuple[str, int]]) -> list[dict]:
     goto_workshop(g)
     out = []
     for name, times in batches:
-        craft_once(g, name, times)
-        out.append({"item": name, "times": times, "ok": True})
+        res = craft_once(g, name, times)
+        out.append({"item": name, "times": times, "ok": True, "verified": res.get("verified")})
     return out
 
 

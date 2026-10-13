@@ -548,9 +548,16 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 ## op / craft —— 快捷操作（碰模拟器）
 
 旧版的自动化脚本，能成就省事，失败了 agent 按 `maapilot-training` / `maapilot-base` 在界面上自己做。失败退出码 1，
-`error.code` 是 `shortcut_failed`（另见下表），`data` 带 `stage`（做到哪一步）、`shot`（失败时的截图，`private/debug/…png`）、
+`error.code` 是 `shortcut_failed`（另见下表），`data` 带 `stage`（做到哪一步）、`shot`（失败时的截图，`private/debug/<名>_<时间>.png`，
+带时间，同一个干员 / 物品再失败不会盖掉上一张；旁边同名的 `.json` 是最近几次识别读到的字和整张图的识别结果，查读错了什么用；只留最近 300 张）、
 `done`（已经做了的部分），脚本给得出的还有 `reached`（升级做到的练度）、`made` / `restored`（制造站）。
 花了多少不在这里算：要知道就前后各 `state depot` 一次。连不上模拟器退出码 5（`device_failed`）。
+
+报失败前先核对结果：`op upgrade` 中途出错时回干员页重读一次练度，已经到目标就算成功（`data.recovered` 是当时的错误）；
+`op mastery` 点了确定没看到"开始"时，确认框还在才再点一次，再回训练计划页看训练位是不是"训练中"；`craft` 加工完重读第一种原料的有/要，
+正好少了这次要用的数为 `verified: true`（读不出为 `null`）。等页面时遇到认得的遮挡（专精完成提示、获得物资、公告、月签到等，
+表在 `maapilot/crew/overlays.py`）先点关掉；不认得的不碰。界面上的中文标签按词认（OCR 读错一个字也认得，如"川练中""环烽预制体"），
+"有/要"数字标签二值化后多读几遍、投票（`maapilot/crew/reading.py`）。加工站读不出份数、或弹了"材料不足"，马上停下报错，不再点"+"。
 
 | 命令 | 做什么 |
 |---|---|
@@ -562,10 +569,11 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 // op upgrade
 {"operator": "遥", "target": {"elite": 2, "level": 1, "skill": null},
  "before": {"elite": 1, "level": 70}, "after": {"elite": 2, "level": 1, "skill": null}, "shot": "private/debug/…png"}
+// （中途报错、重读发现已经到目标时多一个 "recovered": "<当时的错误>"）
 // op mastery
 {"operator": "遥", "skill": 2, "status": "started", "rank": 1, "hours": 8, "short": null, "crafted": [...], "shot": null}
 // craft
-{"item": "聚酸酯块", "count": 3, "times": 3, "station": "WORKSHOP", "shot": "…"}
+{"item": "聚酸酯块", "count": 3, "times": 3, "station": "WORKSHOP", "shot": "…", "verified": true}
 {"item": "辅助双芯片", "count": 2, "station": "MANUFACTURE", "made": 2, "original": "赤金", "restored": true}
 {"item": "芯片助剂", "count": 1, "station": "SHOP", "currency": "采购凭证", "unit_price": 90, "balance_before": 727, "balance_after": 637}
 ```

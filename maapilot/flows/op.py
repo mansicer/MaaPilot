@@ -35,12 +35,21 @@ def upgrade(name: str, elite: int | None, level: int | None, skill: int | None) 
             if l_t is None:
                 l_t = 1 if e_t > cur["elite"] else (cur["level"] or 1)
         pr.stage = "升级 / 精英化 / 升技能"
-        res = up.upgrade_one(g, name, e_t, l_t, skill)
+        recovered = None
+        try:
+            res = up.upgrade_one(g, name, e_t, l_t, skill)
+        except Exception as e:                          # noqa: BLE001 - 先核对一次：做成了就不算失败
+            res = _verify_upgrade(g, name, e_t, l_t, skill, e)
+            if res is None:
+                raise
+            recovered = str(e)
         up.leave_list_unfiltered(g)
         shot = g.save(f"op_upgrade_{name}")
         after = {"elite": res.get("elite"), "level": res.get("level"), "skill": res.get("skill")}
         data = {"operator": name, "target": {"elite": e_t, "level": l_t, "skill": skill},
                 "before": res.get("start"), "after": after, "shot": rel(shot)}
+        if recovered:
+            data["recovered"] = recovered
         reached = res.get("reached") and (skill is None or (after["skill"] or 0) >= skill)
         if not reached:
             raise CliError("shortcut_failed", f"{name} 没到目标练度（现在 {after}）",
@@ -49,6 +58,21 @@ def upgrade(name: str, elite: int | None, level: int | None, skill: int | None) 
         return data
 
     return run_shortcut("op upgrade", args, f"op_upgrade_error_{name}", body)
+
+
+def _verify_upgrade(g, name: str, elite: int, level: int, skill: int | None, err: Exception) -> dict | None:
+    """快捷操作中途报错时，回干员页重读一次练度（只读）：已经到目标了 → 当成做成（返回和 upgrade_one 一样的 dict，
+    start 取报错时带的）；没到、读不出 → None（照原样报失败）。10-05、10-06 升到 7 级其实成了却报失败。"""
+    from maapilot.crew import upgrade as up
+    try:
+        cur = up.read_operator(g, name)
+    except Exception:                                   # noqa: BLE001
+        return None
+    lvl_ok = (cur["elite"], cur["level"] or 0) >= (elite, level) if cur["level"] is not None else cur["elite"] > elite
+    if not lvl_ok or (skill is not None and (cur.get("skill") or 0) < skill):
+        return None
+    start = (getattr(err, "reached", None) or {}).get("start")
+    return {**cur, "reached": True, "start": start}
 
 
 # start_mastery 的状态 → (退出码 1 时的 error.code, 说明)。"started" / "reached" 算成功。

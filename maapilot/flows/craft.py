@@ -81,10 +81,11 @@ def craft(item: str, count: int) -> dict:
         pr.stage = "去加工站"
         cr.goto_workshop(g)
         pr.stage = f"合成 {name} ×{times}"
-        cr.craft_once(g, name, times)
+        res = cr.craft_once(g, name, times) or {}
         pr.done.append({"item": name, "times": times})
         shot = g.save(f"craft_{name}")
-        return {"item": name, "count": count, "times": times, "station": "WORKSHOP", "shot": rel(shot)}
+        return {"item": name, "count": count, "times": times, "station": "WORKSHOP", "shot": rel(shot),
+                "verified": res.get("verified")}
 
     return run_shortcut("craft", args, f"craft_error_{name}", body)
 
