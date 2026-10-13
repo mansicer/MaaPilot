@@ -61,7 +61,7 @@
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
 | `goals list / add / update / remove / move / expire` | 否 | 放行 | B |
-| `op upgrade / mastery`、`craft` | 操作 | 放行 | B |
+| `op upgrade / mastery / progress`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
 | `daily schedule / unschedule` | 否（改 crontab） | **询问** | B |
 | `report show / latest / list / write` | 否 | 放行 | B |
@@ -79,7 +79,8 @@
 - 默认：全部检查，包括连模拟器截一张图。
 - `--offline`：不碰模拟器、不联网的那几项。
 - `--fix`：顺手做不需要问用户的本地修复：从 maa-cli 资源复制 OCR 模型、把 maa-cli 配置模板（`templates/maa-config/` 的
-  `cli.toml`、`profiles/default.toml`）装进本项目的 maa-cli 配置目录 `private/maa-config/`（已有的不覆盖）、缺数据表时 `data sync`。
+  `cli.toml`、`profiles/default.toml`）装进本项目的 maa-cli 配置目录 `private/maa-config/`（已有的不覆盖）、缺数据表时 `data sync`、
+  没有单独的 MaaCore（或版本太旧）时从 MAA 的 GitHub 发布下载（见下表 `maa_core`）。
   装软件（Homebrew、maa-cli、adb）不在这里做：由 agent 问过用户后在终端里做。
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
@@ -96,6 +97,7 @@
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径 | `brew install MaaAssistantArknights/tap/maa-cli`、`maa install` |
 | `claude` | 找得到 `tools.claude`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.claude`）；`trusted`：Claude Code 信任过这个文件夹没有（`~/.claude.json`，没信任时无头 `claude -p` 忽略项目的放行规则） | 在 `tools.claude` 写绝对路径；在这个文件夹里交互地启动一次 claude、接受信任提示 |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
+| `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
@@ -577,7 +579,17 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 |---|---|
 | `op upgrade <干员> [--elite E] [--level L] [--skill N]` | 升级 / 精英化 / 升技能（通用技能等级 1–7）到指定练度（`maapilot/crew/upgrade.py`）。只给一部分时，没给的按现在的练度：只给 `--level` 就在当前精英阶段内升；只给 `--elite` 就升到那一阶的 1 级 |
 | `op mastery <干员> --skill K --rank M` | 在训练室开始技能 K 的下一级专精，不超过专 M（一次开一级；缺的 T3 以上材料先合成，要用 `state depot` 快照；`maapilot/crew/mastery.py`） |
+| `op progress <干员> [--elite E] [--skill-level N] [--mastery K:M …] [--allow-catalyst]` | 交给 MAA 本体的干员培养（MaaCore 的 OperProgress，见下）：精英化到精 E（1–2）、技能升到 N 级（2–7）、技能 K 专到 M（`--mastery` 可写多次）。不管等级、模组 |
 | `craft <物品> [--count N]` | 精英材料走加工站（`maapilot/crew/craft.py`，只合这一样：中间材料先各自 `craft`，顺序看 `calc craft`）；双芯片走制造站（`manufacture.py`，造完改回原产物）；商店兑换的（芯片助剂，花采购凭证）走采购中心（`shop.py`，确认框上核对总价，对不上不买） |
+
+`op progress` 不经 maa-cli（v0.7.5 还不认这个任务类型），在子进程里直接加载单独装的 MaaCore（`maapilot/crew/maacore.py`、
+`maacore_runner.py`；资源先用本体自带的，再叠加 maa-cli 热更新的），回调全文记在 `data.log`（`private/log/maa/<时间>-op-progress.log`）。
+拿锁后先回首页（MaaCore 只会从首页进干员列表；回不去退出码 1 `not_home`，什么都没做），做完再回首页（`data.home`）。
+MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都不点；缺的精英材料会先去加工站合（花龙门币和下级材料）；
+专精一次只开一级（要专 3、现在专 1 → 开专 2，`PrerequisiteTraining`，`training_started: true`），开了之后后面的专精项不再做。
+5、6 星精二要双芯片：MaaCore 会在制造站造（造完改回原产物），**芯片助剂不够时会用采购凭证去采购中心买，关不掉**，
+所以练度快照（`state skland` / `state box`）里还没到精二时要加 `--allow-catalyst`，否则退出码 2 `needs_consent`、不碰模拟器。
+`steps` 按 MaaCore 的执行顺序对应参数里的各项；只回了一条失败、后面都没做时是"找干员"失败（列表里没找到、或页面认不出）。
 
 ```json
 // op upgrade
@@ -586,6 +598,13 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 // （中途报错、重读发现已经到目标时多一个 "recovered": "<当时的错误>"）
 // op mastery
 {"operator": "遥", "skill": 2, "status": "started", "rank": 1, "hours": 8, "short": null, "crafted": [...], "shot": null}
+// op progress
+{"operator": "能天使", "plan": {"name": "能天使", "role": "SNIPER", "elite": 2, "skill_level": 7, "skill_mastery": [0, 0, 2]},
+ "steps": [{"step": "精英化到精2", "result": "Success", "detail": "AlreadySatisfied", "text": "本来就到了", "elite": 2},
+           {"step": "技能升到 7 级", "result": "Success", "detail": "AlreadySatisfied", "text": "本来就到了"},
+           {"step": "技能3 专2", "result": "Success", "detail": "AlreadySatisfied", "text": "本来就到了", "skill_mastery": [0, 0, 2]}],
+ "summary": {"success": 3, "failed": 0, "skipped": 0}, "training_started": false, "core": "v6.19.0",
+ "log": "private/log/maa/…-op-progress.log", "duration_s": 20.5, "home": true}
 // craft
 {"item": "聚酸酯块", "count": 3, "times": 3, "station": "WORKSHOP", "shot": "…", "verified": true}
 {"item": "辅助双芯片", "count": 2, "station": "MANUFACTURE", "made": 2, "original": "赤金", "restored": true}
@@ -595,8 +614,12 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 | error.code | 退出码 | 什么情况 |
 |---|---|---|
 | `shortcut_failed` | 1 | 脚本出错、没到目标练度、认不出专精确认框；确认框里的材料数没认全（`status: costs unreadable`，`shot` 是确认框截图，不报缺材料） |
-| `training_busy` | 1 | `op mastery`：训练室正在练别的 |
-| `short_materials` | 1 | `op mastery`：材料不够、合成也补不上（`data.short`） |
+| `training_busy` | 1 | `op mastery` / `op progress`：训练室正在练别的 |
+| `short_materials` | 1 | `op mastery`：材料不够、合成也补不上（`data.short`）；`op progress`：`ResourceInsufficient` / `ChipNotCraftable` / `FormulaLocked` |
+| `operator_not_found` / `prerequisite_not_met` | 1 | `op progress`：干员列表里没找到；前置练度不够（专精要精二，技能 7 级要精一） |
+| `not_home` / `maa_failed` | 1 | `op progress`：开始前回不到首页；MaaCore 连不上模拟器、超时（60 分钟）、没给结果 |
+| `needs_consent` | 2 | `op progress`：5、6 星精二可能花采购凭证买芯片助剂，问过用户再加 `--allow-catalyst` |
+| `maacore_missing` / `maacore_broken` | 5 | `op progress`：没装单独的 MaaCore 或低于 v6.19.0（`doctor --fix`）；本体或资源加载失败 |
 | `not_restored` | 1 | `craft` 双芯片：造好了，但制造站没改回原产物（`data.original`、`shot`） |
 | `not_bought` | 1 | `craft` 兑换：确认之前停下了，什么都没花（余额不够、找不到商品、确认框对不上） |
 | `unknown_name` / `not_craftable` | 2 | 名字认不出；这样东西快捷操作做不了 |

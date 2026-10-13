@@ -316,6 +316,20 @@ def check_maa_config(ctx: Ctx) -> dict:
     return _item("maa_config", True, str(maa.config_dir()))
 
 
+def check_maa_core(ctx: Ctx) -> dict:
+    """单独装的 MaaCore（`op progress` 用；maa-cli 还跑不了干员培养）。没有不影响别的命令。"""
+    from maapilot.crew import maacore
+    from maapilot.flows.op import PROGRESS_MIN_CORE
+    found = maacore.find()
+    if found is None:
+        return _item("maa_core", False, "没单独装 MaaCore（干员培养 op progress 要用）", "maapilot doctor --fix（从 MAA 的 GitHub 下载）",
+                     required=False)
+    if not maacore.at_least(found[0], PROGRESS_MIN_CORE):
+        return _item("maa_core", False, f"单独装的 MaaCore 是 {found[0]}，干员培养要 {PROGRESS_MIN_CORE} 以上",
+                     "maapilot doctor --fix", required=False)
+    return _item("maa_core", True, f"{found[0]}（{found[1]}）", required=False)
+
+
 def check_ocr_model(ctx: Ctx) -> dict:
     missing = [f for f in OCR_FILES if not (paths.OCR_MODEL / f).exists()]
     if missing:
@@ -379,7 +393,7 @@ def check_setup(ctx: Ctx) -> dict:
 DEVICE_CHECKS = ("emulator", "screen", "input", "game")
 CHECKS = [("config", check_config), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
           ("input", check_input), ("maa_cli", check_maa_cli), ("claude", check_claude), ("maa_config", check_maa_config),
-          ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
+          ("maa_core", check_maa_core), ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
           ("schedule", check_schedule), ("setup", check_setup)]
 
 
@@ -399,7 +413,7 @@ def run_checks(offline: bool = False, probe: Probe | None = None) -> list[dict]:
 # --- --fix ---------------------------------------------------------------------------------
 
 def fix(probe: Probe | None = None) -> list[dict]:
-    """不需要问用户的本地修复：maa-cli 配置、OCR 模型、数据表。"""
+    """不需要问用户的本地修复：maa-cli 配置、单独的 MaaCore、OCR 模型、数据表。"""
     from maapilot import config
     from maapilot.crew import maa
     probe = probe or PROBE
@@ -430,6 +444,15 @@ def fix(probe: Probe | None = None) -> list[dict]:
                     shutil.copyfile(s, paths.OCR_MODEL / dest)
                     copied.append(dest)
             done.append({"name": "ocr_model", "done": copied, "detail": f"从 {src} 复制"})
+    from maapilot.crew import maacore
+    from maapilot.flows.op import PROGRESS_MIN_CORE
+    found = maacore.find()
+    if found is None or not maacore.at_least(found[0], PROGRESS_MIN_CORE):
+        try:
+            r = maacore.install()
+            done.append({"name": "maa_core", "done": [r["version"]] if r["installed"] else [], "detail": r["dir"]})
+        except Exception as e:
+            done.append({"name": "maa_core", "done": [], "detail": f"下载失败：{type(e).__name__}: {e}"})
     from maapilot.knowledge import datasync
     if datasync.missing_tables():
         try:

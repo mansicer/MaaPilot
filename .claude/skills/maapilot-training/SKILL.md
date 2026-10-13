@@ -1,6 +1,6 @@
 ---
 name: maapilot-training
-description: 在游戏里给明日方舟干员升级、精英化、升技能、专精（训练室）、模组 via MaaPilot —— 先试 op upgrade / op mastery 快捷命令，失败就截图、自己在界面上点完；各页面的路线、确认框上看什么、常见卡点（等级拨盘、升级提示遮挡、训练室占用、材料不足）；做完核对。Use when actually performing 升级/精英化/精2/升技能/专精/专三/模组 in the game (level up / promote / skill up / mastery / module).
+description: 在游戏里给明日方舟干员升级、精英化、升技能、专精（训练室）、模组 via MaaPilot —— 精英化 / 升技能 / 专精先交给 MAA 的干员培养（op progress），升级用 op upgrade，失败就截图、自己在界面上点完；各页面的路线、确认框上看什么、常见卡点（等级拨盘、升级提示遮挡、训练室占用、材料不足）；做完核对。Use when actually performing 升级/精英化/精2/升技能/专精/专三/模组 in the game (level up / promote / skill up / mastery / module).
 ---
 
 # maapilot-training：升级、精英化、技能、专精、模组
@@ -11,12 +11,31 @@ description: 在游戏里给明日方舟干员升级、精英化、升技能、�
 
 | 要做 | 命令 |
 |---|---|
-| 升级 / 精英化 / 升技能 | `maapilot op upgrade <干员> --elite 2 --level 1 [--skill 7]` |
-| 专精（一次开一阶） | `maapilot op mastery <干员> --skill 3 --rank 1` |
+| 精英化、技能等级、专精（MAA 的干员培养） | `maapilot op progress <干员> [--elite 2] [--skill-level 7] [--mastery 3:3]` |
+| 升级（在当前精英阶段内升到某一级） | `maapilot op upgrade <干员> --level 90` |
+| 后备：干员培养没做成时 | `maapilot op upgrade <干员> --elite 2 --level 1 [--skill 7]`、`maapilot op mastery <干员> --skill 3 --rank 1` |
 
-成功时 `data` 有 `before`、`after`（升级前后的练度）。花了多少命令不算：动手前后各跑一次 `state depot`，对比着汇报。
-失败（`shortcut_failed`）时看 `data.stage`（做到哪一步）、`data.done`（已经做了的部分）、`data.shot`（失败时的截图，用读图看），**从卡住的地方接着手动做**，别从头再来一遍（已经升上去的不会退回）。
-退出码 2（参数写错、名字认不出）先改参数；4 是模拟器被占用，等一会儿。
+**`op progress`**：几项可以写在一条里（`--mastery 技能:专几`，可写多次），MAA 按精英化 → 技能等级 → 专精的顺序做：
+- 自己读练度，已经到了的项是 `AlreadySatisfied`，什么都不点；
+- 精英化前自己把当前阶段升满级，晋升后停在新阶段 1 级：要精2 90 级，就先 `op progress --elite 2`，再 `op upgrade --level 90`；
+- 缺的精英材料、技能书自己去加工站合（花龙门币和下级材料，目标里同意过就不用再问）；
+- 专精**一次只开一级**：要专3、现在专1，这次开专2（`PrerequisiteTraining`，`training_started: true`），练完再跑一次同样的命令；
+- 不管等级和模组。
+
+**5、6 星精二**要双芯片：MAA 会在制造站造（造完改回原产物），芯片助剂不够时会**用采购凭证去采购中心买，关不掉**。
+所以还没到精二时命令要求加 `--allow-catalyst`，不加就退出码 2 `needs_consent`，什么都没碰。采购凭证不算在目标同意的花费里：
+先看自动记忆里用户的答案，没有就问（"精二可能要用采购凭证买芯片助剂，每个 90 凭证，可以吗？"），问完记住；用户不在场就不做，写进汇报。
+
+看结果：`data.steps` 每项一行，`text` 是中文说明。
+- 退出码 0：都做成了或本来就到了。
+- `training_busy`：训练室在练别人，记进目标笔记，练完再来。
+- `short_materials`：材料不够、合成也补不上，记进目标等日常刷。
+- `prerequisite_not_met`：前置练度不够（专精要精二、技能 7 级要精一），先做前置。
+- `operator_not_found`、`shortcut_failed`（MAA 认不出页面）、`not_home`、`maa_failed`：截图看停在哪；换后备命令，再不行就手动做。
+
+其余命令成功时 `data` 有 `before`、`after`（前后的练度）。花了多少命令不算：动手前后各跑一次 `state depot`，对比着汇报。
+后备命令失败（`shortcut_failed`）时看 `data.stage`（做到哪一步）、`data.done`（已经做了的部分）、`data.shot`（失败时的截图，用读图看），**从卡住的地方接着手动做**，别从头再来一遍（已经升上去的不会退回）。
+退出码 2（参数写错、名字认不出）先改参数；4 是模拟器被占用，等一会儿；5（`maacore_missing`）是没装干员培养用的 MAA 本体，跑 `maapilot doctor --fix`。
 
 ## 手动操作的基本功
 

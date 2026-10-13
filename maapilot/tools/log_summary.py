@@ -142,6 +142,12 @@ def _state_op(d):
     return _pick(d, "name", "elite", "level", "skill_level")
 
 
+def _op_progress(d):
+    out = {"steps": [f"{r.get('step')}：{r.get('detail')}" for r in d.get("steps") or []] or None,
+           "training_started": d.get("training_started") or None, "home": d.get("home")}
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _craft(d):
     return _pick(d, "item", "count", "times", "station", "made", "restored", "balance_before", "balance_after",
                  "balance", "stage", "done")
@@ -184,7 +190,8 @@ def _calc_need(d):
 SUMMARIES = {
     "state sanity": _sanity, "state depot": _depot, "state box": _box, "state skland": _skland, "state op": _state_op,
     "guard snapshot": _guard, "guard check": _guard,
-    "op upgrade": _op_upgrade, "op mastery": _op_mastery, "craft": _craft,
+    "op upgrade": _op_upgrade, "op mastery": _op_mastery, "op progress": _op_progress,
+    "craft": _craft,
     "goals add": _goal, "goals update": _goal, "goals remove": _goal, "goals move": _goals_move,
     "goals expire": _goals_expire,
     "calc need": _calc_need,
