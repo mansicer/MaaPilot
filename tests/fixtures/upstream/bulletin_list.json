@@ -1,0 +1,37 @@
+{
+ "status": 0,
+ "code": 0,
+ "msg": "",
+ "data": {
+  "list": [
+   {
+    "cid": "9126",
+    "title": "恒远津梁系列\\n衍生品现已开售",
+    "category": 4,
+    "displayTime": "2026-10-13",
+    "updatedAt": 1791777407,
+    "sticky": false
+   },
+   {
+    "cid": "4845",
+    "title": "昨日海系列\\n衍生品现已开售",
+    "category": 4,
+    "displayTime": "2026-10-13",
+    "updatedAt": 1791777255,
+    "sticky": false
+   },
+   {
+    "cid": "8217",
+    "title": "森空岛昨日海\\n创作者应援",
+    "category": 4,
+    "displayTime": "2026-10-11",
+    "updatedAt": 1791606341,
+    "sticky": false
+   }
+  ],
+  "popup": {
+   "popupList": [],
+   "defaultPopup": "0401"
+  }
+ }
+}

@@ -27,6 +27,8 @@ import urllib.request
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode, urlparse
 
+from maapilot.knowledge.sources import UpstreamFormat, need, need_keys
+
 APP_CODE = "4ca99fa6b56cc2ba"
 GRANT_URL = "https://as.hypergryph.com/user/oauth2/v2/grant"
 CRED_URL = "https://zonai.skland.com/web/v1/user/auth/generate_cred_by_code"
@@ -186,10 +188,37 @@ def _potential(rank) -> int | None:
     return rank + 1 if isinstance(rank, int) else None
 
 
+SRC = "skland"
+
+
+def check_chars(info: dict) -> list:
+    """player/info 里干员练度用到的字段（对不上抛 UpstreamFormat）：chars[] 的 charId / evolvePhase / level / potentialRank /
+    mainSkillLvl，skills[] 的 id / specializeLevel，equip[] 的 id / level，charInfoMap。
+    skills、equip 不是每名干员都有（机器人没技能）：只要求至少有一名干员带着这两个键。"""
+    chars = need(info, "chars", list, source=SRC)
+    need(info, "charInfoMap", dict, source=SRC)
+    for c in chars:
+        need_keys(c, ("charId", "evolvePhase", "level", "potentialRank", "mainSkillLvl"), source=SRC, where="chars[]")
+        for key, sub in (("skills", ("id", "specializeLevel")), ("equip", ("id", "level"))):
+            v = c.get(key)
+            if v is None:
+                continue
+            if not isinstance(v, list):
+                raise UpstreamFormat(SRC, f"chars[].{key}", "type")
+            for x in v:
+                need_keys(x, sub, source=SRC, where=f"chars[].{key}[]")
+    for key in ("skills", "equip"):
+        if chars and not any(key in c for c in chars):
+            raise UpstreamFormat(SRC, f"chars[].{key}")
+    return chars
+
+
 def to_box(info: dict, names: dict | None = None) -> dict:
     """player/info 的 data → {名: {...}}：精英化、等级、潜能（1–6，同 MAA；接口的 potentialRank 从 0 数）、稀有度（1–6）、
     技能等级、各技能专精、模组。names：游戏数据表给的 {char_id: 名}、{equip_id: 模组名}、{skill_id: 技能名}
-    （缺的用接口自带的 charInfoMap / equipmentInfoMap，再缺就留 id；技能名缺就是 null）。"""
+    （缺的用接口自带的 charInfoMap / equipmentInfoMap，再缺就留 id；技能名缺就是 null）。
+    字段对不上（接口改了格式）抛 UpstreamFormat，不给半截数据。"""
+    check_chars(info)
     names = names or {}
     char_names, equip_names = names.get("chars") or {}, names.get("equips") or {}
     skill_names = names.get("skills") or {}
@@ -206,7 +235,7 @@ def to_box(info: dict, names: dict | None = None) -> dict:
             "elite": c.get("evolvePhase"), "level": c.get("level"), "potential": _potential(c.get("potentialRank")),
             "skill_level": c.get("mainSkillLvl"),
             "skills": [{"index": i + 1, "id": s.get("id"), "name": skill_names.get(s.get("id")),
-                        "mastery": s.get("specializeLevel", 0)}
+                        "mastery": s["specializeLevel"]}
                        for i, s in enumerate(c.get("skills") or [])],
             "modules": [{"id": e.get("id"), "name": equip_names.get(e.get("id")) or (einfo.get(e.get("id")) or {}).get("name")
                          or e.get("id"), "level": e.get("level"), "equipped": e.get("id") == equipped,
@@ -216,24 +245,34 @@ def to_box(info: dict, names: dict | None = None) -> dict:
     return ops
 
 
-def annihilation_of(info: dict) -> dict | None:
-    """data.campaign → 本周剿灭合成玉 {current, total} 和每张剿灭图的最高击杀 {campaignId: maxKills}（400 = 能代理）。"""
-    camp = info.get("campaign") or {}
-    reward = camp.get("reward") or {}
-    if "current" not in reward or "total" not in reward:
-        return None
+def _int(v, field: str) -> int:
+    try:
+        if isinstance(v, bool):
+            raise TypeError
+        return int(v)
+    except (TypeError, ValueError):
+        raise UpstreamFormat(SRC, field, "type") from None
+
+
+def annihilation_of(info: dict) -> dict:
+    """data.campaign → 本周剿灭合成玉 {current, total} 和每张剿灭图的最高击杀 {campaignId: maxKills}（400 = 能代理）。
+    格式对不上（缺 campaign.reward.current / total）抛 UpstreamFormat。"""
+    camp = need(info, "campaign", dict, source=SRC)
+    reward = need(camp, "reward", dict, source=SRC, label="campaign.reward")
+    cur = _int(need(reward, "current", source=SRC, label="campaign.reward.current"), "campaign.reward.current")
+    total = _int(need(reward, "total", source=SRC, label="campaign.reward.total"), "campaign.reward.total")
     names = {k: (v or {}).get("name") for k, v in (info.get("campaignInfoMap") or {}).items()}
-    return {"current": int(reward["current"]), "total": int(reward["total"]),
+    return {"current": cur, "total": total,
             "max_kills": {r.get("campaignId"): {"name": names.get(r.get("campaignId")), "kills": r.get("maxKills")}
                           for r in camp.get("records") or [] if r.get("campaignId")}}
 
 
-def sanity_of(info: dict, now_ts: float | None = None) -> dict | None:
-    """data.status.ap → {current, max}：没到上限的按 6 分钟 1 点从 lastApAddTime 推到现在。"""
-    ap = (info.get("status") or {}).get("ap") or {}
-    if "current" not in ap or "max" not in ap:
-        return None
-    cur, cap = int(ap["current"]), int(ap["max"])
+def sanity_of(info: dict, now_ts: float | None = None) -> dict:
+    """data.status.ap → {current, max}：没到上限的按 6 分钟 1 点从 lastApAddTime 推到现在。
+    格式对不上（缺 status.ap.current / max）抛 UpstreamFormat（调用方改用首页识别，并记下来）。"""
+    ap = need(info, "status.ap", dict, source=SRC)
+    cur = _int(need(ap, "current", source=SRC, label="status.ap.current"), "status.ap.current")
+    cap = _int(need(ap, "max", source=SRC, label="status.ap.max"), "status.ap.max")
     last = ap.get("lastApAddTime")
     if cur < cap and last:
         cur = min(cap, cur + max(0, int(((now_ts or time.time()) - int(last)) // 360)))

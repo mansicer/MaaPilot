@@ -60,6 +60,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 | `op` / `craft` `shortcut_failed` | 看 `data.stage` 和截图，按 `maapilot-training` / `maapilot-base` 手动接着做 |
 | 退出码 4（被占用） | `maapilot lock status` 看谁占着、做到哪；想知道它在干什么可以 `maapilot screen shot` 看一眼（截图不用锁）。在跑日常就等它；持有进程已经不在了（残留）才 `maapilot lock release`（弹确认） |
 | 退出码 5（环境） | `maapilot doctor`，按每项的修复建议；要用户动手的（开模拟器、装软件）告诉用户 |
+| `upstream_format`，或启动检查 / 汇报里有"外部数据：…的数据格式变了" | 森空岛、MAA、官方公告、企鹅物流这些外面的数据改了格式，程序得开发者来改。用玩家的话告诉用户哪部分受影响、现在怎么凑合（例如"森空岛那边改了格式，理智先从首页认，干员练度改用游戏里识别，慢一点"），不要自己想办法绕过去，也不用反复重试 |
 | 模拟器卡死、截图失败 | 请用户重启模拟器；`doctor` 确认连上再继续 |
 
 ## 4. 掉线、被登出

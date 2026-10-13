@@ -1,0 +1,47 @@
+{
+ "items": {
+  "30012": {
+   "itemId": "30012",
+   "name": "固源岩",
+   "description": "内含有密集的微孔，常作为源石气体分解物的吸附剂。多用于防护夹层。",
+   "rarity": "TIER_2",
+   "iconId": "MTL_SL_G2",
+   "overrideBkg": null,
+   "stackIconId": null,
+   "sortId": 100039,
+   "usage": "从地表开采出的岩石固块，可用于多种强化场合，也常作为制造站合成项目的原料。",
+   "obtainApproach": null,
+   "hideInItemGet": false,
+   "reslockStatus": "NOT_SUPPORT_RESLOCK",
+   "canReslock": false,
+   "classifyType": "MATERIAL",
+   "itemType": "MATERIAL",
+   "stageDropList": [
+    {
+     "stageId": "act52side_04",
+     "occPer": "ALWAYS",
+     "sortId": 0
+    },
+    {
+     "stageId": "act44side_04",
+     "occPer": "ALMOST",
+     "sortId": 1
+    }
+   ],
+   "buildingProductList": [
+    {
+     "roomType": "WORKSHOP",
+     "formulaId": "34"
+    }
+   ],
+   "voucherRelateList": null,
+   "shopRelateInfoList": [
+    {
+     "shopType": "EPGS_SHOP",
+     "shopGroup": 0,
+     "startTs": 1749096000
+    }
+   ]
+  }
+ }
+}

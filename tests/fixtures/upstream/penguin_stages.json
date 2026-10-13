@@ -1,0 +1,108 @@
+[
+ {
+  "stageId": "main_01-07",
+  "zoneId": "main_1",
+  "stageType": "MAIN",
+  "code": "1-7",
+  "code_i18n": {
+   "en": "1-7",
+   "ja": "1-7",
+   "ko": "1-7",
+   "zh": "1-7"
+  },
+  "apCost": 6,
+  "existence": {
+   "CN": {
+    "exist": true
+   },
+   "JP": {
+    "exist": true
+   },
+   "KR": {
+    "exist": true
+   },
+   "US": {
+    "exist": true
+   }
+  },
+  "minClearTime": 118000,
+  "dropInfos": [
+   {
+    "itemId": "30012",
+    "dropType": "NORMAL_DROP",
+    "bounds": {
+     "lower": 1,
+     "upper": 2
+    }
+   },
+   {
+    "itemId": "30011",
+    "dropType": "EXTRA_DROP",
+    "bounds": {
+     "lower": 0,
+     "upper": 1
+    }
+   },
+   {
+    "itemId": "30021",
+    "dropType": "EXTRA_DROP",
+    "bounds": {
+     "lower": 0,
+     "upper": 1
+    }
+   }
+  ]
+ },
+ {
+  "stageId": "wk_melee_6",
+  "zoneId": "weekly_9",
+  "stageType": "DAILY",
+  "code": "CE-6",
+  "code_i18n": {
+   "en": "CE-6",
+   "ja": "CE-6",
+   "ko": "CE-6",
+   "zh": "CE-6"
+  },
+  "apCost": 36,
+  "existence": {
+   "CN": {
+    "exist": true
+   },
+   "JP": {
+    "exist": true
+   },
+   "KR": {
+    "exist": true
+   },
+   "US": {
+    "exist": true
+   }
+  },
+  "minClearTime": 172000,
+  "dropInfos": [
+   {
+    "dropType": "NORMAL_DROP",
+    "bounds": {
+     "lower": 0,
+     "upper": 0
+    }
+   },
+   {
+    "dropType": "EXTRA_DROP",
+    "bounds": {
+     "lower": 0,
+     "upper": 0
+    }
+   },
+   {
+    "itemId": "furni",
+    "dropType": "FURNITURE",
+    "bounds": {
+     "lower": 0,
+     "upper": 1
+    }
+   }
+  ]
+ }
+]

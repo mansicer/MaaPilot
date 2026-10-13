@@ -57,7 +57,7 @@ MaaPilot/
 | `config.yaml` | 模拟器地址、服务器、日常时间、要做的 MAA 日常项、没有目标时刷哪关（默认 1-7）、游戏更新后的用户协议能不能直接点同意 |
 | `goals.md` | 进行中的目标（格式见下） |
 | `goals-done.md` | 完成或放弃的目标，整段挪过来，写上结束日期和原因 |
-| `state/` | 仓库、干员、理智快照；官方公告缓存 |
+| `state/` | 仓库、干员、理智快照；官方公告缓存；外部数据源的格式健康（`sources.json`，见「外部数据源」） |
 | `cache/game/` | 下载的游戏安装包 |
 | `log/` | 每次运行、每次 agent 操作的记录，含前后仓库差 |
 | `reports/` | 每次日常的汇报 |
@@ -145,3 +145,24 @@ MaaPilot/
 2. 自由对话里能做到：重新跑一次日常；练干员（等级、技能、专精）；合成指定材料；复杂任务（模组任务、剿灭）。
 3. 定时日常里 MAA 出错会当场叫 agent 接管，跑完有汇报。
 4. 没经用户确认的合成玉、源石减少会被发现并停下。
+
+## 10. 外部数据源
+
+程序靠这些外部数据，格式随时会变（`maapilot/knowledge/sources.py`）：
+
+| 来源（`sources.json` 的键） | 在哪解析 | 核对什么 | 对不上时 |
+|---|---|---|---|
+| 森空岛 `skland` | `crew/skland.py` | `chars[]`、`skills[]`、`equip[]`、`charInfoMap`；`status.ap`；`campaign.reward` | 练度：`state skland` 报错，日常改用 MAA 识别；理智：改用首页识别；剿灭：按自己的记录 |
+| MAA 活动列表 `maa_activity` | `knowledge/maa_activity.py` | `<服务器>.sideStoryStage.*` 的 `Activity.UtcStartTime/UtcExpireTime`、`Stages[].Value` | 能解析的照用，导航不了时原因写明格式变了 |
+| MAA 任务表 `maa_tasks` | 同上 | `{任务名: 对象}` | 活动关只认列表里写明的几关 |
+| maa-cli 的输出 `maa_cli` | `tools/maa_cmd.py`、`tools/doctor.py` | Summary 任务行；刷图日志的 `Current sanity` / `Mission started`；`maa version` 的版本号 | 命令照常返回，`data.upstream_format` 写明 |
+| 官方公告 `bulletin` | `knowledge/news.py` | 列表 `cid/title/displayTime/updatedAt/category`，全文 `content` 等 | 用上次的缓存，日常告警里写明 |
+| 官网安装包地址 `game_download` | `tools/game.py` | 跳转后的文件名 `arknights-hg-<版本>.apk` | `game version` 报错，不更新 |
+| 企鹅物流 `penguin`、一图流 `yituliu` | `knowledge/live.py` | matrix / stages、`data[].itemValueAp` | 不换缓存（旧的照用） |
+| 游戏数据表 `gamedata` | `knowledge/datasync.py` | 每张表程序用到的字段（`TABLE_SCHEMA`） | 不替换本地的表 |
+
+规矩：在解析的地方核对用到的字段，对不上抛 `UpstreamFormat`（错误码 `upstream_format`，消息写明来源和字段），不当成"没有数据"悄悄过去；
+有正当退路的照样退，但要记下来。每个来源的健康记在 `private/state/sources.json`（`{last_ok, last_error: {at, code, message, effect}, recent}`），
+网络连不上不算（各命令自己报）。看得到的地方：`doctor --brief` 的 `sources`（只列有问题的）和 `lines`；日常汇报的"要注意"（这次日常期间记下的，
+`flows/report.py` 按 `started_at`–`finished_at` 从 `sources.json` 取，日常流程本身不用管）。用户的 agent 按 `maapilot-recovery` 用玩家的话告诉用户哪部分受影响；
+修是开发者的事。每个来源的真实响应样本在 `tests/fixtures/upstream/`（去掉了个人数据），`tests/test_upstream.py` 核对样本能过、删掉字段会报错。

@@ -1,0 +1,137 @@
+{
+ "equipDict": {
+  "uniequip_002_amiya": {
+   "uniEquipId": "uniequip_002_amiya",
+   "uniEquipName": "DWDB-221E",
+   "uniEquipIcon": "uniequip_002_amiya",
+   "uniEquipDesc": "最初是几个模糊人影，随后是耀眼的光，光渐渐远离，升到天上，留下一片斑驳。不多久这些光点同样迅速远去，就只剩一片无意义的漆黑。\n你想起那些斑驳皆是天体，你想起星星们的家园名为宇宙。\n紧接着，你的视野忽然清晰起来，光滑的金属、密闭的空间、透明的窗口成了你的第三只眼——你透过它，看着窗外巨大的灰色球体，在那些常人无法理解的巨构之中，它安静地等待着自己的生父……\n你突然有些感动，某些体液打湿了视野。你开始寻找这份情绪的根源，你看到了一个孩子的诞生，那是你的孩子。全新的命运，灵魂的寄托……可这样一个小小的生命与那个虚空的巨构相比，是多么微不足道。\n你回到眼下，看着那些大大小小的工程舰船，作为数学家的你迅速进行了一个可笑的对比——其中最小的舰船，都数千万倍于一个人类婴儿的大小。\n但你们做到了。从远古的远古开始，从火或者一次狩猎开始，你们走到了今天。\n你很自豪。不知怎地，你对这份自豪感同身受，于是更多的信息涌入了你的脑海。你想起了自己的身份，你明白了自己就是那颗人造卫星的设计者。而在漫长的亚空间旅行之后，你终于迎来了亲眼目睹它竣工的那一刻。\n荣誉，财富，家人，理想.....这些词汇闪烁、盘旋、消散，最终只剩下一个，且仅有一个……\n……\n...\n“未来……”\n“什么？你看到了什么？”\n“……”\n“喂，回话！喂！”\n众人陷入了沉默。一旁的年轻女性着急了起来。\n“检查他的大脑，我早说了不该这么着急，我们才建立起与数据库通讯的协议渠道！这才刚完成第一例成功的输送！”\n“……抱歉。”\n“等等。你说什么？”\n“我说……我以前其实一直不太喜欢你们这些行星工程师，我觉得你们做的事情华而不实……但我看见了。我看见了你的过去，我共享了你的过去，我感受到了你的情感，这是……无与伦比的。”\n“你……”\n“是。我感到你像个普通的父亲那样回想起孩子和家庭，看着那颗确实有些惊人的人造月亮，而且，这种感觉超乎想象……我们成功了。”\n众人再次沉默。\n“那么……”打破沉默的是个相对年轻些的红发女人，“它会怎么记录我们的时代，往后的时代？”\n“大概是一堆蠢事的大合集。”有人漫不经心地回答，“我们已经领教得够多了，只不过以后，他们再也找不到修饰历史的借口了。”\n“对人类更有信心一点吧，朋友们。”另一位老人索性坐了下来，为自己挑了个更舒服的姿势，“我们已经吸取了足够多的教训了，我们的后人不会重蹈覆辙。”\n有人露出苦笑，当然，这只是个美好的祝愿。\n“……所以我们确实成功了？DWDB-221E项目居然这么快就取得成果……天哪。”\n卷头发的人猛然站起身来。\n“我们还要叫它DWDB-221E吗？我知道，项目编号有规定的格式，就和AMa一样，冷冰冰的简称……但我们的工作值得一个更庄重的正式命名！”他再次抛出了那个业已锲而不舍了大半年的提议，“我希望叫它……‘命运’！或者‘世界真理’？”\n这次是尴尬的沉默。\n“‘黑王冠’怎么样？毕竟从部分现象的直观视觉印象来讲，确实像个黑王冠。”\n“不怎么样，听起来像个无聊的历史剧集。”\n“那么……”\n老人打断了即将陷入无止境争吵的属下们，她看向窗外的星辰，有些不好的消息在传来，但一切艰险终将被人类逾越，就和以往的无数时刻一样。\n“我有个提议……”\n“我们该叫它，‘文明的存续’。”",
+   "typeIcon": "ccr-y",
+   "typeName1": "CCR",
+   "typeName2": "Y",
+   "equipShiningColor": "red",
+   "showEvolvePhase": "PHASE_2",
+   "unlockEvolvePhase": "PHASE_2",
+   "charId": "char_002_amiya",
+   "tmplId": null,
+   "showLevel": 1,
+   "unlockLevel": 50,
+   "missionList": [
+    "uniequip_002_amiya_1",
+    "uniequip_002_amiya_2"
+   ],
+   "unlockFavors": {
+    "1": 0,
+    "2": 2732,
+    "3": 10070
+   },
+   "itemCost": {
+    "1": [
+     {
+      "id": "mod_unlock_token",
+      "count": 2,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "30034",
+      "count": 3,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "4001",
+      "count": 40000,
+      "type": "GOLD"
+     }
+    ],
+    "2": [
+     {
+      "id": "mod_unlock_token",
+      "count": 2,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "mod_update_token_1",
+      "count": 20,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "30054",
+      "count": 4,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "4001",
+      "count": 50000,
+      "type": "GOLD"
+     }
+    ],
+    "3": [
+     {
+      "id": "mod_unlock_token",
+      "count": 2,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "mod_update_token_2",
+      "count": 8,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "30044",
+      "count": 5,
+      "type": "MATERIAL"
+     },
+     {
+      "id": "4001",
+      "count": 60000,
+      "type": "GOLD"
+     }
+    ]
+   },
+   "type": "ADVANCED",
+   "uniEquipGetTime": 1673928000,
+   "uniEquipShowEnd": 1673928000,
+   "charEquipOrder": 2,
+   "hasUnlockMission": true,
+   "isSpecialEquip": false,
+   "specialEquipDesc": null,
+   "specialEquipColor": null,
+   "charColor": "#0098dc"
+  }
+ },
+ "charEquip": {
+  "char_002_amiya": [
+   "uniequip_001_amiya",
+   "uniequip_002_amiya"
+  ]
+ },
+ "missionList": {
+  "uniequip_002_amiya_1": {
+   "template": "EquipmentEventTotal",
+   "desc": "由非助战阿米娅累计歼灭10个精英或领袖敌人",
+   "paramList": [
+    "char_002_amiya",
+    "DEATHDETAIL,char_002_amiya,BOSS,ELITE",
+    "10"
+   ],
+   "uniEquipMissionId": "uniequip_002_amiya_1",
+   "uniEquipMissionSort": 1,
+   "uniEquipId": "uniequip_002_amiya",
+   "jumpStageId": null
+  },
+  "uniequip_002_amiya_2": {
+   "template": "EquipmentEventStageMore",
+   "desc": "3星通关主题曲3-8；必须编入非助战中坚术师状态的阿米娅并上场，且使用中坚术师状态的阿米娅歼灭碎骨",
+   "paramList": [
+    "3",
+    "main_03-08",
+    "char_002_amiya",
+    "DEATHDETAIL,char_002_amiya,enemy_1500_skulsr",
+    "1"
+   ],
+   "uniEquipMissionId": "uniequip_002_amiya_2",
+   "uniEquipMissionSort": 2,
+   "uniEquipId": "uniequip_002_amiya",
+   "jumpStageId": "main_03-08"
+  }
+ }
+}

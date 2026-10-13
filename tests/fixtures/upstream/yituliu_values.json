@@ -1,0 +1,39 @@
+{
+ "code": 200,
+ "msg": "操作成功",
+ "data": [
+  {
+   "itemId": "30145",
+   "itemName": "晶体电子单元",
+   "itemValue": 302.42316694207534,
+   "itemValueAp": 325.96250672267115,
+   "rarity": 5,
+   "weight": 0.0,
+   "cardNum": 1,
+   "groupId": 1,
+   "type": "精英材料"
+  },
+  {
+   "itemId": "30155",
+   "itemName": "烧结核凝晶",
+   "itemValue": 284.8519670786448,
+   "itemValueAp": 308.2495392178427,
+   "rarity": 5,
+   "weight": 0.0,
+   "cardNum": 1,
+   "groupId": 1,
+   "type": "精英材料"
+  },
+  {
+   "itemId": "30115",
+   "itemName": "聚合剂",
+   "itemValue": 238.17343279529572,
+   "itemValueAp": 236.04498968848958,
+   "rarity": 5,
+   "weight": 0.0,
+   "cardNum": 1,
+   "groupId": 1,
+   "type": "精英材料"
+  }
+ ]
+}

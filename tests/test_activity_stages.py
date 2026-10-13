@@ -44,7 +44,8 @@ def maa_file(tmp_path, monkeypatch):
     def write(side: dict, server="Official", tasks: dict | None = None):
         n[0] += 1                                            # 每次换个文件名：缓存按路径 + 修改时间
         p = tmp_path / f"StageActivityV2-{n[0]}.json"
-        p.write_text(json.dumps({server: {"sideStoryStage": side}}, ensure_ascii=False), encoding="utf-8")
+        doc = {"Official": {"sideStoryStage": {}}, server: {"sideStoryStage": side}}   # 真文件里各服务器的节都在
+        p.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
         monkeypatch.setenv(maa_activity.ACTIVITY_FILE_ENV, str(p))
         if tasks is not None:
             tp = tmp_path / f"tasks-{n[0]}.json"

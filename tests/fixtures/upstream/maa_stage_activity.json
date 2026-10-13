@@ -1,0 +1,106 @@
+{
+ "Official": {
+  "sideStoryStage": {
+   "SSReopen": {
+    "MinimumRequired": "v6.14.0",
+    "Activity": {
+     "Tip": "SideStory「墟」复刻",
+     "StageName": "墟",
+     "UtcStartTime": "2026/08/22 04:00:00",
+     "UtcExpireTime": "2026/09/01 03:59:59",
+     "TimeZone": 8
+    },
+    "Stages": [
+     {
+      "Display": "SSReopen-AT",
+      "Value": "SSReopen-AT",
+      "Drop": "代理1~8关"
+     },
+     {
+      "Display": "AT-8",
+      "Value": "AT-8",
+      "Drop": "31093"
+     },
+     {
+      "Display": "AT-7",
+      "Value": "AT-7",
+      "Drop": "30053"
+     },
+     {
+      "Display": "AT-6",
+      "Value": "AT-6",
+      "Drop": "30013"
+     },
+     {
+      "Display": "AT-4",
+      "Value": "AT-4",
+      "Drop": "搓玉效率0.91"
+     }
+    ]
+   },
+   "YW": {
+    "MinimumRequired": "v6.17.0",
+    "Activity": {
+     "Tip": "SideStory「昨日海」",
+     "StageName": "昨日海",
+     "UtcStartTime": "2026/10/09 12:00:00",
+     "UtcExpireTime": "2026/10/23 03:59:59",
+     "TimeZone": 8
+    },
+    "Stages": [
+     {
+      "Display": "YW-8",
+      "Value": "YW-8",
+      "Drop": "31103"
+     },
+     {
+      "Display": "YW-7",
+      "Value": "YW-7",
+      "Drop": "31063"
+     },
+     {
+      "Display": "YW-6",
+      "Value": "YW-6",
+      "Drop": "30063"
+     },
+     {
+      "Display": "YW-4",
+      "Value": "YW-4",
+      "Drop": "搓玉效率0.69"
+     }
+    ]
+   }
+  }
+ },
+ "YoStarEN": {
+  "sideStoryStage": {
+   "PA": {
+    "MinimumRequired": "v6.0.1",
+    "Activity": {
+     "Tip": "People, A People",
+     "StageName": "PA",
+     "UtcStartTime": "2026/09/16 08:00:00",
+     "UtcExpireTime": "2026/09/30 03:59:59",
+     "TimeZone": -7
+    },
+    "Stages": [
+     {
+      "Display": "PA-8",
+      "Value": "PA-8",
+      "Drop": "31033"
+     },
+     {
+      "Display": "PA-7",
+      "Value": "PA-7",
+      "Drop": "30053"
+     },
+     {
+      "Display": "PA-6",
+      "Value": "PA-6",
+      "Drop": "30023"
+     }
+    ]
+   }
+  }
+ }
+}

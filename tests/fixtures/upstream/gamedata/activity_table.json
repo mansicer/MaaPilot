@@ -1,0 +1,29 @@
+{
+ "basicInfo": {
+  "act52side": {
+   "id": "act52side",
+   "type": "TYPE_ACT9D0",
+   "displayType": "SIDESTORY",
+   "name": "昨日海",
+   "startTime": 1791500400,
+   "endTime": 1792699199,
+   "rewardEndTime": 1793303999,
+   "displayOnHome": true,
+   "hasStage": true,
+   "templateShopId": "shop_act52side",
+   "medalGroupId": "medalGroupActivity52side",
+   "ungroupedMedalIds": null,
+   "isReplicate": false,
+   "needFixedSync": false,
+   "trapDomainId": null,
+   "recType": "SPECIAL",
+   "isPageEntry": false,
+   "isMagnify": false,
+   "picGroup": [],
+   "usePicGroup": false
+  }
+ },
+ "zoneToActivity": {
+  "act52side_zone1": "act52side"
+ }
+}
