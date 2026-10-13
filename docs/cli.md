@@ -25,6 +25,10 @@
   | 4 | 模拟器被占用 | 稍后再试；`lock status` 看谁占着 |
   | 5 | 环境问题（没配置、adb 连不上、maa-cli 没装） | `doctor` |
 
+- **外部数据的格式变了**：森空岛、MAA 的活动列表 / 任务表、maa-cli 的输出、官方公告、官网安装包地址、企鹅物流、一图流、游戏数据表，
+  程序用到的字段对不上时报 `error.code` 为 `upstream_format`（退出码 1，message 写明哪个来源、缺哪个字段，`data: {source, field, effect}`），
+  不当成"没有数据"悄悄过去；有退路的（森空岛的理智 → 首页识别）照样退，同样记下来。都记进 `private/state/sources.json`，
+  `doctor --brief` 的 `sources`、日常汇报的"要注意"会列出来（见 docs/design.md「外部数据源」）。这是要开发者改程序的事，原样重试没用。
 - **坐标**：所有坐标、区域都是 1280×720 参考坐标系（截图也按这个尺寸存），与设备真实分辨率无关（要求 16:9）。
 - **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
   只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
@@ -123,6 +127,8 @@
                       "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "…"]}],
  "goals": [{"title": "昨日海", "object": "活动 昨日海", "deadline": "2026-10-30T03:59+08:00", "days_left": 20.5}],
  "news": {"at": "…", "lines": ["进行中：昨日海（到 10月30日 03:59）"], "due": ["6774:2026-10-09T12:00:00+08:00"]},
+ "sources": [{"source": "skland", "name": "森空岛", "at": "…", "message": "森空岛的数据格式变了（缺 status.ap）",
+              "effect": "理智改用首页识别"}],
  "lines": ["MaaPilot 还没设置：用户一开口就进入 maapilot-setup（…）"]}
 ```
 
@@ -131,6 +137,8 @@
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有官服、有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是到点还没告诉用户的时间点的 key（`lines` 里也写一行，agent 按 `maapilot-events` 去说）。
+`sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
+`lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 
 ## screen —— 截图与识别（只读，不拿锁）
 
@@ -221,6 +229,8 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
 重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
+maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa run` 的标准输出里没有 Summary 任务行；`fight` 的日志里既没有 `Current sanity` 也没有 `Mission started`），
+命令照常返回，`data.upstream_format` 是一句说明，同时记进 `sources.json`（maa-cli 的输出格式可能变了，次数、理智、掉落记不到）。
 
 **失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
 再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
@@ -319,10 +329,13 @@ token 怎么来：在浏览器登录鹰角官网（https://user.hypergryph.com/l
 `sign = md5(hmac_sha256(签名密钥, 路径 + query + 时间戳 + {"platform","timestamp","dId","vName"} 的紧凑 JSON))`，时间戳按服务器的 `Date` 校准。
 
 `state skland` 的 `data`：`{at, source: "skland", uid, operators, with_modules, mastered, sanity: {current, max}, annihilation}`（`--op` 另给这些干员的 `operators_detail` 和 `missing`）。
-`annihilation`：`{current, total, max_kills: {<campaignId>: {name, kills}}}`（本周剿灭合成玉、每张剿灭图的最高击杀，400 = 能代理；接口没给为 `null`），顺手记进本周剿灭记录（见「maa」）。
+`annihilation`：`{current, total, max_kills: {<campaignId>: {name, kills}}}`（本周剿灭合成玉、每张剿灭图的最高击杀，400 = 能代理；接口格式变了为 `null`），顺手记进本周剿灭记录（见「maa」）。
 `box.json` 里每名干员：`{id, rarity(1–6), elite, level, potential(1–6), skill_level, skills: [{index, id, name, mastery}], modules: [{id, name, level, equipped, locked}]}`
 （`locked` 照接口原样，森空岛把没解锁的模组也列出来；潜能同 MAA 从 1 数，接口的 `potentialRank` 从 0 数、读进来加 1；模组名取游戏数据表，没有就用接口给的，再没有就是 id；技能名取 `skill_table`，没有就是 null）。失败不改 `box.json`。错误：没接 → 退出码 2 `not_configured`；
 token 失效 → 退出码 3 `token_invalid`（请用户重新取 token、在终端跑 `skland token`）；接口、网络、设备号 → 退出码 1 `skland_api` / `skland_network` / `skland_device`。
+接口格式变了：干员数据（`chars[]` 的 charId / evolvePhase / level / potentialRank / mainSkillLvl、`skills[]` 的 id / specializeLevel、`equip[]` 的 id / level、`charInfoMap`）
+对不上 → 退出码 1 `upstream_format`，不改 `box.json`；理智（`status.ap.current / max`）、剿灭（`campaign.reward.current / total`）对不上 → 命令照常成功、
+那一项为 `null`，记进 `sources.json`。`state sanity` 遇到理智格式变了改用首页识别，`skland_error` 写原因。
 token 不出现在任何输出、日志、报错里；agent 读不了也改不了 `private/skland.json`（权限设置里拒绝）。
 
 ## news —— 官方日程（只有官服，不碰模拟器）
@@ -383,6 +396,7 @@ token 不出现在任何输出、日志、报错里；agent 读不了也改不�
 | `adb_failed` | 5 | adb 读不了版本、关不了游戏（`doctor`）；没配置、没填地址同样退出码 5 |
 | `network` | 1 | 连不上官网、下载失败或中断、下载中安装包大小变了（官网刚发新版）；再跑一次会接着下 |
 | `unexpected_download` | 1 | 下载地址跳到别的域名：不下载，告诉用户 |
+| `upstream_format` | 1 | 跳到了官网域名，但文件名不是 `arknights-hg-<版本>.apk`：认不出最新版本（记进 `sources.json`），告诉用户、请用户自己更新 |
 | `version_unknown` | 1 | 比不出要不要更新（`data` 同 `version`） |
 | `disk_full` | 3 | 电脑磁盘不够（还要下的 + 1 GB 余量；`data.free_bytes`、`need_bytes`、`apk_bytes`）：请用户腾空间 |
 | `download_incomplete` / `bad_apk` | 1 | 下得不全（再跑接着下）；下下来的不是 zip（已删） |
@@ -430,7 +444,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 
 | 命令 | 输出 |
 |---|---|
-| `data sync [--check]` | 从 ArknightsGameData 同步数据表、刷新企鹅物流掉率与一图流价值；`--check` 只看要不要更新。`{updated, to_update, missing, recipes_rebuilt, live, ages: {matrix_age_h, values_age_d}}`；联网失败退出码 1（`sync_failed`） |
+| `data sync [--check]` | 从 ArknightsGameData 同步数据表、刷新企鹅物流掉率与一图流价值；`--check` 只看要不要更新。`{updated, to_update, missing, recipes_rebuilt, live, ages: {matrix_age_h, values_age_d}}`；联网失败退出码 1（`sync_failed`）；下下来的表缺程序用的字段 → 不替换本地的表，退出码 1（`upstream_format`）。企鹅物流、一图流的格式问题写在 `live` 里、记进 `sources.json`，不算失败 |
 | `data operator <干员>`（别名 `op`） | `{name, id, rarity, profession, levels: [{elite, max_level, to_max: {exp, lmd}}], elite: [{elite, lmd, items, needs_level}], skill_levels: [{to, items}], mastery: [{skill, ranks: [{rank, items, hours}]}], modules: [{type, name, levels: [{level, lmd, items}]}] \| null}` |
 | `data item <物品>`（别名 `drops`） | `{id, name, rarity, type, craftable, recipe, stages: [{stage, ap, rate, sanity_per_item, open_days, open_today, event_end?}], drops_source}`：掉落最好的几关（常驻主线 / 资源本 / 芯片本，加上 MAA 现在能导航的活动关，按每件期望理智排；活动关带 `event_end`：活动什么时候结束） |
 | `data recipe <物品>` | `{tree, shop}`：合成树（加工站 / 制造站），每一步的材料与龙门币、叶子的主掉落关；能在商店兑换的另给 `shop` |
@@ -821,6 +835,7 @@ private/
   goals.md           进行中的目标
   goals-done.md      完成或放弃的目标
   state/             depot.json  box.json  sanity.json（最新快照）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
+                     sources.json（外部数据源的格式健康：{来源: {last_ok, last_error, recent}}）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   cache/copilot/     copilot strip 存的去掉练度要求的作业
   log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  cron.log

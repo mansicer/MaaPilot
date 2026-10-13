@@ -240,6 +240,10 @@ def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
             cli = m.group(1)
         elif m := re.search(r"maa-?core\s+v?(\S+)", line, re.I):
             core = m.group(1)
+    if r.returncode == 0 and r.text.strip() and not cli:     # 跑起来了、有输出，却认不出版本号：输出格式变了
+        from maapilot.knowledge import sources
+        sources.bad("maa_cli", sources.UpstreamFormat("maa_cli", "maa version 输出里的 maa-cli 版本号",
+                                                      effect="doctor 认不出 maa-cli 装好了没有"))
     return cli, core
 
 
@@ -482,8 +486,18 @@ def brief(probe: Probe | None = None) -> dict:
         data["unseen_problems"] = []
     data["goals"] = goals_brief()
     data["news"] = news_brief()
+    data["sources"] = sources_brief()
     data["lines"] = brief_lines(data)
     return data
+
+
+def sources_brief() -> list[dict]:
+    """格式出了问题的外部数据源（private/state/sources.json；没问题的不列）：[{source, name, at, message, effect}]。"""
+    try:
+        from maapilot.knowledge import sources
+        return [{k: s.get(k) for k in ("source", "name", "at", "message", "effect")} for s in sources.unhealthy()]
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return []
 
 
 def goals_brief() -> list[dict] | None:
@@ -537,6 +551,9 @@ def brief_lines(d: dict) -> list[str]:
         lines.append(f"官方日程：{l}")
     if n.get("due"):
         lines.append("维护结束 / 活动开始了、还没跟用户说（maapilot-events）：" + "、".join(n["due"]))
+    for x in d.get("sources") or []:
+        lines.append(f"外部数据：{x['message']}" + (f"，{x['effect']}" if x.get("effect") else "")
+                     + "（要开发者修；用户问起或受影响时用玩家的话说明，见 maapilot-recovery）")
     for p in d.get("unseen_problems") or []:
         lines.append("还没告诉用户的问题：" + " ".join(p.get("lines") or [p.get("run_id") or "?"])
                      + f"（运行 {p.get('run_id')}；告诉用户后 report seen {p.get('run_id')}）")

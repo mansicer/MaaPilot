@@ -1,0 +1,34 @@
+{
+ "zones": {
+  "main_1": {
+   "zoneID": "main_1",
+   "zoneIndex": 1,
+   "type": "MAINLINE",
+   "zoneNameFirst": "第一章",
+   "zoneNameSecond": "黑暗时代·下",
+   "zoneNameTitleCurrent": "01",
+   "zoneNameTitleUnCurrent": "01",
+   "zoneNameTitleEx": "EPISODE",
+   "zoneNameThird": "EPISODE 01",
+   "lockedText": "完成上一章以解锁",
+   "antiSpoilerId": null,
+   "canPreview": true,
+   "hasAdditionalPanel": false,
+   "sixStarMilestoneGroupId": null,
+   "bindMainlineZoneId": null,
+   "bindMainlineRetroZoneId": null,
+   "diamondRewardCount": 0
+  }
+ },
+ "weeklyAdditionInfo": {
+  "weekly_1": {
+   "daysOfWeek": [
+    1,
+    4,
+    5,
+    7
+   ],
+   "type": "EVOLVE"
+  }
+ }
+}

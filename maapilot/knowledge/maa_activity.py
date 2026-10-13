@@ -20,9 +20,14 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
+from maapilot.knowledge import sources
+from maapilot.knowledge.sources import UpstreamFormat, need, need_keys
+
 ACTIVITY_FILE_ENV = "MAAPILOT_MAA_ACTIVITY_FILE"
 TASKS_FILE_ENV = "MAAPILOT_MAA_TASKS_FILE"
 REOPEN_PREFIX = "SSReopen"
+SRC, TASKS_SRC = "maa_activity", "maa_tasks"
+SERVER_ALIAS = {"Bilibili": "Official"}      # B 服和官服用同一份活动列表（文件里没有 Bilibili 这一节）
 
 
 def _cache_dir() -> Path:
@@ -86,9 +91,33 @@ def _time(s: str, tz_h: float) -> datetime:
     return datetime.strptime(s, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone(timedelta(hours=tz_h)))
 
 
+def check(doc, server: str = "Official") -> dict:
+    """核对 StageActivityV2.json 里程序用到的字段，返回这个服务器的 sideStoryStage。对不上抛 UpstreamFormat：
+    `<服务器>.sideStoryStage` 是对象；每期活动有 Activity.UtcStartTime / UtcExpireTime（"2026/08/22 04:00:00"）、
+    Stages[].Value。"""
+    if not isinstance(doc, dict):
+        raise UpstreamFormat(SRC, "最外层", "type")
+    srv = SERVER_ALIAS.get(server, server) if SERVER_ALIAS.get(server) in doc and server not in doc else server
+    ss = need(doc, f"{srv}.sideStoryStage", dict, source=SRC)
+    for key, a in ss.items():
+        where = f"{srv}.sideStoryStage.{key}"
+        act = need(a, "Activity", dict, source=SRC, label=f"{where}.Activity")
+        for f in ("UtcStartTime", "UtcExpireTime"):
+            v = need(act, f, str, source=SRC, label=f"{where}.Activity.{f}")
+            try:
+                _time(v, 8)
+            except ValueError:
+                raise UpstreamFormat(SRC, f"{where}.Activity.{f}", f"时间写法认不出（{v}）") from None
+        for st in need(a, "Stages", list, source=SRC, label=f"{where}.Stages"):
+            need_keys(st, ("Value",), source=SRC, where=f"{where}.Stages[]")
+    return ss
+
+
 def parse(doc: dict, server: str = "Official") -> list[Activity]:
-    """StageActivityV2.json → 这个服务器的活动关（sideStoryStage）。写法不对的条目跳过。"""
+    """StageActivityV2.json → 这个服务器的活动关（sideStoryStage）。写法不对的条目跳过（格式核对见 check）。"""
     out = []
+    if server not in doc and SERVER_ALIAS.get(server) in doc:
+        server = SERVER_ALIAS[server]
     for key, a in ((doc.get(server) or {}).get("sideStoryStage") or {}).items():
         try:
             act = a.get("Activity") or {}
@@ -112,21 +141,49 @@ def _mtime(p: Path) -> float | None:
 
 
 @lru_cache(maxsize=4)
-def _load(path: str, mtime: float, server: str) -> tuple[Activity, ...]:
+def _load(path: str, mtime: float, server: str) -> tuple[tuple[Activity, ...], str | None]:
+    """→ (活动, 格式问题)。格式对不上：记进 sources.json，能解析的条目照样给（why_not 会带上这条问题）。"""
     try:
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ()
-    return tuple(parse(doc if isinstance(doc, dict) else {}, server))
+    except OSError:
+        return (), None
+    except ValueError:
+        e = UpstreamFormat(SRC, "整个文件", "不是 JSON")
+        sources.bad(SRC, e, effect="认不出哪些活动关 MAA 能导航")
+        return (), e.message
+    problem = None
+    try:
+        check(doc, server)
+        sources.ok(SRC)
+    except UpstreamFormat as e:
+        sources.bad(SRC, e, effect="认不出哪些活动关 MAA 能导航")
+        problem = e.message
+    return tuple(parse(doc if isinstance(doc, dict) else {}, server)), problem
+
+
+def check_tasks(doc) -> frozenset[str]:
+    """resource/tasks/tasks.json：{任务名: 对象}。对不上抛 UpstreamFormat。"""
+    if not isinstance(doc, dict):
+        raise UpstreamFormat(TASKS_SRC, "最外层", "type")
+    for k, v in doc.items():
+        if not isinstance(v, dict):
+            raise UpstreamFormat(TASKS_SRC, k, "type")
+    return frozenset(doc)
 
 
 @lru_cache(maxsize=4)
 def _task_names(path: str, mtime: float) -> frozenset[str]:
     try:
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
-        return frozenset(doc) if isinstance(doc, dict) else frozenset()
-    except (OSError, ValueError):
+        names = check_tasks(doc)
+    except OSError:
         return frozenset()
+    except (ValueError, UpstreamFormat) as e:      # UpstreamFormat 也是 ValueError
+        err = e if isinstance(e, UpstreamFormat) else UpstreamFormat(TASKS_SRC, "整个文件", "不是 JSON")
+        sources.bad(TASKS_SRC, err, effect="活动关只认 MAA 列表里写明的几关")
+        return frozenset()
+    sources.ok(TASKS_SRC)
+    return names
 
 
 def available() -> bool:
@@ -139,7 +196,14 @@ def activities(server: str | None = None) -> list[Activity]:
     m = _mtime(p)
     if m is None:
         return []
-    return [map_stages(a) for a in _load(str(p), m, server or _server())]
+    return [map_stages(a) for a in _load(str(p), m, server or _server())[0]]
+
+
+def problem(server: str | None = None) -> str | None:
+    """活动列表文件的格式问题（没有问题、没有文件 → None）。"""
+    p = activity_file()
+    m = _mtime(p)
+    return None if m is None else _load(str(p), m, server or _server())[1]
 
 
 def _now() -> datetime:
@@ -220,6 +284,9 @@ def why_not(s: dict, at=None, server: str | None = None) -> str:
     code = s.get("code") or s.get("stageId")
     name = _zone_activity().get(s.get("zoneId"))
     a = for_stage(s, server)
+    bad = problem(server)
+    if a is None and bad:
+        return f"{bad}，判断不了 MAA 认不认这关"
     if a is None:
         return f"MAA 还不认这个活动的关卡（MAA 的活动列表里还没有「{name or code.split('-', 1)[0]}」）"
     if at < a.start:

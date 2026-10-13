@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from maapilot import paths
+from maapilot.knowledge import sources
+from maapilot.knowledge.sources import UpstreamFormat, need, need_keys
 
 REQUIRED_TABLES: tuple[str, ...] = (
     "character_table", "item_table", "gamedata_const", "building_data",
@@ -31,6 +33,47 @@ API_URL = f"https://api.github.com/repos/{REPO}/contents/{EXCEL_DIR}?ref=master"
 MANIFEST_NAME = "manifest.json"
 LIVE_SOURCES = {"penguin": "企鹅物流", "values": "一图流"}   # live.sync() 结果里的来源键 → 显示名
 LIVE_OK = ("ok", "skipped")                                  # 其余值是错误文字（skipped：这个服务器没有该来源）
+
+
+# 每张表程序用到的字段：top 是最外层要有的 {键: 类型}；entries 是 (装条目的对象的键（"" = 最外层）, 每个条目要有的键,
+# 只查键名以此开头的条目)。只查"有没有"，不查全部取值；对不上就不替换本地的表（见 check_table）。
+SRC = "gamedata"
+TABLE_SCHEMA: dict[str, dict] = {
+    "character_table": {"entries": ("", ("name", "rarity", "profession", "phases", "skills", "allSkillLvlup"), "char_")},
+    "item_table": {"entries": ("items", ("itemId", "name", "rarity", "itemType"), "")},
+    "gamedata_const": {"top": {"characterExpMap": list, "characterUpgradeCostMap": list, "evolveGoldCost": list,
+                               "maxLevel": list}},
+    "building_data": {"top": {"workshopFormulas": dict, "manufactFormulas": dict},
+                      "entries": ("workshopFormulas", ("itemId", "count", "goldCost", "costs", "requireRooms"), "")},
+    "stage_table": {"entries": ("stages", ("stageId", "code", "zoneId", "stageType", "difficulty", "apCost"), "")},
+    "zone_table": {"top": {"weeklyAdditionInfo": dict}, "entries": ("zones", ("zoneNameFirst", "zoneNameSecond"), "")},
+    "uniequip_table": {"top": {"charEquip": dict, "missionList": dict},
+                       "entries": ("equipDict", ("uniEquipId", "uniEquipName", "charId", "itemCost", "unlockEvolvePhase",
+                                                 "unlockLevel", "missionList"), "")},
+    "activity_table": {"top": {"zoneToActivity": dict}, "entries": ("basicInfo", ("name",), "")},
+    "skill_table": {"entries": ("", ("skillId", "levels"), "")},
+}
+
+
+def check_table(file: str, obj) -> None:
+    """一张表（下载下来、还没替换本地的）有没有程序用到的字段。对不上抛 UpstreamFormat（字段写成 表名.路径.键）。"""
+    table = file.removesuffix(".json")
+    schema = TABLE_SCHEMA.get(table)
+    if schema is None:
+        return
+    if not isinstance(obj, dict):
+        raise UpstreamFormat(SRC, table, "type")
+    for k, typ in schema.get("top", {}).items():
+        need(obj, k, typ, source=SRC, label=f"{table}.{k}")
+    if "entries" in schema:
+        where, keys, prefix = schema["entries"]
+        rows = need(obj, where, dict, source=SRC, label=f"{table}.{where}") if where else obj
+        picked = [(k, v) for k, v in rows.items() if k.startswith(prefix)]
+        label = f"{table}.{where}" if where else table
+        if not picked:
+            raise UpstreamFormat(SRC, label, "没有条目")
+        for _, v in picked:
+            need_keys(v, keys, source=SRC, where=f"{label}[]")
 
 
 def table_files() -> list[str]:
@@ -98,6 +141,10 @@ def fetch_remote_shas(files: list[str] | None = None) -> dict[str, str]:
     """GitHub contents API：excel 目录下每个文件的 git blob sha（只取我们需要的文件）。"""
     wanted = set(files or table_files())
     listing = json.loads(_get(API_URL))
+    if not isinstance(listing, list):
+        raise UpstreamFormat(SRC, "GitHub 目录列表", "type")
+    for e in listing:
+        need_keys(e, ("name", "sha"), source=SRC, where="GitHub 目录列表[]")
     return {e["name"]: e["sha"] for e in listing if e.get("name") in wanted}
 
 
@@ -105,7 +152,7 @@ def download(file: str) -> Path:
     dest = paths.DATA / file
     dest.parent.mkdir(parents=True, exist_ok=True)
     data = _get(source_url(file), timeout=300)
-    json.loads(data)                                  # 不把半截/错误页当表存下来
+    check_table(file, json.loads(data))               # 不把半截/错误页、改了格式的表存下来
     tmp = dest.with_suffix(".json.part")
     tmp.write_bytes(data)
     tmp.replace(dest)
@@ -115,10 +162,22 @@ def download(file: str) -> Path:
 def sync(check_only: bool = False, *, server: str | None = None, now: datetime | None = None) -> dict:
     """比对 manifest 与远端，下载缺失/变化的表并更新 manifest，需要时重建 data/recipes.json。
     返回 {"to_update", "updated", "missing", "checked", "not_on_remote", "recipes_rebuilt"}（check_only 时没有最后一项）。
-    官方表的网络失败直接抛异常，由调用方决定是否致命（日常的 sys:data 里非致命）。
+    官方表的网络失败直接抛异常，由调用方决定是否致命（日常的 sys:data 里非致命）。表的格式变了（缺程序用的字段）：
+    不替换本地的表，记进 private/state/sources.json，抛 UpstreamFormat。
 
     `server`（企鹅物流的服务器代码，如 "CN"）不为 None 时结果另有 `live`：刷新时是 `live.sync()` 的结果
     （{penguin, values, fetched_at}，失败不抛），check_only 时是缓存年龄 {matrix_age_h, values_age_d}（没有缓存为 None）。"""
+    try:
+        result = _sync(check_only, server=server, now=now)
+    except UpstreamFormat as e:
+        sources.bad(SRC, e, effect="游戏数据表停在旧版本（新干员、新关卡可能认不出）")
+        raise
+    if not check_only:
+        sources.ok(SRC)
+    return result
+
+
+def _sync(check_only: bool, *, server: str | None, now: datetime | None) -> dict:
     manifest = read_manifest()
     files = table_files()
     remote = fetch_remote_shas(files)

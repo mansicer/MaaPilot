@@ -1,0 +1,87 @@
+{
+ "status": {
+  "level": 120,
+  "ap": {
+   "current": 100,
+   "max": 135,
+   "lastApAddTime": 1000,
+   "completeRecoveryTime": 0
+  }
+ },
+ "chars": [
+  {
+   "charId": "char_002_amiya",
+   "level": 80,
+   "evolvePhase": 2,
+   "potentialRank": 5,
+   "mainSkillLvl": 7,
+   "skills": [
+    {
+     "id": "skcom_magic_rage[3]",
+     "specializeLevel": 0
+    },
+    {
+     "id": "skchr_amiya_2",
+     "specializeLevel": 3
+    }
+   ],
+   "equip": [
+    {
+     "id": "uniequip_001_amiya",
+     "level": 1
+    },
+    {
+     "id": "uniequip_002_amiya",
+     "level": 3
+    }
+   ],
+   "defaultEquipId": "uniequip_002_amiya"
+  },
+  {
+   "charId": "char_285_medic2",
+   "level": 30,
+   "evolvePhase": 0,
+   "potentialRank": 0,
+   "mainSkillLvl": 1,
+   "skills": [],
+   "equip": [],
+   "defaultEquipId": ""
+  }
+ ],
+ "charInfoMap": {
+  "char_002_amiya": {
+   "name": "阿米娅",
+   "rarity": 4
+  },
+  "char_285_medic2": {
+   "name": "Lancet-2",
+   "rarity": 0
+  }
+ },
+ "equipmentInfoMap": {
+  "uniequip_002_amiya": {
+   "name": "接口给的模组名"
+  }
+ },
+ "campaign": {
+  "reward": {
+   "current": 1215,
+   "total": 1800
+  },
+  "records": [
+   {
+    "campaignId": "camp_r_33",
+    "maxKills": 370
+   },
+   {
+    "campaignId": "camp_01",
+    "maxKills": 400
+   }
+  ]
+ },
+ "campaignInfoMap": {
+  "camp_r_33": {
+   "name": "默祷圣祠"
+  }
+ }
+}

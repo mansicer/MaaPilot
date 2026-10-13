@@ -155,7 +155,15 @@ def latest_version() -> dict:
     if not allowed_host(final):
         raise CliError("unexpected_download", f"官网下载地址跳到了意料之外的网址：{final}",
                        hint="不要下载；告诉用户官网下载地址变了，请用户自己更新", exit=FAILED, data={"url": final})
-    return {"version": version_from_url(final), "url": final, "size": total_size(status, headers)}
+    from maapilot.knowledge import sources
+    version = version_from_url(final)
+    if version is None:                             # 地址在官网域名下，但文件名不是 arknights-hg-<数字>.apk：认不出版本
+        e = sources.UpstreamFormat("game_download", "安装包文件名", f"不是 arknights-hg-<版本>.apk（{urlparse(final).path}）",
+                                   effect="查不出游戏的最新版本")
+        sources.bad("game_download", e)
+        raise sources.cli_error(e) from None
+    sources.ok("game_download")
+    return {"version": version, "url": final, "size": total_size(status, headers)}
 
 
 def version_info() -> dict:

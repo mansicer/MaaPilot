@@ -13,6 +13,7 @@ import sys
 
 from maapilot import config, paths
 from maapilot.cliutil import BAD_REQUEST, FAILED, NEEDS_USER, CliError
+from maapilot.knowledge import sources
 from maapilot.tools import common
 
 TOKEN_HINT = "请用户在终端里跑 maapilot skland token（按提示粘贴鹰角账号 token），agent 不要代办"
@@ -216,17 +217,25 @@ def read_skland() -> dict:
         raise err from None
     if client.did and client.did != store.get("did"):
         store["did"] = client.did
-    ops = skland.to_box(info, _local_names())
+    try:
+        ops = skland.to_box(info, _local_names())
+    except sources.UpstreamFormat as e:
+        sources.bad(SRC, e, effect=BOX_EFFECT)
+        err = sources.cli_error(e, effect=BOX_EFFECT)
+        _record(store, False, err)
+        raise err from None
     if not ops:
         err = CliError("skland_empty", "森空岛返回的角色数据里没有干员", exit=FAILED)
         _record(store, False, err)
         raise err
     at = common.iso()
     common.write_json(paths.STATE / "box.json", {"at": at, "source": "skland", "uid": uid, "operators": ops})
-    san = skland.sanity_of(info)
+    san = _sanity(info)
     if san:
         common.write_json(paths.STATE / "sanity.json", {"at": at, **san, "source": "skland"})
     ann = _note_annihilation(info)
+    if san is not None and ann is not None:
+        sources.ok(SRC)
     _record(store, True)
     return {"at": at, "source": "skland", "uid": uid, "operators": len(ops),
             "with_modules": sum(1 for o in ops.values() if o["modules"]),
@@ -234,18 +243,39 @@ def read_skland() -> dict:
             "sanity": san, "annihilation": ann}
 
 
+SRC = "skland"
+BOX_EFFECT = "干员练度改用 MAA 识别"
+SANITY_EFFECT = "理智改用首页识别"
+ANNIHILATION_EFFECT = "本周剿灭进度只按自己的记录算"
+
+
+def _sanity(info: dict) -> dict | None:
+    """理智；接口格式变了 → 记下来（sources.json）、返回 None（调用方改用首页识别）。"""
+    from maapilot.crew import skland
+    try:
+        return skland.sanity_of(info)
+    except sources.UpstreamFormat as e:
+        sources.bad(SRC, e, effect=SANITY_EFFECT)
+        return None
+
+
 def _note_annihilation(info: dict) -> dict | None:
+    """本周剿灭进度记进剿灭记录；接口格式变了 → 记下来、返回 None（日常按自己累加的记录判断）。"""
     from maapilot.crew import skland
     from maapilot.tools import maa_cmd
-    ann = skland.annihilation_of(info)
-    if ann:
-        maa_cmd.note_annihilation_progress(ann["current"], ann["total"])
+    try:
+        ann = skland.annihilation_of(info)
+    except sources.UpstreamFormat as e:
+        sources.bad(SRC, e, effect=ANNIHILATION_EFFECT)
+        return None
+    maa_cmd.note_annihilation_progress(ann["current"], ann["total"])
     return ann
 
 
 def sanity_now() -> dict | None:
     """只为理智读一次森空岛（几秒，不碰模拟器、不改 box.json），写 sanity.json（source: skland）。
-    没接森空岛 → None；接口出错抛 CliError；接口里没有理智 → None。"""
+    没接森空岛 → None；接口出错抛 CliError；接口里理智的格式变了 → 记进 sources.json、抛 CliError(upstream_format)
+    （state sanity 接着用首页识别，并带上这条原因）。"""
     from maapilot.crew import skland
     store = load_store()
     if store is None:
@@ -256,9 +286,12 @@ def sanity_now() -> dict | None:
         info = client.player_info(uid)
     except skland.SklandError as e:
         raise _cli_error(e, store["token"]) from None
-    san = skland.sanity_of(info)
-    if not san:
-        return None
+    try:
+        san = skland.sanity_of(info)
+    except sources.UpstreamFormat as e:
+        sources.bad(SRC, e, effect=SANITY_EFFECT)
+        raise sources.cli_error(e, effect=SANITY_EFFECT) from None
+    sources.ok(SRC)
     snap = {"at": common.iso(), **san, "source": "skland"}
     common.write_json(paths.STATE / "sanity.json", snap)
     return snap

@@ -1,0 +1,14 @@
+{
+ "skchr_amiya_2": {
+  "skillId": "skchr_amiya_2",
+  "iconId": null,
+  "hidden": false,
+  "levels": [
+   {
+    "name": "精神爆发",
+    "skillType": "AUTO",
+    "durationType": "NONE"
+   }
+  ]
+ }
+}

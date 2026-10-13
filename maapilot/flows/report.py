@@ -139,6 +139,16 @@ def has_problem(d: dict) -> bool:
     return st != "done" or d.get("ok") is False or bool(d.get("failed"))
 
 
+def source_alerts(d: dict) -> list[str]:
+    """这次日常期间（started_at 到 finished_at，还在跑就到现在）记下的外部数据格式问题（private/state/sources.json）。
+    日常本身不用管：各命令在解析外部数据时自己记，这里按时间段取出来放进"要注意"。"""
+    try:
+        from maapilot.knowledge import sources
+        return [f"外部数据：{x}（要开发者修）" for x in sources.errors_between(d.get("started_at"), d.get("finished_at"))]
+    except Exception:                                    # noqa: BLE001 - 读不了不影响汇报
+        return []
+
+
 def problem_brief(d: dict) -> dict:
     """一次有问题的运行的要点（doctor --brief、daily watch 用）。"""
     tasks = {t.get("task"): t for t in d.get("tasks") or []}
@@ -146,7 +156,7 @@ def problem_brief(d: dict) -> dict:
                "code": (tasks.get(t) or {}).get("code")} for t in d.get("failed") or []]
     out = {"run_id": d.get("run_id"), "trigger": d.get("trigger"), "started_at": d.get("started_at"),
            "finished_at": d.get("finished_at"), "status": d.get("status"), "ok": d.get("ok"), "failed": failed,
-           "alerts": d.get("alerts") or [], "report": d.get("report")}
+           "alerts": [*(d.get("alerts") or []), *source_alerts(d)], "report": d.get("report")}
     if d.get("status") == "stopped":
         out["guard_stop"] = {"reason": d.get("stop_reason"), **{k: (d.get("guard") or {}).get(k)
                                                                 for k in ("before", "after", "unexplained")}}
@@ -457,7 +467,7 @@ def render(d: dict) -> str:
     if gl:
         out += ["", "## 目标变动", ""] + [f"- {x}" for x in gl]
     g = d.get("guard") or {}
-    alerts = list(d.get("alerts") or [])
+    alerts = [*(d.get("alerts") or []), *source_alerts(d)]
     if g.get("ok") is False:
         alerts.insert(0, "合成玉 / 源石有没经同意的减少：" + json.dumps(g.get("unexplained") or {}, ensure_ascii=False)
                       + "。日常暂停，等用户说明。")

@@ -1,0 +1,58 @@
+{
+ "workshopFormulas": {
+  "1": {
+   "sortId": 1001,
+   "formulaId": "1",
+   "rarity": 0,
+   "itemId": "3131",
+   "count": 1,
+   "goldCost": 800,
+   "apCost": 360000,
+   "formulaType": "F_BUILDING",
+   "buffType": "W_BUILDING",
+   "extraOutcomeRate": 0.1,
+   "extraOutcomeGroup": [
+    {
+     "weight": 100,
+     "itemId": "3112",
+     "itemCount": 1
+    }
+   ],
+   "costs": [
+    {
+     "id": "3112",
+     "count": 2,
+     "type": "MATERIAL"
+    }
+   ],
+   "requireRooms": [
+    {
+     "roomId": "WORKSHOP",
+     "roomLevel": 1,
+     "roomCount": 1
+    }
+   ],
+   "requireStages": []
+  }
+ },
+ "manufactFormulas": {
+  "1": {
+   "formulaId": "1",
+   "itemId": "2001",
+   "count": 1,
+   "weight": 2,
+   "costPoint": 2700,
+   "formulaType": "F_EXP",
+   "buffType": "M_EXP",
+   "costs": [],
+   "requireRooms": [
+    {
+     "roomId": "MANUFACTURE",
+     "roomLevel": 1,
+     "roomCount": 1
+    }
+   ],
+   "requireStages": []
+  }
+ }
+}

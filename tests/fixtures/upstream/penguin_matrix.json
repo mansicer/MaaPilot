@@ -1,0 +1,40 @@
+{
+ "matrix": [
+  {
+   "stageId": "main_01-07",
+   "itemId": "30011",
+   "times": 1000,
+   "quantity": 500,
+   "stdDev": 0.5,
+   "start": 1556676000000,
+   "end": null
+  },
+  {
+   "stageId": "main_01-07",
+   "itemId": "30012",
+   "times": 2000,
+   "quantity": 1000,
+   "stdDev": 0.5,
+   "start": 1556676000000,
+   "end": null
+  },
+  {
+   "stageId": "main_01-07",
+   "itemId": "30061",
+   "times": 3000,
+   "quantity": 1500,
+   "stdDev": 0.5,
+   "start": 1556676000000,
+   "end": null
+  },
+  {
+   "stageId": "tough_14-02",
+   "itemId": "30011",
+   "times": 4000,
+   "quantity": 2000,
+   "stdDev": 0.5,
+   "start": 1714550400000,
+   "end": 1715716800000
+  }
+ ]
+}

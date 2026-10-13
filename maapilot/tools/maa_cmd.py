@@ -173,6 +173,34 @@ def _save_sanity(last) -> None:
                           {"at": common.iso(), "current": last[0], "max": last[1], "source": "maa-log"})
 
 
+def output_problem(task: str, mrun):
+    """maa 说做成了（退出码 0），输出里却认不出程序要读的行 → UpstreamFormat（maa-cli 的输出格式可能变了）；正常 → None。
+    - `maa run` 的标准输出里没有一行 Summary 任务行（`[任务] … Completed`）；作业（copilot）不查。
+    - 刷图（fight）的日志里既没有 "Current sanity" 也没有 "Mission started"：理智、次数、掉落都记不到。
+      剿灭不查：本周拿满、找不到入口时 MAA 也报完成、日志里没有这两行（另有记录判断）。"""
+    from maapilot.knowledge.sources import UpstreamFormat
+    if mrun.error or mrun.timed_out or mrun.returncode != 0:
+        return None
+    p = mrun.parsed
+    if task != "copilot" and not p.get("tasks"):
+        return UpstreamFormat("maa_cli", "标准输出里 Summary 的任务行", effect="分不出任务做没做成")
+    if task == "fight" and mrun.ok and not p.get("sanity_first") and not p.get("fights"):
+        return UpstreamFormat("maa_cli", "日志里的 Current sanity / Mission started 行", effect="刷图次数、理智、掉落都记不到")
+    return None
+
+
+def _note_output(task: str, mrun, data: dict) -> None:
+    """把 output_problem 记进 sources.json（命令照常返回，data 里多一条 upstream_format）。"""
+    from maapilot.knowledge import sources
+    e = output_problem(task, mrun)
+    if e is None:
+        if mrun.returncode == 0 and not mrun.error and not mrun.timed_out:
+            sources.ok("maa_cli")
+        return
+    sources.bad("maa_cli", e)
+    data["upstream_format"] = sources.line({"message": e.message, "effect": e.effect})
+
+
 def result(task: str, mrun, info: dict) -> dict:
     """MaaRun → 命令的 data。"""
     p = mrun.parsed
@@ -369,6 +397,7 @@ def run(task: str, **opts) -> dict:
     else:
         mrun = maa.run_tasks(task, [{"name": task, "type": ttype, "params": params}], timeout_s=timeout)
     data = result(task, mrun, info)
+    _note_output(task, mrun, data)
     if mrun.ok:
         if task == "startup":
             data["home"] = go_home()

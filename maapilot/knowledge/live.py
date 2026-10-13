@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from maapilot import paths
+from maapilot.knowledge import sources
+from maapilot.knowledge.sources import UpstreamFormat, need, need_keys
 
 PENGUIN_HOSTS = ("https://penguin-stats.io", "https://penguin-stats.cn")
 PENGUIN_STAGES_PATH = "/PenguinStats/api/v2/stages?server={server}"
@@ -159,20 +161,34 @@ def parse_values(raw: dict, *, known_items: set[str]) -> dict[str, float]:
 
 
 def check_penguin(matrix: object, stages: object) -> None:
-    """写缓存前的结构校验：不像企鹅物流接口的响应抛 ValueError。"""
-    if not isinstance(stages, list) or not stages or not all(isinstance(s, dict) and "stageId" in s for s in stages):
-        raise ValueError("企鹅物流 stages 响应结构不对")
-    rows = matrix.get("matrix") if isinstance(matrix, dict) else None
-    if not isinstance(rows, list) or not rows or not all(
-            isinstance(m, dict) and {"stageId", "itemId", "times", "quantity"} <= m.keys() for m in rows):
-        raise ValueError("企鹅物流 matrix 响应结构不对")
+    """写缓存前的结构校验（不像企鹅物流接口的响应抛 UpstreamFormat，它也是 ValueError）：
+    stages[] 有 stageId、apCost、existence；matrix.matrix[] 有 stageId、itemId、times、quantity、end。"""
+    if not isinstance(stages, list) or not stages:
+        raise UpstreamFormat("penguin", "stages", "type")
+    for s in stages:
+        need_keys(s, ("stageId", "apCost", "existence"), source="penguin", where="stages[]")
+    rows = need(matrix, "matrix", list, source="penguin")
+    if not rows:
+        raise UpstreamFormat("penguin", "matrix", "是空的")
+    for m in rows:
+        need_keys(m, ("stageId", "itemId", "times", "quantity", "end"), source="penguin", where="matrix[]")
+        if not isinstance(m["times"], int) or not isinstance(m["quantity"], int):
+            raise UpstreamFormat("penguin", "matrix[].times / quantity", "type")
 
 
 def check_values(raw: object) -> None:
-    rows = raw.get("data") if isinstance(raw, dict) else None
-    if not isinstance(raw, dict) or raw.get("code") != 200 or not isinstance(rows, list) or not rows or not all(
-            isinstance(d, dict) and "itemId" in d and "itemValueAp" in d for d in rows):
-        raise ValueError("一图流物品价值响应结构不对")
+    """一图流 /item/v7/value：{code: 200, data: [{itemId, itemValueAp}]}。对不上抛 UpstreamFormat。"""
+    if not isinstance(raw, dict):
+        raise UpstreamFormat("yituliu", "最外层", "type")
+    if raw.get("code") != 200:
+        raise UpstreamFormat("yituliu", "code", f"不是 200（{raw.get('code')}）")
+    rows = need(raw, "data", list, source="yituliu")
+    if not rows:
+        raise UpstreamFormat("yituliu", "data", "是空的")
+    for d in rows:
+        need_keys(d, ("itemId", "itemValueAp"), source="yituliu", where="data[]")
+        if not isinstance(d["itemValueAp"], (int, float)):
+            raise UpstreamFormat("yituliu", "data[].itemValueAp", "type")
 
 
 def read_manifest() -> dict:
@@ -314,8 +330,11 @@ def sync(server: str = "CN", *, now: datetime | None = None) -> dict:
             for name, path in names.items():
                 manifest[name] = {"fetched_at": stamp, "source_url": PENGUIN_HOSTS[0] + path.format(server=server),
                                   "ok": True, "error": None, "attempted_at": stamp}
+            sources.ok("penguin")
         except Exception as e:
-            result["penguin"] = _describe(e)
+            result["penguin"] = e.message if isinstance(e, UpstreamFormat) else _describe(e)
+            if isinstance(e, UpstreamFormat):
+                sources.bad("penguin", e, effect="掉率用上次的缓存（越来越旧）")
             for name, path in names.items():
                 old = manifest.get(name) or {"fetched_at": None, "source_url": PENGUIN_HOSTS[0] + path.format(server=server)}
                 manifest[name] = {**old, "ok": False, "error": result["penguin"], "attempted_at": stamp}
@@ -326,8 +345,11 @@ def sync(server: str = "CN", *, now: datetime | None = None) -> dict:
                 _write_atomic({VALUES_FILE: raw})
                 manifest[VALUES_FILE] = {"fetched_at": stamp, "source_url": YITULIU_VALUE_URL, "ok": True,
                                          "error": None, "attempted_at": stamp}
+                sources.ok("yituliu")
             except Exception as e:
-                result["values"] = _describe(e)
+                result["values"] = e.message if isinstance(e, UpstreamFormat) else _describe(e)
+                if isinstance(e, UpstreamFormat):
+                    sources.bad("yituliu", e, effect="物品价值用上次的缓存（超过 7 天就不用）")
                 manifest[VALUES_FILE] = {**manifest.get(VALUES_FILE, {"fetched_at": None, "source_url": YITULIU_VALUE_URL}),
                                          "ok": False, "error": result["values"], "attempted_at": stamp}
         else:

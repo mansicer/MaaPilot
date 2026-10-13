@@ -14,10 +14,14 @@ import urllib.request
 from datetime import datetime, timedelta
 
 from maapilot import paths
+from maapilot.knowledge import sources
 from maapilot.knowledge.calendar import GAME_TZ
+from maapilot.knowledge.sources import UpstreamFormat, need, need_keys
 
 LIST_URL = "https://ak-webview.hypergryph.com/api/game/bulletinList?target=Android"
 ITEM_URL = "https://ak-webview.hypergryph.com/api/game/bulletin/{cid}"
+SRC = "bulletin"
+EFFECT = "维护和活动时间按上次拉到的公告看"
 STALE_H = 6                     # 缓存超过几小时，日常开头再拉一次
 RECENT_DAYS = 30                # 只看最近多少天发的公告（常驻的说明类公告很旧，不看）
 
@@ -107,28 +111,59 @@ def item_from(raw: dict, *, published: datetime | None = None) -> dict:
     return item
 
 
+# --- 格式核对 ----------------------------------------------------------------------------------------------------------
+
+def check_list(data) -> list:
+    """bulletinList 的 data：list[]，每条有 cid、title、displayTime（"2026-10-13"）、updatedAt、category。对不上抛 UpstreamFormat。"""
+    rows = need(data, "list", list, source=SRC)
+    for b in rows:
+        need_keys(b, ("cid", "title", "displayTime", "updatedAt", "category"), source=SRC, where="list[]")
+        try:
+            datetime.strptime(b["displayTime"] or "", "%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise UpstreamFormat(SRC, "list[].displayTime", f"日期写法认不出（{b['displayTime']}）") from None
+    return rows
+
+
+def check_item(raw) -> dict:
+    """bulletin/<cid> 的 data：cid、title、content（HTML 字符串）、displayTime、updatedAt。"""
+    need_keys(raw, ("cid", "title", "content", "displayTime", "updatedAt"), source=SRC, where="bulletin")
+    if not isinstance(raw["content"], str):
+        raise UpstreamFormat(SRC, "bulletin.content", "type")
+    return raw
+
+
 # --- 联网 --------------------------------------------------------------------------------------------------------------
 
 def _get(url: str, timeout: int = 20) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "maapilot-news"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         d = json.loads(r.read())
+    if not isinstance(d, dict):
+        raise UpstreamFormat(SRC, "最外层", "type")
     if d.get("code") not in (0, None):
         raise RuntimeError(f"公告接口返回 {d.get('code')}：{d.get('msg')}")
-    return d.get("data") or {}
+    return need(d, "data", dict, source=SRC)
 
 
 def fetch(now: datetime | None = None, get=_get) -> list[dict]:
-    """最近 RECENT_DAYS 天的活动、维护公告（"其他"只留标题）。网络错误直接抛。"""
+    """最近 RECENT_DAYS 天的活动、维护公告（"其他"只留标题）。网络错误直接抛；格式变了记进 sources.json、抛 UpstreamFormat。"""
+    try:
+        out = _fetch(now, get)
+    except UpstreamFormat as e:
+        sources.bad(SRC, e, effect=EFFECT)
+        raise
+    sources.ok(SRC)
+    return out
+
+
+def _fetch(now: datetime | None, get) -> list[dict]:
     now = now or datetime.now(GAME_TZ)
     old = load()
     cache = {i["cid"]: i for i in old.get("items") or []}
     out = []
-    for b in get(LIST_URL).get("list") or []:
-        try:
-            shown = datetime.strptime(b.get("displayTime") or "", "%Y-%m-%d").replace(tzinfo=GAME_TZ)
-        except ValueError:
-            continue
+    for b in check_list(get(LIST_URL)):
+        shown = datetime.strptime(b["displayTime"], "%Y-%m-%d").replace(tzinfo=GAME_TZ)
         if shown < now - timedelta(days=RECENT_DAYS):
             continue
         cid = str(b.get("cid"))
@@ -140,7 +175,7 @@ def fetch(now: datetime | None = None, get=_get) -> list[dict]:
         if kind_of(title, "") == "其他" and b.get("category") not in (1, 2):
             out.append({"cid": cid, "title": title, "kind": "其他", "published": b.get("displayTime"), "windows": []})
             continue
-        item = item_from(get(ITEM_URL.format(cid=cid)))
+        item = item_from(check_item(get(ITEM_URL.format(cid=cid))))
         item["updated_at"] = b.get("updatedAt")
         out.append(item)
     return out

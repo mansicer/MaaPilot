@@ -26,6 +26,11 @@ def listing(refresh: bool = False, days: float = 3) -> dict:
     if refresh or news.stale(d):
         try:
             d = news.refresh()
+        except news.UpstreamFormat as e:             # 公告接口的格式变了：已记进 sources.json
+            if not d.get("items"):
+                from maapilot.knowledge import sources
+                raise sources.cli_error(e) from None
+            d = {**d, "refresh_error": e.message}
         except Exception as e:                       # noqa: BLE001 - 拉不到就用缓存，并说清楚
             if not d.get("items"):
                 raise CliError("network", f"拉不到官方公告：{type(e).__name__}: {e}", exit=FAILED,

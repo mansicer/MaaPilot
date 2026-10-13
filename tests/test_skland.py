@@ -17,6 +17,7 @@ import pytest
 
 from maapilot import cli, paths
 from maapilot.crew import skland, skland_device
+from maapilot.knowledge import sources
 from maapilot.tools import common, skland_cmd
 
 TOKEN = "TESTTOKEN0123456789abcdefSECRET"
@@ -250,7 +251,8 @@ def test_annihilation_progress_from_campaign(tmp_path, monkeypatch):
     ann = skland.annihilation_of(info)
     assert ann["current"] == 1215 and ann["total"] == 1800
     assert ann["max_kills"]["camp_r_33"] == {"name": "默祷圣祠", "kills": 370}
-    assert skland.annihilation_of({}) is None
+    with pytest.raises(sources.UpstreamFormat, match="campaign"):
+        skland.annihilation_of({})
     from maapilot.tools import maa_cmd
     d = maa_cmd.note_annihilation_progress(1215, 1800)
     assert d["orundum"] == 1215 and d["capped"] is False and d["progress"]["source"] == "skland"
@@ -286,3 +288,53 @@ def test_state_sanity_falls_back_to_ocr(fake, capsys, monkeypatch):
     row = json.loads(log.splitlines()[-1])
     assert row["result"] == {"current": 50, "max": 135, "source": "ocr", "skland_error": True}
     assert TOKEN not in log
+
+
+# --- 接口格式变了 -------------------------------------------------------------------------------------------------------
+
+def _info_without(*path):
+    info = json.loads(json.dumps(INFO))
+    info["campaign"] = {"reward": {"current": 0, "total": 1800}, "records": []}
+    cur = info
+    for k in path[:-1]:
+        cur = cur[k]
+    del cur[path[-1]]
+    return info
+
+
+def test_state_skland_sanity_format_change_is_recorded(fake, capsys):
+    """理智的字段改了名：练度照样写，理智不写，记进 sources.json（doctor --brief 会列出来）。"""
+    _configure()
+    fake.info = _info_without("status", "ap")
+    code, env, _ = run(capsys, "state", "skland")
+    assert code == 0 and env["data"]["sanity"] is None
+    assert json.loads((paths.STATE / "box.json").read_text())["source"] == "skland"
+    assert not (paths.STATE / "sanity.json").exists()
+    (u,) = sources.unhealthy()
+    assert u["source"] == "skland" and u["line"] == "森空岛的数据格式变了（缺 status.ap），理智改用首页识别"
+
+
+def test_state_skland_chars_format_change_fails(fake, capsys):
+    _configure()
+    common.write_json(paths.STATE / "box.json", {"at": "old", "operators": {"x": {}}})
+    fake.info = _info_without("chars")
+    code, env, _ = run(capsys, "state", "skland")
+    assert code == 1 and env["error"]["code"] == "upstream_format" and "缺 chars" in env["error"]["message"]
+    assert env["data"]["source"] == "skland" and env["data"]["field"] == "chars"
+    assert json.loads((paths.STATE / "box.json").read_text())["at"] == "old"
+    assert "干员练度改用 MAA 识别" in sources.unhealthy()[0]["line"]
+
+
+def test_state_sanity_format_change_falls_back_to_ocr(fake, capsys, monkeypatch):
+    from contextlib import nullcontext
+    from maapilot.tools import state
+    _configure()
+    fake.info = _info_without("status", "ap", "current")
+    monkeypatch.setattr(common, "device", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(state, "read_sanity", lambda: {"at": common.iso(), "current": 50, "max": 135, "source": "ocr"})
+    code, env, _ = run(capsys, "state", "sanity")
+    assert code == 0 and env["data"]["source"] == "ocr" and "status.ap.current" in env["data"]["skland_error"]
+    assert sources.unhealthy()[0]["effect"] == "理智改用首页识别"
+    fake.info = _info_without("status", "level")                       # 接口修好了：又读成了
+    code, env, _ = run(capsys, "state", "sanity")
+    assert env["data"]["source"] == "skland" and sources.unhealthy() == []

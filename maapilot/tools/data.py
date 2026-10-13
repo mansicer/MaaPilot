@@ -151,6 +151,9 @@ def cmd_sync(args):
     from maapilot.knowledge import datasync
     try:
         r = datasync.sync(check_only=args.check, server=config.penguin_server())
+    except datasync.UpstreamFormat as e:                 # 表的格式变了：本地的表没换，已记进 sources.json
+        from maapilot.knowledge import sources
+        raise sources.cli_error(e) from None
     except Exception as e:
         raise CliError("sync_failed", f"同步失败（多半是网络）：{type(e).__name__}: {e}", exit=FAILED,
                        hint="稍后再试；本地已有的数据照常能用") from None

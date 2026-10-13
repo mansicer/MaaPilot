@@ -1,0 +1,29 @@
+{
+ "YW-8": {
+  "algorithm": "JustReturn",
+  "sub": [
+   "YW-8@YW-OpenOpt"
+  ],
+  "next": [
+   "YW-8@SideStoryStage",
+   "YW-8@SwipeToStage"
+  ]
+ },
+ "YW-8@SideStoryStage": {
+  "text": [
+   "YW-8"
+  ]
+ },
+ "YW-6@SideStoryStage": {
+  "text": [
+   "YW-6"
+  ]
+ },
+ "YW-OpenOpt": {
+  "algorithm": "JustReturn",
+  "next": [
+   "YW-OpenOcr",
+   "YW-Open"
+  ]
+ }
+}
