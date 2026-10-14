@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,6 +7,7 @@ name = "maapilot"
 version = "0.1.0"
 description = "明日方舟账号助手：给 Claude Code 用的命令行工具"
 requires-python = ">=3.12"
+license = "AGPL-3.0-only"
 dependencies = [
     "MaaFw==5.13.0",
     "MaaAgentBinary==1.0.1",
