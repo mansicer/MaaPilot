@@ -31,6 +31,7 @@ description: 在游戏里给明日方舟干员升级、精英化、升技能、�
 - `training_busy`：训练室在练别人，记进目标笔记，练完再来。
 - `short_materials`：材料不够、合成也补不上，记进目标等日常刷。
 - `prerequisite_not_met`：前置练度不够（专精要精二、技能 7 级要精一），先做前置。
+- 专精这一步 MAA 认不出页面时（多半是要练的人在基建里工作，MAA 认不出他的卡片），命令已经自动改用后备的专精命令做了：有 `data.fallback` 就看它的 `status`，不用再自己换。
 - `operator_not_found`、`shortcut_failed`（MAA 认不出页面）、`not_home`、`maa_failed`：截图看停在哪；换后备命令，再不行就手动做。
 
 其余命令成功时 `data` 有 `before`、`after`（前后的练度）。花了多少命令不算：动手前后各跑一次 `state depot`，对比着汇报。

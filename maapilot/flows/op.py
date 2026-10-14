@@ -258,8 +258,46 @@ def progress(name: str, elite: int | None, skill_level: int | None, mastery: lis
         data = progress_result(name, steps, run, plan)
     except CliError as e:
         e.data = {**(e.data or {}), "plan": plan, "home": home}
-        raise
+        fb = _mastery_fallback_step(e.data)
+        if fb is None or not home:
+            raise
+        return _mastery_fallback(name, e.data, fb, run)
     data.update(plan=plan, home=home)
+    return data
+
+
+# MaaCore 的训练室选人只认卡片上的名字；在基建设施里工作的干员卡片上显示的是设施名（"制造站B201"），
+# 它就找不到人、报 RecognitionFailed（10-14 真机）。专精这一步认不出页面时改用我们自己的专精流程接着做。
+TRAINEE_NOT_FOUND = "select_training_trainee | oper not found"
+
+
+def _mastery_fallback_step(data: dict) -> tuple[int, int] | None:
+    """第一条没做成的是"技能K 专M"且是认不出页面 → (K, M)；否则 None。"""
+    bad = next((r for r in data.get("steps") or [] if r.get("result") != "Success"), None)
+    if not bad or bad.get("detail") != "RecognitionFailed":
+        return None
+    step = bad.get("step") or ""
+    if not (step.startswith("技能") and " 专" in step):
+        return None
+    k, _, m = step[len("技能"):].partition(" 专")
+    return (int(k), int(m)) if k.isdigit() and m.isdigit() else None
+
+
+def _mastery_fallback(name: str, data: dict, km: tuple[int, int], run) -> dict:
+    from maapilot.tools import live_box
+    k, m = km
+    reason = ("训练室选人名单里没认出他（多半在基建设施里工作，卡片上显示的是设施名）"
+              if any(TRAINEE_NOT_FOUND in w for w in run.warnings) else "MAA 认不出页面")
+    try:
+        md = mastery(name, k, m)
+    except CliError as e:
+        e.message = f"干员培养的技能{k} 专{m}没做成（{reason}），改用旧的专精命令也没做成：{e.message}"
+        e.data = {**data, "fallback": {"command": "op mastery", "reason": reason, **(e.data or {})}}
+        raise
+    if md.get("status") == "started" and (md.get("rank") or 0) > 1:
+        live_box.record(name, source="op mastery", mastery={k: md["rank"] - 1})
+    data["fallback"] = {"command": "op mastery", "reason": reason, **md}
+    data["training_started"] = md.get("status") == "started"
     return data
 
 

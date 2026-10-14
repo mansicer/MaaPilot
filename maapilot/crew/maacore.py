@@ -137,6 +137,7 @@ class CoreRun:
     timed_out: bool = False
     error: str | None = None                    # 子进程起不来、加载 / 连接 / 参数失败
     version: str | None = None
+    warnings: list[str] = field(default_factory=list)  # 这次运行里 MaaCore 自己日志（debug/asst.log）的 WRN / ERR 行
 
     @property
     def ok(self) -> bool:
@@ -171,6 +172,8 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
     spec = {"lib": str(lib), "resources": resources, "user_dir": str(user_dir),
             "adb": shutil.which(conn.adb) or conn.adb, "address": conn.address,
             "task": task, "params": params, "instance_options": INSTANCE_OPTIONS}
+    core_log = user_dir / "debug" / "asst.log"
+    log_start = core_log.stat().st_size if core_log.exists() else 0
     t0 = time.monotonic()
     try:
         proc = subprocess.Popen(runner_argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -193,10 +196,23 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
                    encoding="utf-8")
     events, messages = parse(stdout)
     run = CoreRun(proc.returncode, events, messages, log, round(time.monotonic() - t0, 1), timed_out=timed_out,
-                  version=next((e["version"] for e in events if e.get("event") == "version"), version))
+                  version=next((e["version"] for e in events if e.get("event") == "version"), version),
+                  warnings=_core_warnings(core_log, log_start))
     if not timed_out and proc.returncode:
         run.error = RUNNER_EXIT.get(proc.returncode, f"MaaCore 子进程退出码 {proc.returncode}")
     return run
+
+
+def _core_warnings(core_log: Path, start: int) -> list[str]:
+    """MaaCore 日志从 start 字节起的 WRN / ERR 行（回调里没有的细节，如训练室选人没找到）。日志轮转过就从头读。"""
+    try:
+        size = core_log.stat().st_size
+        with core_log.open("rb") as f:
+            f.seek(start if size >= start else 0)
+            text = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    return [line for line in text.splitlines() if "][WRN][" in line or "][ERR][" in line]
 
 
 def parse(stdout: str) -> tuple[list[dict], list[dict]]:

@@ -145,6 +145,9 @@ def _state_op(d):
 def _op_progress(d):
     out = {"steps": [f"{r.get('step')}：{r.get('detail')}" for r in d.get("steps") or []] or None,
            "training_started": d.get("training_started") or None, "home": d.get("home")}
+    fb = d.get("fallback")
+    if fb:
+        out["fallback"] = f"{fb.get('command')}：{fb.get('status')}"
     return {k: v for k, v in out.items() if v is not None}
 
 

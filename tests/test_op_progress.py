@@ -281,3 +281,71 @@ def test_run_task_exit_code_explained(monkeypatch, tmp_path):
 def test_run_task_without_core():
     run = maacore.run_task("OperProgress", {}, label="t", timeout_s=30)
     assert run.error == "没装单独的 MaaCore"
+
+
+# --- 专精认不出页面 → 旧的专精命令兜底 ------------------------------------------------------------
+
+def _progress_env(monkeypatch, run):
+    from maapilot.tools import maa_cmd
+    monkeypatch.setattr(maacore, "find", lambda: ("v6.19.0", Path("x")))
+    monkeypatch.setattr(maa_cmd, "go_home", lambda: True)
+    monkeypatch.setattr(maacore, "run_task", lambda *a, **k: run)
+
+
+NOT_FOUND = "[2026-10-14 16:57:16.543][WRN][Px1][Tx1] select_training_trainee | oper not found 能天使"
+
+
+def test_trainee_not_found_falls_back_to_op_mastery(ops, fake_device, monkeypatch, capsys):
+    from maapilot.tools import live_box
+    _progress_env(monkeypatch, core_run(detail("Failed", "RecognitionFailed"), summary(failed=1),
+                                        warnings=[NOT_FOUND]))
+    calls = []
+
+    def mastery(name, skill, rank):
+        calls.append((name, skill, rank))
+        return {"operator": name, "skill": skill, "status": "started", "rank": 3, "hours": 24}
+    monkeypatch.setattr(op, "mastery", mastery)
+    assert cli.main(["op", "progress", "能天使", "--mastery", "3:3"]) == 0
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert calls == [("能天使", 3, 3)] and d["training_started"] is True
+    assert d["fallback"]["command"] == "op mastery" and "基建设施里工作" in d["fallback"]["reason"]
+    assert d["steps"][0]["detail"] == "RecognitionFailed"                # MaaCore 的原话留着
+    assert live_box.load()["能天使"]["mastery"] == {"3": 2}               # 开了专3 → 至少专2
+
+
+def test_fallback_failure_reports_both(ops, fake_device, monkeypatch, capsys):
+    _progress_env(monkeypatch, core_run(detail("Failed", "RecognitionFailed"), summary(failed=1)))
+
+    def mastery(name, skill, rank):
+        raise CliError("short_materials", "材料不够，没开专精：x", data={"status": "blocked: x"})
+    monkeypatch.setattr(op, "mastery", mastery)
+    assert cli.main(["op", "progress", "能天使", "--mastery", "3:2"]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["error"]["code"] == "short_materials"
+    assert "改用旧的专精命令也没做成" in out["error"]["message"] and "MAA 认不出页面" in out["error"]["message"]
+    assert out["data"]["fallback"]["status"] == "blocked: x" and out["data"]["steps"][0]["step"] == "技能3 专2"
+
+
+@pytest.mark.parametrize("args,rows", [
+    (["--mastery", "3:3"], [detail("Failed", "ResourceInsufficient")]),           # 别的失败不兜底
+    (["--elite", "2", "--allow-catalyst", "--mastery", "3:1"],                      # 精英化认不出页面不进训练室
+     [detail("Failed", "RecognitionFailed"), detail("Skipped", "Interrupt")]),
+])
+def test_no_fallback_otherwise(ops, fake_device, monkeypatch, capsys, args, rows):
+    _progress_env(monkeypatch, core_run(*rows, summary(failed=1)))
+    monkeypatch.setattr(op, "mastery", lambda *a: pytest.fail("不该兜底"))
+    assert cli.main(["op", "progress", "能天使", *args]) == 1
+
+
+def test_run_task_collects_core_log_warnings(monkeypatch, tmp_path):
+    log = maacore.root() / "userdir" / "debug" / "asst.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("[t][WRN][P][T] old warning\n", encoding="utf-8")
+    _fake_core(monkeypatch, tmp_path, f"""
+        import sys
+        sys.stdin.read()
+        with open({str(log)!r}, "a", encoding="utf-8") as f:
+            f.write("[t][INF][P][T] fine\\n{NOT_FOUND}\\n")
+    """)
+    run = maacore.run_task("OperProgress", {}, label="t", timeout_s=30)
+    assert run.warnings == [NOT_FOUND]

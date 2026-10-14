@@ -599,6 +599,9 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 5、6 星精二要双芯片：MaaCore 会在制造站造（造完改回原产物），**芯片助剂不够时会用采购凭证去采购中心买，关不掉**，
 所以练度快照（`state skland` / `state box`）里还没到精二时要加 `--allow-catalyst`，否则退出码 2 `needs_consent`、不碰模拟器。
 `steps` 按 MaaCore 的执行顺序对应参数里的各项；只回了一条失败、后面都没做时是"找干员"失败（列表里没找到、或页面认不出）。
+专精这一步报 `RecognitionFailed`（MaaCore 的训练室选人只认卡片上的名字，在基建设施里工作的干员卡片上显示的是设施名，它就找不到人）时，
+命令自动改用 `op mastery` 的流程开同一级（`data.fallback`：`{command: "op mastery", reason, …op mastery 的 data}`；`steps` 里仍是 MaaCore 的原话）。
+兜底开成了退出码 0、`training_started` 跟着它；兜底也没做成就报它的错，`error.message` 两边的原因都写上。精英化、技能等级不进训练室，不兜底。
 
 ```json
 // op upgrade
