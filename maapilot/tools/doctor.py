@@ -510,8 +510,18 @@ def brief(probe: Probe | None = None) -> dict:
     data["goals"] = goals_brief()
     data["news"] = news_brief()
     data["sources"] = sources_brief()
+    data["live_suspects"] = live_suspects_brief()
     data["lines"] = brief_lines(data)
     return data
+
+
+def live_suspects_brief() -> list[dict]:
+    """现场读到的练度，一天后的快照还没追上（可能读错了，已经不再采用）。"""
+    try:
+        from maapilot.tools import live_box
+        return live_box.suspects()
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return []
 
 
 def sources_brief() -> list[dict]:
@@ -577,6 +587,9 @@ def brief_lines(d: dict) -> list[str]:
     for x in d.get("sources") or []:
         lines.append(f"外部数据：{x['message']}" + (f"，{x['effect']}" if x.get("effect") else "")
                      + "（要开发者修；用户问起或受影响时用玩家的话说明，见 maapilot-recovery）")
+    for x in d.get("live_suspects") or []:
+        lines.append(f"练度可能读错了：{x['name']} 在 {str(x.get('at') or '')[5:16].replace('T', ' ')} 由 {x.get('source')} 读到的练度，"
+                     "一天后森空岛还比它低，已经不再采用；在游戏里看一眼是哪边对，告诉用户（要开发者查的话也说）")
     for p in d.get("unseen_problems") or []:
         lines.append("还没告诉用户的问题：" + " ".join(p.get("lines") or [p.get("run_id") or "?"])
                      + f"（运行 {p.get('run_id')}；告诉用户后 report seen {p.get('run_id')}）")

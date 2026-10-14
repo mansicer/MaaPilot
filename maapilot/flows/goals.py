@@ -553,6 +553,8 @@ def verify(object_text: str | None) -> dict:
         out["why"].append(f"干员识别里没有{name}")
         return out
     out["current"] = {k: owned.get(k) for k in ("elite", "level", "skill_level", "skills", "modules") if k in owned}
+    if owned.get("live"):
+        out["live"] = owned["live"]                     # 有几项用的是现场读数（森空岛还没更新）
     short, why = [], []
 
     def miss(part, target, current):
@@ -624,11 +626,14 @@ def remove(title, status, reason=None, confirmed: bool = False) -> dict:
         if check["verified"] is False and not confirmed:
             raise CliError("not_achieved", f"「{sec.title}」按快照看还没做完", exit=NEEDS_USER,
                            hint="告诉用户哪里没到，只有用户能决定算不算完成；用户说算，再加 --confirmed-by-user",
-                           data={k: check.get(k) for k in ("short", "current", "depot_at", "box_at") if k in check})
+                           data={k: check.get(k) for k in ("short", "current", "depot_at", "box_at", "live") if k in check})
         if confirmed and check["verified"] is not True:
             ended += "（用户确认" + (f"：快照里还没到 {_short_text(check['short'])}" if check["short"] else "") + "）"
         elif check["verified"] is None:
             ended += "（没能核对：" + "；".join(check["why"] or ["不知道原因"]) + "）"
+        elif check.get("live"):
+            lv = check["live"]
+            ended += f"（已核对：快照加 {str(lv.get('at') or '')[5:16].replace('T', ' ')} {lv.get('source')} 的现场读数）"
         else:
             ended += "（已核对快照）"
     elif confirmed:

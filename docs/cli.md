@@ -141,6 +141,7 @@
 `lines` 同 `news list`，`due` 是到点还没告诉用户的时间点的 key（`lines` 里也写一行，agent 按 `maapilot-events` 去说）。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
+`live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
 
 ## screen —— 截图与识别（只读，不拿锁）
 
@@ -414,7 +415,7 @@ token 不出现在任何输出、日志、报错里；agent 读不了也改不�
 |---|---|---|
 | `state depot` | MAA 仓库识别（Depot），自动从首页进仓库 | `private/state/depot.json` |
 | `state box` | MAA 干员识别（OperBox）：精英化、等级、稀有度、潜能 | `private/state/box.json` |
-| `state op <干员>` | 进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，约一分钟；不存快照）。专精、模组读不了（`unread` 列出没读到的） | — |
+| `state op <干员>` | 进这名干员的干员页读精英化、等级、技能等级（MaaFramework，只读，约一分钟；不改 `box.json`，记成现场练度，见「goals」）。专精、模组读不了（`unread` 列出没读到的） | `live.json` |
 | `state skland [--op <名>…]` | 从森空岛读（**不碰模拟器、不拿锁**，要先接森空岛，见「skland」）：每名干员的精英化、等级、稀有度、潜能，**加上**技能等级、各技能专精、模组（等级、装没装）；顺手更新理智 | `box.json`（`source: "skland"`）、`sanity.json` |
 | `state sanity` | 接了森空岛就从森空岛读（准、几秒、**不碰模拟器、不拿锁**，`source: "skland"`）；没接或读不到（`skland_error`）才回首页 OCR 右上角的理智（大号的当前值 + 下面的"理智/上限"，`source: "ocr"`）。OCR 读数比上一份快照推出来的（6 分钟 1 点）少 20 以上时带 `suspect: true`、`estimate`（推算值）、`shot`（首页截图）和 `hint`：首页数字上压着图标，真机读错过（130 → 29、114 → 4）；用户自己打过关时读数低也正常，以截图为准 | `private/state/sanity.json` |
 | `state show [depot\|box\|sanity] [--item <名>…] [--op <名>…]` | 读快照，不碰模拟器；不写种类时给三样里有的 | — |
@@ -539,7 +540,15 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 **完成前核对**（`remove --status 完成`）：只读 `state/` 快照对照对象。干员：精英化与等级、技能等级、各技能专精、模组逐项比；材料：仓库够不够（同 `calc need` 的 `short`）；
 关卡、活动、其他核对不了。有一项没到 → 退出码 3（`not_achieved`，`data.short` 是 `[{part, target, current}]`、`current`、`depot_at` / `box_at`），不挪：
 只有用户能决定算不算完成，用户说算就加 `--confirmed-by-user` 再跑（结束行记"用户确认：快照里还没到 …"）。核对不了（没快照、快照里没有这一项）不拦，结束行记"没能核对：…"；
-都到了记"已核对快照"。输出多 `verified`（`true` / `false` / `null`；放弃时 `null`）和 `check: {short, why, depot_at, box_at}`。
+都到了记"已核对快照"；有几项是靠现场练度才到的（见下）记"已核对：快照加 <时间> <命令> 的现场读数"。
+输出多 `verified`（`true` / `false` / `null`；放弃时 `null`）和 `check: {short, why, depot_at, box_at, live}`。
+
+**现场练度**（`private/state/live.json`，`maapilot/tools/live_box.py`）：森空岛的练度会滞后（10-14 实测：专精练完 15 分钟后还是旧的，
+几小时后才更新；社区有一天不更新的报告），而刚做完培养时最要用练度。所以我们的命令在游戏里读到 / 做成的练度记下来：
+`op progress` 成功的项（专精只有 `AlreadySatisfied` 是现场读到的当前等级；开练的只说明至少到了前一级）、`op upgrade` 做完核对读到的、`state op`。
+读干员快照的地方（`goals remove` 的核对、`calc need`、目标占用的材料、目标排序）都按项取快照和现场练度里高的（练度只会涨；精英化与等级连起来比），
+用到了现场读数的干员带 `live: {at, source, parts}`。快照追上来的条目下次记录时清掉；记下一天后、更晚的快照还比它低的不再采用，
+`doctor --brief` 的 `live_suspects` 列出来（可能读错了）。`state show box` 和 `box.json` 本身仍是快照原样。
 
 ```json
 // goals list
@@ -865,7 +874,7 @@ private/
   setup.json         setup 完成的标记
   goals.md           进行中的目标
   goals-done.md      完成或放弃的目标
-  state/             depot.json  box.json  sanity.json（最新快照）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
+  state/             depot.json  box.json  sanity.json（最新快照）  live.json（现场练度）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
                      sources.json（外部数据源的格式健康：{来源: {last_ok, last_error, recent}}）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   cache/copilot/     copilot strip 存的去掉练度要求的作业
@@ -964,7 +973,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ### state/
 
 `depot.json`：`{"at": iso, "items": {"<id>": count}}`；`box.json`：`{"at": iso, "operators": {"<名>": {"id", "rarity", "elite", "level", "potential"}}}`；
-`sanity.json`：`{"at": iso, "current": n, "max": n}`。
+`sanity.json`：`{"at": iso, "current": n, "max": n}`；
+`live.json`：`{"operators": {"<名>": {"elite", "level", "skill_level", "mastery": {"<技能>": 专几}, "at", "source"}}}`（只有读到的项，都是下界）。
 
 ### log/
 

@@ -365,6 +365,10 @@ def cmd_op(args):
             up.leave_list_unfiltered(g)
         except Exception:                                # noqa: BLE001 - 清筛选失败不影响读到的数
             pass
+        if cur["elite"] is not None:                     # 现场读到的：森空岛滞后时补上（live_box）
+            from maapilot.tools import live_box
+            live_box.record(args.name, source="state op", elite=cur["elite"], level=cur["level"],
+                            skill_level=cur["skill"])
         return {"name": args.name, "rarity": info.get("rarity"), "elite": cur["elite"], "level": cur["level"],
                 "skill_level": cur["skill"], "at": common.iso(), "shot": rel(shot),
                 "unread": ["专精", "模组"] + ([] if cur["level"] is not None else ["等级"])

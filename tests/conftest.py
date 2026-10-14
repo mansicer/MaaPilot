@@ -21,5 +21,8 @@ def _tmp_private(tmp_path, monkeypatch):
     def _no_device(ocr=False, readonly=False):
         raise CliError("screen_failed", "测试里没有模拟器", exit=ENVIRONMENT)
     monkeypatch.setattr(common, "connect", _no_device)
+    # 本机正好有人在用 maa（用户的 agent 在打作业）时，拿锁的测试不该跟着失败（要测的测试自己换掉）
+    from maapilot.crew import lock
+    monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
     yield tmp_path / "private"
     paths.set_private(old)

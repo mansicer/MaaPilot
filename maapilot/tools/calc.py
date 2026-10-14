@@ -78,9 +78,18 @@ def depot_snapshot() -> tuple[dict, str | None]:
     return dict(snap.get("items") or {}), snap.get("at")
 
 
-def box_snapshot() -> tuple[dict, str | None]:
+def raw_box_snapshot() -> tuple[dict, str | None]:
+    """box.json 原样（森空岛 / MAA 识别读的）。"""
     snap = common.read_json(_state("box")) or {}
     return dict(snap.get("operators") or {}), snap.get("at")
+
+
+def box_snapshot() -> tuple[dict, str | None]:
+    """干员快照，叠上现场练度（maapilot.tools.live_box：森空岛滞后时，我们刚在游戏里读到 / 做成的更高的练度）。
+    用到现场读数的干员带 `live`。"""
+    from maapilot.tools import live_box
+    box, at = raw_box_snapshot()
+    return live_box.overlay(box, at), at
 
 
 def _state(kind: str):

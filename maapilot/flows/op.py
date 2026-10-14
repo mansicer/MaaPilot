@@ -55,6 +55,10 @@ def upgrade(name: str, elite: int | None, level: int | None, skill: int | None) 
         if recovered:
             data["recovered"] = recovered
         reached = res.get("reached") and (skill is None or (after["skill"] or 0) >= skill)
+        if after["elite"] is not None:                 # 做完回干员页读的：记成现场练度（森空岛会滞后）
+            from maapilot.tools import live_box
+            live_box.record(name, source="op upgrade", elite=after["elite"], level=after["level"],
+                            skill_level=after["skill"])
         if not reached:
             raise CliError("shortcut_failed", f"{name} 没到目标练度（现在 {after}）",
                            hint="screen shot 看看停在哪，在界面上接着做", exit=FAILED,
@@ -179,7 +183,7 @@ def progress_plan(name: str, elite: int | None, skill_level: int | None, mastery
     return plan, steps
 
 
-def progress_result(name: str, steps: list[str], run) -> dict:
+def progress_result(name: str, steps: list[str], run, plan: dict | None = None) -> dict:
     """MaaCore 的回调 → data；没做成抛 CliError（data 同结构）。"""
     details = run.extra("OperProgressDetail")
     summary = (run.extra("OperProgressSummary") or [None])[-1]
@@ -196,6 +200,8 @@ def progress_result(name: str, steps: list[str], run) -> dict:
         if "skill_mastery" in d:
             row["skill_mastery"] = d["skill_mastery"]
         rows.append(row)
+    from maapilot.tools import live_box
+    live_box.from_progress(name, plan or {}, rows)
     data = {"operator": name, "steps": rows,
             "summary": None if summary is None else {k: summary.get(k) for k in ("success", "failed", "skipped")},
             "training_started": any(r["detail"] in ("Completed", "PrerequisiteTraining") and r["step"].startswith("技能")
@@ -249,7 +255,7 @@ def progress(name: str, elite: int | None, skill_level: int | None, mastery: lis
             run = maacore.run_task("OperProgress", {"plans": [plan]}, label="op-progress", timeout_s=PROGRESS_TIMEOUT_S)
         home = maa_cmd.go_home()                        # 做完停在干员页；回首页，后面的命令从首页开始
     try:
-        data = progress_result(name, steps, run)
+        data = progress_result(name, steps, run, plan)
     except CliError as e:
         e.data = {**(e.data or {}), "plan": plan, "home": home}
         raise
