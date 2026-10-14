@@ -291,6 +291,8 @@ def cmd_check(args):
 
 
 def cmd_allow(args):
+    from maapilot.tools import confirm
+    confirm.require("这笔花费")                                       # 定时日常里不记；会话里 agent 已在对话里问过用户
     return allow(args.item, args.amount, args.reason)
 
 
@@ -305,7 +307,7 @@ def register(sub) -> None:
     p.set_defaults(func=cmd_snapshot, command="guard snapshot")
     p = gs.add_parser("check", help="再读一次，与快照对账")
     p.set_defaults(func=cmd_check, command="guard check")
-    p = gs.add_parser("allow", help="记下用户同意的一笔花费（会弹权限确认）")
+    p = gs.add_parser("allow", help="记下用户在对话里同意的一笔花费（定时日常里一律拒绝）")
     p.add_argument("item", help="源石 或 合成玉")
     p.add_argument("amount", type=int)
     p.add_argument("--reason", required=True, help="用户同意了什么")

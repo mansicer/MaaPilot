@@ -53,7 +53,8 @@ from maapilot.flows.daily.preflight import (  # noqa: F401
 from maapilot.flows.daily.steps import _finish, _steps, run  # noqa: F401
 from maapilot.flows.daily.cron import (  # noqa: F401
     _CRON_HM, _OLD_MARKS, _TIME, TAG, _crontab, _entries, _mine, _next_at, _old, _parse_times, _path_dirs,
-    _times_of, cron_lines, read_crontab, schedule, schedule_info, status, unschedule, write_crontab)
+    _times_of, check_confirmed, unconfirmed, cron_lines, read_crontab, record_confirmed, schedule, schedule_cmd, schedule_info, status,
+    unschedule, unschedule_cmd, write_crontab)
 
 
 # --- 命令 ------------------------------------------------------------------------------------------------------------
@@ -92,8 +93,8 @@ def register(sub) -> None:
     p.add_argument("--times", help="HH:MM[,HH:MM]；默认 config.yaml 的 schedule")
     p.add_argument("--replace-old", action="store_true", help="同时删掉旧版 MaaPilot 的定时任务")
     p.add_argument("--dry-run", action="store_true", help="只给出改完的 crontab，不写")
-    p.set_defaults(func=lambda a: schedule(a.times, a.replace_old, a.dry_run), command="daily schedule")
+    p.set_defaults(func=lambda a: schedule_cmd(a.times, a.replace_old, a.dry_run), command="daily schedule")
 
     p = gs.add_parser("unschedule", help="取消本项目的定时任务")
     p.add_argument("--dry-run", action="store_true")
-    p.set_defaults(func=lambda a: unschedule(a.dry_run), command="daily unschedule")
+    p.set_defaults(func=lambda a: unschedule_cmd(a.dry_run), command="daily unschedule")

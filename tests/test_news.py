@@ -58,7 +58,7 @@ def test_schedule_lines_due_and_told(capsys):
     assert any(l.startswith("10月9日 12:00 开始：昨日海") for l in lines)
     keys = [e["key"] for e in news.events(d)]
     assert len(keys) == len(set(keys))                                  # 同一时刻开始的几段只算一个
-    assert news.due(d, at(10, 9, 11)) == []
+    assert [e["key"] for e in news.due(d, at(10, 9, 11))] == ["6774:公告"]      # 还没开始：先说一声有新活动
     due = news.due(d, at(10, 9, 12, 30))
     assert {e["what"] for e in due} == {"维护结束", "开始"}
     news.mark_told([e["key"] for e in due], at(10, 9, 12, 31))
@@ -78,6 +78,31 @@ def test_watch_ends_on_due_schedule(monkeypatch):
     cache(EVENT, MAINT)
     monkeypatch.setattr(news, "stale", lambda d=None, now=None: False)
     real_due = news.due
-    monkeypatch.setattr(news, "due", lambda d=None, now=None, within_h=24: real_due(d, at(10, 9, 12, 30)))
+    monkeypatch.setattr(news, "due", lambda d=None, now=None: real_due(d, at(10, 9, 12, 30)))
     out = watch.watch(timeout_min=1, sleep=lambda s: pytest.fail("不该等"))
     assert out["kind"] == "news" and {e["what"] for e in out["due"]} == {"维护结束", "开始"}
+
+
+def test_new_announcements_are_due_before_they_start():
+    d = cache(EVENT, MAINT)
+    due = news.due(d, at(10, 8, 9))
+    assert [(e["what"], e["cid"]) for e in due] == [("公告", "6774"), ("公告", "5699")]      # 按发布先后
+    m = due[1]
+    assert m["kind"] == "维护" and m["start"] == at(10, 9, 6).isoformat() and m["forced_update"] is True
+    news.mark_told(["6774:公告"], at(10, 8, 9, 1))
+    assert [e["key"] for e in news.due(None, at(10, 8, 9, 2))] == ["5699:公告"]
+    assert [e["key"] for e in news.due(None, at(10, 9, 12, 30))] == ["6774:2026-10-09T12:00:00+08:00", "5699:维护结束"]
+
+
+def test_reminders_last_a_few_days_not_forever():
+    d = cache(EVENT, MAINT)
+    assert {e["what"] for e in news.due(d, at(10, 11, 11))} == {"维护结束", "开始"}         # 两天没开会话也补上
+    assert news.due(d, at(10, 13, 13)) == []                                               # 过了三天就不再提
+    assert [e["what"] for e in news.due(d, at(10, 16, 17))] == ["开始"]                     # 后一段开始
+
+
+def test_announcement_skipped_once_its_event_was_told():
+    d = cache(EVENT)
+    d["told"] = {"6774:2026-10-09T12:00:00+08:00": "x"}
+    news.save(d)
+    assert news.due(None, at(10, 8, 9)) == []

@@ -32,7 +32,7 @@ DENIED = ("Permission for this tool use was denied", "Permission for this action
 _STANDARD = re.compile(r"^(maapilot\s[^|;&<>`$\n]*|maapilot|sleep 300)$")
 _QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|\'[^\']*\'')         # 引号里的 | ; 等不算（如 --find "a|b"）
 # 开发会话的迹象：改代码、跑测试、提交
-_DEV_PATH = re.compile(r"/(maapilot|tests|docs)/|/\.claude/skills/|CLAUDE(_DEV)?\.md$")
+_DEV_PATH = re.compile(r"/(maapilot|tests|docs)/|/\.(claude|agents)/skills/|(CLAUDE|CLAUDE_DEV|AGENTS)\.md$")
 _DEV_BASH = re.compile(r"\bpytest\b|\bgit (commit|diff|add)\b|CLAUDE_DEV\.md")
 
 

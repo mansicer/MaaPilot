@@ -68,6 +68,12 @@
 
 "放行"的命令不弹确认；"询问"的每次都弹 Claude Code 的权限确认，无头运行（`claude -p`）里一律被拒。
 
+**要用户同意的命令**：`guard allow`、`daily schedule / unschedule`（有改动时）、`reset`（不带 `--dry-run`）。用户可能远程连着会话、不在这台电脑前，
+所以不弹本机的框：agent 先在对话里问清楚（花多少、改成什么、会执行哪些程序），用户在对话里同意后再跑（`maapilot/tools/confirm.py`）。
+- 定时日常叫起的无头 agent 里（环境带 `MAAPILOT_DAILY_RUN`）：用户不在场，直接退出码 3 `needs_user`，什么也没做；
+- 会话里的把关靠 agent 守 AGENTS.md 硬规则，加上宿主的权限设置（Claude Code：这几条是"询问"，远程也能点）；
+  `private/guard/` 下的记录文件 agent 改不改得了，仍靠宿主的权限 / 沙箱（Claude Code：拒绝编辑 `private/guard/**`）。
+
 ---
 
 ## doctor —— 环境检查
@@ -138,10 +144,13 @@
 `lines` 是给会话开头看的几行中文摘要。`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（`seen.json` 不算；读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有官服、有缓存时才有，否则 `null`）：
-`lines` 同 `news list`，`due` 是到点还没告诉用户的时间点的 key（`lines` 里也写一行，agent 按 `maapilot-events` 去说）。
+`lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说）。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
+`memory`：用户偏好记录 `{dir: "private/memory", index: [MEMORY.md 里的 "- …" 行], imported}`（没设置过为 `null`）。偏好由 agent 读写（格式见 `AGENTS.md`「用户偏好」），
+不依赖哪个 agent 的记忆功能。还没有 `private/memory/` 时，第一次启动检查把 Claude Code 给这个项目记的自动记忆整个复制过来（原来的不删），`imported` 是复制的文件名。
+`schedule_unconfirmed`：定时日常要执行的程序改过、用户还没确认（见「daily」的 `daily schedule`）：`{名: {confirmed, now}}` 或 `null`，`lines` 里写一行。
 
 ## screen —— 截图与识别（只读，不拿锁）
 
@@ -367,8 +376,11 @@ token 不出现在任何输出、日志、报错里；agent 读不了也改不�
 ```
 
 - **时间点**（`upcoming` / `due` 的每一项）：维护公告给 `维护开始`、`维护结束`（key `<cid>:维护开始` / `<cid>:维护结束`；维护时段取标签带"维护"的那段，没有就取第一段）；
-  活动公告每个开始时刻一个 `开始`（key `<cid>:<开始时刻>`；同一刻开始的几段算一个，`end` 取最长的）。`forced_update`：正文写了强制更新 / 重新下载和安装。
-- `upcoming`：接下来 `--days` 天内的时间点。`due`：最近 24 小时内到点、还没 `told` 的 `维护结束` / 活动 `开始`（会话里的 agent 该按 `maapilot-events` 去跟用户说了）。
+  活动公告每个开始时刻一个 `开始`（key `<cid>:<开始时刻>`；同一刻开始的几段算一个，`end` 取最长的）；
+  活动、维护公告本身还有一个 `公告`（key `<cid>:公告`，`at` 是发布日，带 `kind`、`start`（最早开始）、`end`（最晚结束）、`forced_update`）。`forced_update`：正文写了强制更新 / 重新下载和安装。
+- `upcoming`：接下来 `--days` 天内的时间点。`due`：还没 `told`、会话里的 agent 该按 `maapilot-events` 去跟用户说的：
+  `公告`（新的活动 / 维护公告，还没开始；同一条公告别的时间点已经 `told` 过的不算），活动 `开始`（开始后 72 小时内、还没结束），`维护结束`（结束后 72 小时内）。
+  公告缓存超过 6 小时 `daily watch` 会顺手重拉，所以新公告一般几小时内就提醒。
 - `maintenance_now`：现在在不在某条维护公告的维护时段里。`lines`：正在维护、接下来几天的维护和活动开始、进行中的活动，给启动检查和转述用。
 - `daily run` 开头（缓存旧了重拉、维护中不跑）、`daily watch`（`due` 不空就结束）、`doctor --brief`（只读缓存）都用这份缓存。
 
@@ -631,6 +643,8 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 | `operator_not_found` / `prerequisite_not_met` | 1 | `op progress`：干员列表里没找到；前置练度不够（专精要精二，技能 7 级要精一） |
 | `not_home` / `maa_failed` | 1 | `op progress`：开始前回不到首页；MaaCore 连不上模拟器、超时（60 分钟）、没给结果 |
 | `needs_consent` | 2 | `op progress`：5、6 星精二可能花采购凭证买芯片助剂，问过用户再加 `--allow-catalyst` |
+| `needs_user` | 3 | `guard allow`、`daily schedule / unschedule`、`reset`：要用户在会话里同意，定时日常里一律拒绝（`needs_user`）。什么都没做，写进汇报等用户回来 |
+| `config_unconfirmed` | 3 | 定时日常：`config.yaml` 里要执行的程序改过、用户还没在会话里确认、重跑 `daily schedule`（`data.changed`），这次不跑 |
 | `maacore_missing` / `maacore_broken` | 5 | `op progress`：没装单独的 MaaCore 或低于 v6.19.0（`doctor --fix`）；本体或资源加载失败 |
 | `not_restored` | 1 | `craft` 双芯片：造好了，但制造站没改回原产物（`data.original`、`shot`） |
 | `not_bought` | 1 | `craft` 兑换：确认之前停下了，什么都没花（余额不够、找不到商品、确认框对不上） |
@@ -650,7 +664,7 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 |---|---|
 | `guard snapshot` | 记下现在的源石、合成玉 → `private/guard/snapshot.json`。**上次对账之后跑过可能花东西的命令**（`private/guard/dirty.json` 在）又已有快照时，改做一次 `check`（`checked_instead: true`，不过就退出码 3），不重记起点：agent 不能靠重记快照抹掉自己的花费。停机中退出码 3（`guard_stop`） |
 | `guard check` | 再读一次，与快照比。减少的部分扣掉快照之后记下的、还没用完的 `allow`（按时间先后，一笔可以分几次用）；还有没放行的减少 → 退出码 3（`currency_decreased`），写 `private/guard/stop.json`，快照不动。通过则更新快照、删掉 `stop.json`。还没有快照时把这次的数记为起点（`baseline: true`） |
-| `guard allow <源石\|合成玉> <数量> --reason <用户同意了什么>` | 记下用户同意的一笔花费 → `private/guard/allowances.jsonl`。**权限设置里是"询问"**：每次弹确认 |
+| `guard allow <源石\|合成玉> <数量> --reason <用户同意了什么>` | 记下用户同意的一笔花费 → `private/guard/allowances.jsonl`。每次都要用户先在对话里同意；定时日常里一律拒绝（见「命令总览」的要用户同意的命令） |
 | `guard status` | 快照、未用的放行、是否停机中、上次对账后动过什么（`dirty`）（不碰模拟器） |
 
 **dirty**：`input …`、`maa …`（`startup`、`closedown` 除外）、`op …`、`craft` 拿到模拟器锁时记进 `private/guard/dirty.json`；
@@ -761,7 +775,12 @@ agent 结束（或超时被杀）后日常换一次锁的 token：它留下还�
 时限 = 次数 × `daily.farm_min_per_fight`（默认 3）+ `daily.farm_timeout_margin_min`（默认 15）分钟；理智超上限（如 358/205）照算。完全读不到理智才用 `task_timeout_min`。
 算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（Bash 超时 10 分钟）、刷图分批。
 
-`daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`（权限"询问"）：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行：
+`daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行。
+输出带 `exec`：定时日常要执行的程序（`tools.maa`、`tools.claude`、`emulator.adb`）的完整路径；agent 先用 `--dry-run` 看，在对话里跟用户说清时间和这几个程序，
+用户同意后再跑。写完把这几个程序记进 `private/guard/schedule.json`。crontab 要变、或程序和记下的不一样时，定时日常里一律拒绝（`needs_user`）。
+定时日常（`--trigger schedule`）开始时对一对：`config.yaml` 里这几个程序和记下的不一样 → 退出码 3 `config_unconfirmed`（`data.changed`），这次不跑；
+`doctor --brief` 的 `schedule_unconfirmed` 也列出来，让会话里的 agent 告诉用户、用户同意后重跑 `daily schedule`。还没记过（旧版装的）时记下现在的。
+`daily unschedule` 有本项目的行要删时，定时日常里同样拒绝。每行：
 
 ```
 40 4 * * * PATH=<maa、claude、adb 所在目录>:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin PYTHONUTF8=1 <仓库>/maapilot daily run --trigger schedule >> <仓库>/private/log/cron.log 2>&1 # maapilot-v2 <仓库>
@@ -778,8 +797,8 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 "schedule": {"installed": true, "times": [...], "old_entries": [...]}, "next_at": "…"}`。
 
 `daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果；
-或者等到官方日程到点（维护结束、活动开始，还没 `news told` 的）。
-会话里的 agent 一直在后台挂着一个（`CLAUDE.md`「盯着日常」），结束就告诉用户、`report seen`、再挂一个。每 20 秒看一次汇报（`private/reports/*.json` 的 `status`、`finished_at`）和运行标记；
+或者等到官方日程有消息（新公告、维护结束、活动开始，还没 `news told` 的）。
+会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯着日常」，环境支持后台叫醒时），结束就告诉用户、`report seen`、再挂一个。每 20 秒看一次汇报（`private/reports/*.json` 的 `status`、`finished_at`）和运行标记；
 只认命令开始之后跑完的（`finished_at` 晚于开始时间）。等着的那次进程没了而汇报还写着 `running` → 当成 `aborted`（`alerts` 里写明）。
 每次也看一眼官方日程（只有官服；有缓存而旧了顺手重拉，没缓存不拉；出错当没有）：`news` 的 `due` 不空 → 退出码 0，
 `data: {kind: "news", due: [时间点…], lines: [...], seen: false}`（时间点同「news」），agent 按 `maapilot-events` 跟用户说、`news told <key>…`、再挂一个。
@@ -800,7 +819,7 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 
 ## reset —— 从头设置
 
-`maapilot reset [--dry-run] [--memory]`（权限"询问"；不碰模拟器）
+`maapilot reset [--dry-run] [--memory]`（不碰模拟器；用户在对话里同意后才跑；定时日常里拒绝）
 
 用户说要从头设置时用。**什么都不删**：
 1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令或接管的 agent 在操作，退出码 4 `busy`，`data.holder`）、
@@ -809,8 +828,10 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
 3. `private/` 整个改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、`setup.json`、目标、快照、日志、汇报、截图、对账都在里面）；
    再把备份里的 `maa-config/`（maa-cli 的配置与任务模板）复制回新的 `private/maa-config/`。之后 `doctor --brief` 的 `next` 是 `setup`。
    恢复：把新建的 `private/` 挪开，把备份改回 `private`（`data.private.restore` 写着）。
-4. `--memory`（默认不动）：Claude Code 给这个项目目录记的自动记忆 `<~/.claude 或 $CLAUDE_CONFIG_DIR>/projects/<仓库绝对路径里非字母数字都换成 ->/memory/`
-   也改名成旁边的 `memory.bak-<时间>`。测试用 `MAAPILOT_CLAUDE_PROJECTS_DIR` 换掉 projects 目录。
+4. 用户偏好 `private/memory/` 默认也从备份复制回新的 `private/`（偏好留着）。
+   `--memory`：偏好不留——不复制回来；Claude Code 给这个项目目录记的自动记忆（偏好以前的位置，
+   `<~/.claude 或 $CLAUDE_CONFIG_DIR>/projects/<仓库绝对路径里非字母数字都换成 ->/memory/`）也改名成旁边的 `memory.bak-<时间>`，免得启动检查又搬回来。
+   测试用 `MAAPILOT_CLAUDE_PROJECTS_DIR` 换掉 projects 目录。
 5. 留着：`.venv`、`data/`、`resource/`、maa-cli 本身和它的资源。
 
 `--dry-run` 只列出会挪什么、删哪几行，什么都不动。
@@ -820,7 +841,7 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
  "crontab": {"remove": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "removed": ["…"], "other_lines_kept": true},
  "private": {"move": "/…/private", "to": "/…/private.bak-20261002-1700", "entries": ["config.yaml", "goals.md", "log", …],
              "restore": "mv … …", "keep_maa_config": "/…/private/maa-config"},
- "memory": {"move": null, "note": "没带 --memory：自动记忆不动"},
+ "memory": {"move": null, "note": "没带 --memory：用户偏好（private/memory/）留着"},
  "keep": ["/…/.venv", "/…/data", "/…/resource", "maa-cli（及它的资源）"], "next": "setup"}
 ```
 
@@ -863,7 +884,7 @@ macOS 会弹窗问终端能否改 crontab，要用户点允许。
  "transcripts": {"dir": "…", "sessions": [{"session", "label", "start", "end", "prompt", "result", "bash", "denied"?, "maapilot_failed"?, "tool_errors"?, "bash_nonstandard"?}], "excluded": [{"session", "why"}]}}
 ```
 
-不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
+不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
 
 ---
 
@@ -1090,8 +1111,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 - `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`news …` 只联网、写自己的缓存；`game update` 要下载、覆盖安装游戏，
   但只装官网的包（地址只认官方域名），无头运行里日常要靠它更新，所以都放行。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
-- `reset` 在 **ask** 里：挪走用户的全部设置和数据，用户在确认框里点同意才做；无头运行里一律被拒（命令自己也拒绝）。
-- `guard allow` 必须在 **ask** 里：这是代码里唯一的硬防线，用户在确认框里点同意才算数。
+- `reset`、`guard allow`、`daily schedule / unschedule` 要用户在对话里同意（见「命令总览」的要用户同意的命令）；权限设置里是 **ask**，
+  再弹一次 Claude Code 的权限确认（远程也能点）。无头运行里命令自己就拒绝，换了宿主也一样。
 - 直接 `maa run` / `maa fight` 被拒：绕过了锁和对账，一律经 `maapilot maa`。setup 里装 maa-cli（`maa install`、`maa update`）不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写。
 - 森空岛的 token：`skland token` 只能由用户自己在终端里跑（拒绝），`private/skland.json` agent 读不了、改不了（拒绝）。
@@ -1100,4 +1121,4 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 - 启动钩子 `bin/session-start` 用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）：先往 `$CLAUDE_ENV_FILE` 写一行把 `.venv/bin` 加进 PATH（环境还没建也写，setup 建好后同一会话就能用），再跑 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。
   `next` 是 `setup` / `guard` 时另带顶层的 `systemMessage`（直接显示给用户的一行）：钩子不会让 agent 先开口，要用户先说一句，这一行告诉用户"随便说一句就开始"。
   `.venv` 还没建时钩子自己按钩子的格式输出（`no_env`），agent 按 `maapilot-setup`「装运行环境」帮用户建。
-- 启动钩子的输出进会话上下文；`CLAUDE.md` 让 agent 看到 `next: "setup"` 时，用户一开口就进入 `maapilot-setup`。
+- 启动钩子的输出进会话上下文；`AGENTS.md` 让 agent 看到 `next: "setup"` 时，用户一开口就进入 `maapilot-setup`。

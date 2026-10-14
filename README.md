@@ -77,7 +77,7 @@ claude
 
 - 设计：[`docs/design.md`](docs/design.md)——思路是"程序薄、agent 厚"：`maapilot` 命令只做可靠的事，做法写进 skill
 - 命令与输出：[`docs/cli.md`](docs/cli.md)
-- 给用户的 agent 的说明：[`CLAUDE.md`](CLAUDE.md) 和 [`.claude/skills/`](.claude/skills/)
+- 给用户的 agent 的说明：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 引用它）和 [`.agents/skills/`](.agents/skills/)
 - 测试：`.venv/bin/python -m pytest -q`
 
 ## 致谢

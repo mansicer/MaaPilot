@@ -2,7 +2,7 @@
 
 只读：不拿锁、不碰模拟器。看的是汇报 private/reports/*.json（`daily run` 每一步都会更新）和运行标记
 private/daily-run.json（`daily.running()`）。命令开始时正在跑的那次也算"下一次"：等它跑完。
-会话里的 agent 一直在后台挂着一个（CLAUDE.md），结束就告诉用户、`report seen`、再挂一个。
+会话里的 agent 一直在后台挂着一个（AGENTS.md「盯着日常」），结束就告诉用户、`report seen`、再挂一个。
 契约见 docs/cli.md「daily watch」。
 """
 from __future__ import annotations

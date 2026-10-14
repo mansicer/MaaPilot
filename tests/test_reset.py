@@ -127,3 +127,18 @@ def test_reset_refuses_when_busy(capsys, world, monkeypatch):
     assert code == 2 and env["error"]["code"] == "not_allowed"
     # 什么都没动
     assert (paths.PRIVATE / "config.yaml").exists() and MINE in world["crontab"].read_text(encoding="utf-8")
+
+
+def test_reset_keeps_preferences_unless_memory(capsys, world):
+    prefs = paths.PRIVATE / "memory"
+    prefs.mkdir()
+    (prefs / "MEMORY.md").write_text("- [理智液](s.md) — 快到期的可以用\n", encoding="utf-8")
+    code, env = run(capsys, "reset")
+    assert code == 0 and (paths.PRIVATE / "memory" / "MEMORY.md").exists()          # 用户偏好留着
+    assert Path(env["data"]["private"]["to"], "memory", "MEMORY.md").exists()      # 备份里也有
+
+
+def test_reset_memory_drops_preferences(capsys, world):
+    (paths.PRIVATE / "memory").mkdir()
+    code, env = run(capsys, "reset", "--memory")
+    assert code == 0 and not (paths.PRIVATE / "memory").exists() and not world["memory"].exists()

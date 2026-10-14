@@ -15,7 +15,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 说清你是谁、接下来做什么，例如："你好！我是你的明日方舟助手，能帮你每天自动做日常、练干员、合材料。先花十几分钟把环境设好：确认模拟器、装 MAA、问你几个日常的偏好。先问一句：电脑上已经装好安卓模拟器、装了明日方舟吗？"
 
 用户说要从头设置（全部重来）：先 `maapilot reset --dry-run` 把会挪走什么、删掉哪个定时任务给用户看，用户同意再 `maapilot reset`（弹确认；
-自动记忆也要清才加 `--memory`），然后请用户重新开一次会话。
+用户偏好记录也要清才加 `--memory`），然后请用户重新开一次会话。
 
 重新设置（`private/setup.json` 已经在）时：先 `maapilot doctor` 看哪些已经好了，只重做用户想改的和没通过的部分。
 
@@ -58,7 +58,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `adb` | 没有 adb：先征得用户同意，`brew install --cask android-platform-tools`（没有 Homebrew 就请用户按 https://brew.sh 装） |
 | `emulator` | 见上一步；模拟器没开、ADB 没打开、地址填错 |
 | `screen` | 分辨率不对：请用户在模拟器设置里改成 1280×720（16:9），改完多半要重启模拟器 |
-| `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。这两条会弹权限确认 |
+| `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。你的 agent 可能要用户批准这两条命令 |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `claude` | `trusted: false`：请用户在这个文件夹里正常启动一次 claude 并接受信任提示（不然定时日常叫起的 agent 用不了放行的命令）；这项只是提示 |
@@ -104,14 +104,14 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 ## 5. 写配置、设定时、收尾
 
 1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`tools`。改完 `maapilot doctor` 再确认一次。
-2. `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）。会弹权限确认；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
+2. 先 `maapilot daily schedule --dry-run`，把时间和 `exec` 里要执行的程序路径告诉用户，用户同意后 `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
    - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude 问"今天做了什么"就行；
    - 可以直接说想做的事："把某某练到精2""合 10 个聚酸酯组""打一次剿灭""现在跑一次日常"；
    - 花合成玉、源石的事每次都会先问；别的第一次遇到时问，之后按用户的回答办。
 5. 问一句要不要现在就跑一次日常（`maapilot-daily`），不跑也没关系。
-6. 开始盯着日常：后台挂一个 `maapilot daily watch`（见 CLAUDE.md「盯着日常」），以后一直挂着。
+6. 开始盯着日常：后台挂一个 `maapilot daily watch`（见 AGENTS.md「盯着日常」；环境做不到后台叫醒就不挂），以后一直挂着。
 
 ## 问用户的情形
 
@@ -124,7 +124,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 除此之外不要问（理智液、汇报详略、代选这类以后遇到再问）。
 
-## 记住什么（写进自动记忆）
+## 记住什么（写进用户偏好 private/memory/）
 
 - 这台电脑的环境怪癖和解决办法（例如"这个模拟器重启后 ADB 端口会变""截图要等模拟器完全开好"），写明日期。
 - 用户在 setup 里顺口说的偏好（例如"别在晚上 11 点后跑"），写明是用户哪天说的。

@@ -507,12 +507,34 @@ def brief(probe: Probe | None = None) -> dict:
                                    for p in report.unseen_problems()]
     except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
         data["unseen_problems"] = []
+    data["memory"] = memory_brief() if setup_done else None
     data["goals"] = goals_brief()
     data["news"] = news_brief()
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
+    data["schedule_unconfirmed"] = schedule_unconfirmed_brief() if sched["installed"] else None
     data["lines"] = brief_lines(data)
     return data
+
+
+def memory_brief() -> dict | None:
+    """用户偏好记录（private/memory/MEMORY.md 的目录行）。第一次会把 Claude Code 自动记忆里的搬过来（imported）。"""
+    try:
+        from maapilot.tools import memory
+        imported = memory.import_claude()
+        return {"dir": "private/memory", "index": memory.index_lines(), "imported": imported or None}
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return None
+
+
+def schedule_unconfirmed_brief() -> dict | None:
+    """config.yaml 里定时日常要执行的程序和用户确认过的不一样（定时日常会拒绝运行）。"""
+    try:
+        from maapilot import config
+        from maapilot.flows import daily
+        return daily.unconfirmed(config.load())
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return None
 
 
 def live_suspects_brief() -> list[dict]:
@@ -565,6 +587,9 @@ def brief_lines(d: dict) -> list[str]:
         u = d["guard_stop"].get("unexplained") or {}
         what = "、".join(f"{'源石' if k == 'originite' else '合成玉'}少了 {-v}" for k, v in u.items())
         lines.append(f"对账停机中：{what}，没经用户同意。先告诉用户、问清楚。")
+    if d.get("schedule_unconfirmed"):
+        lines.append("设置里定时日常要执行的程序改过、用户还没确认，定时日常不会跑："
+                     + "、".join(d["schedule_unconfirmed"]) + "。先告诉用户，用户同意后 maapilot daily schedule。")
     goals = d.get("goals")
     if goals:
         lines.append(f"进行中的目标 {len(goals)} 个（做别的事前想想会不会用掉它们要的材料）：" + "；".join(
@@ -583,7 +608,7 @@ def brief_lines(d: dict) -> list[str]:
     for l in n.get("lines") or []:
         lines.append(f"官方日程：{l}")
     if n.get("due"):
-        lines.append("维护结束 / 活动开始了、还没跟用户说（maapilot-events）：" + "、".join(n["due"]))
+        lines.append("官方日程有消息还没跟用户说（新公告 / 维护结束 / 活动开始，maapilot-events）：" + "、".join(n["due"]))
     for x in d.get("sources") or []:
         lines.append(f"外部数据：{x['message']}" + (f"，{x['effect']}" if x.get("effect") else "")
                      + "（要开发者修；用户问起或受影响时用玩家的话说明，见 maapilot-recovery）")

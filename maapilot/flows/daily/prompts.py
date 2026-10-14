@@ -6,7 +6,8 @@ import shlex
 from maapilot.flows import report as reportmod
 
 # 每个无头 agent 的提示都带上：语言、总结怎么交（最后的回复就是总结，程序放进汇报；自己再追加会重复）
-REPORT_RULES = ("全程用中文（包括中间的说明），总结写给用户看。"
+REPORT_RULES = ("用户偏好在 private/memory/MEMORY.md（目录）和同目录的文件里，做决定前先看。"
+                "全程用中文（包括中间的说明），总结写给用户看。"
                 "不要用 maapilot report write 往汇报里追加：你最后的回复就是总结，程序会把它放进这次的汇报。")
 
 

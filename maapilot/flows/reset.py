@@ -4,7 +4,7 @@
 恢复就是把它改回来。之后 `doctor --brief` 的 `next` 是 `setup`，下次会话重新设置。
 留着：.venv、data/、resource/、maa-cli 本身，以及 maa-cli 配置目录里装好的配置与任务模板（从备份复制回新的 private/maa-config/）。
 crontab 只删以 `# maapilot-v2 <本仓库>` 结尾的行（复用 daily unschedule），别的行不动。
-`--memory`：Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
+`--memory`：用户偏好不留：private/memory/ 不复制回来，Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
 
 日常在跑、模拟器锁被占着、在日常叫起来的 agent 里（环境里有 MAAPILOT_DAILY_RUN 或继承的锁）→ 不做。权限是"询问"。契约见 docs/cli.md「reset」。
 """
@@ -21,6 +21,7 @@ from maapilot.tools import common
 
 PROJECTS_ENV = "MAAPILOT_CLAUDE_PROJECTS_DIR"     # 测试用：Claude Code 的 projects 目录
 MAA_CONFIG = "maa-config"
+MEMORY = "memory"                                   # private/memory/：用户偏好
 
 
 def claude_projects_dir() -> Path:
@@ -88,7 +89,8 @@ def reset(dry_run: bool, memory: bool) -> dict:
         bak = None
         out["private"] = None
 
-    # 3. 自动记忆（--memory 才动）
+    # 3. 用户偏好：private/memory/ 默认复制回新的 private/；--memory 时不复制，Claude Code 的自动记忆（以前的位置）也挪成备份，
+    #    免得下次启动检查又从那里搬回来
     mem = memory_dir()
     if memory:
         if mem.is_dir():
@@ -99,7 +101,7 @@ def reset(dry_run: bool, memory: bool) -> dict:
             out["memory"] = {"move": None, "note": f"没有自动记忆目录 {mem}"}
     else:
         mbak = None
-        out["memory"] = {"move": None, "note": "没带 --memory：自动记忆不动"}
+        out["memory"] = {"move": None, "note": "没带 --memory：用户偏好（private/memory/）留着"}
 
     out["keep"] = [str(paths.ROOT / ".venv"), str(paths.DATA), str(paths.RESOURCE), "maa-cli（及它的资源）"]
     if dry_run:
@@ -112,6 +114,8 @@ def reset(dry_run: bool, memory: bool) -> dict:
         src = bak / MAA_CONFIG
         if src.is_dir():
             shutil.copytree(src, priv / MAA_CONFIG)
+        if not memory and (bak / MEMORY).is_dir():            # 用户偏好默认留着（--memory 才一起挪走）
+            shutil.copytree(bak / MEMORY, priv / MEMORY)
     if memory and mbak is not None:
         os.rename(mem, mbak)
     out["next"] = "setup"
@@ -119,11 +123,15 @@ def reset(dry_run: bool, memory: bool) -> dict:
 
 
 def cmd(args):
+    if not args.dry_run:
+        from maapilot.tools import confirm
+        _refuse_if_busy()
+        confirm.require("从头设置")
     return reset(args.dry_run, args.memory)
 
 
 def register(sub) -> None:
-    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份、删本项目的定时任务（询问）")
+    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份、删本项目的定时任务（用户在对话里同意后才跑）")
     p.add_argument("--dry-run", action="store_true", help="只列出会挪走、删掉什么，不动")
-    p.add_argument("--memory", action="store_true", help="同时把 Claude Code 给这个项目的自动记忆挪成备份")
+    p.add_argument("--memory", action="store_true", help="用户偏好也不留（private/memory/ 随备份走，Claude Code 的自动记忆也挪成备份）")
     p.set_defaults(func=cmd, command="reset")

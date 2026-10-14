@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from maapilot import config, paths
-from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
+from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, NEEDS_USER, CliError
 from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
@@ -143,6 +143,77 @@ def unschedule(dry_run: bool) -> dict:
     if dry_run:
         out["crontab"] = text
     return out
+
+
+# --- 要执行的程序（maapilot.tools.confirm）---------------------------------------------------------------------------
+# 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa / tools.claude、emulator.adb）。
+# 会话里 `daily schedule` 时把这些路径放进输出（agent 转告用户），并记在 private/guard/schedule.json；
+# 定时日常开始时路径和记下的不一样就不跑，等用户在会话里看过、再跑一次 `daily schedule`。
+
+def _exec_paths(cfg: dict) -> dict:
+    tools = cfg.get("tools") or {}
+    return {"maa": str(tools.get("maa") or "maa"), "claude": str(tools.get("claude") or "claude"),
+            "adb": str((cfg.get("emulator") or {}).get("adb") or "adb")}
+
+
+def _resolved(ex: dict) -> dict:
+    return {k: shutil.which(v) or v for k, v in ex.items()}
+
+
+def _confirmed_file() -> Path:
+    return paths.GUARD / "schedule.json"
+
+
+def record_confirmed(cfg: dict) -> None:
+    from maapilot.tools import common
+    common.write_json(_confirmed_file(), {"at": common.iso(), "exec": _exec_paths(cfg)})
+
+
+def unconfirmed(cfg: dict) -> dict | None:
+    """要执行的程序里和确认过的不一样的 {名: {confirmed, now}}；没记过 → None（不算改过）。只读。"""
+    from maapilot.tools import common
+    rec = common.read_json(_confirmed_file())
+    if not rec:
+        return None
+    changed = {k: {"confirmed": (rec.get("exec") or {}).get(k), "now": v}
+               for k, v in _exec_paths(cfg).items() if (rec.get("exec") or {}).get(k) != v}
+    return changed or None
+
+
+def check_confirmed(cfg: dict) -> None:
+    """定时日常开头：config.yaml 里要执行的程序和设定时确认过的一样。没记过（旧版装的）→ 记下现在的。"""
+    from maapilot.tools import common
+    if not common.read_json(_confirmed_file()):
+        record_confirmed(cfg)
+        return
+    changed = unconfirmed(cfg)
+    if changed:
+        raise CliError("config_unconfirmed", "设置里定时日常要执行的程序改过、用户还没确认，这次定时日常不跑",
+                       exit=NEEDS_USER, data={"changed": changed},
+                       hint="在会话里把改过的程序告诉用户，用户同意后 maapilot daily schedule")
+
+
+def schedule_cmd(times: str | None, replace_old: bool, dry_run: bool) -> dict:
+    """`daily schedule`：输出里带上要执行的程序（`exec`，完整路径）；有变化时定时日常里一律拒绝，会话里写并记下程序路径。"""
+    cfg = config.load()
+    if dry_run:
+        return {**schedule(times, replace_old, True), "exec": _resolved(_exec_paths(cfg))}
+    plan = schedule(times, replace_old, True)
+    from maapilot.tools import common
+    rec = common.read_json(_confirmed_file()) or {}
+    if plan["changed"] or rec.get("exec") != _exec_paths(cfg):
+        from maapilot.tools import confirm
+        confirm.require("改定时日常")
+    out = schedule(times, replace_old, False)
+    record_confirmed(cfg)
+    return {**out, "exec": _resolved(_exec_paths(cfg))}
+
+
+def unschedule_cmd(dry_run: bool) -> dict:
+    if not dry_run and unschedule(True)["removed"]:
+        from maapilot.tools import confirm
+        confirm.require("取消定时日常")
+    return unschedule(dry_run)
 
 
 def schedule_info() -> dict:

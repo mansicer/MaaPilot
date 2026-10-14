@@ -36,6 +36,8 @@ def run(only: list[str] | None, trigger: str, no_agent: bool) -> dict:
     if stop_file.exists():
         raise CliError("guard_stop", "合成玉 / 源石对账停机中，日常不开始", exit=NEEDS_USER,
                        hint="先把停机的原因告诉用户（guard status），用户说明后再处理")
+    if trigger == "schedule":
+        daily.check_confirmed(cfg)
     run_id = _new_run_id()
     headless = trigger == "schedule" and not no_agent
     _take_marker(run_id, trigger)

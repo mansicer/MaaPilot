@@ -23,6 +23,8 @@ ITEM_URL = "https://ak-webview.hypergryph.com/api/game/bulletin/{cid}"
 SRC = "bulletin"
 EFFECT = "维护和活动时间按上次拉到的公告看"
 STALE_H = 6                     # 缓存超过几小时，日常开头再拉一次
+START_DUE_H = 72                # 活动开始后几小时内还算"没说过要说"
+MAINT_DUE_H = 72                # 维护结束后几小时内还算"没说过要说"（之后游戏多半已经在日常里更新了）
 RECENT_DAYS = 30                # 只看最近多少天发的公告（常驻的说明类公告很旧，不看）
 
 
@@ -254,6 +256,16 @@ def events(d: dict | None = None) -> list[dict]:
                 elif w["end"] > e["end"]:
                     e["end"] = w["end"]
             out.extend(starts.values())
+        else:
+            continue
+        # 公告本身：活动 / 维护一发公告就是一个时间点（还没开始时先跟用户说一声）
+        spans = [i["maintenance"]] if i.get("kind") == "维护" and i.get("maintenance") else i.get("windows") or []
+        if spans:
+            first = min(w["start"] for w in spans)
+            pub = f"{i['published']}T00:00:00+08:00" if i.get("published") else first
+            out.append({"key": f"{i['cid']}:公告", "at": min(pub, first), "what": "公告", "cid": i["cid"],
+                        "title": i["title"], "kind": i["kind"], "start": first, "end": max(w["end"] for w in spans),
+                        "forced_update": bool(i.get("forced_update"))})
     out.sort(key=lambda e: e["at"])
     return out
 
@@ -264,13 +276,30 @@ def upcoming(d: dict | None = None, now: datetime | None = None, days: float = 3
     return [e for e in events(d) if now <= _dt(e["at"]) <= now + timedelta(days=days)]
 
 
-def due(d: dict | None = None, now: datetime | None = None, within_h: float = 24) -> list[dict]:
-    """已经到点（最近 within_h 小时内）、还没告诉过用户的"维护结束 / 活动开始"：会话里的 agent 该去问用户了。"""
+def due(d: dict | None = None, now: datetime | None = None) -> list[dict]:
+    """还没告诉过用户的官方日程消息：会话里的 agent 该去说了（maapilot-events）。
+    - `公告`：活动 / 维护的新公告，还没开始（先说一声；同一条公告别的时间点已经说过的不算）；
+    - 活动 `开始`：开始后 START_DUE_H 小时内、还没结束（用户这几天没开会话也能补上）；
+    - `维护结束`：结束后 MAINT_DUE_H 小时内（要更新游戏）。"""
     d = load() if d is None else d
     now = now or datetime.now(GAME_TZ)
     told = d.get("told") or {}
-    return [e for e in events(d) if e["what"] in ("维护结束", "开始") and e["key"] not in told
-            and now - timedelta(hours=within_h) <= _dt(e["at"]) <= now]
+    told_cids = {k.split(":", 1)[0] for k in told}
+    out = []
+    for e in events(d):
+        if e["key"] in told:
+            continue
+        if e["what"] == "公告":
+            ok = e["cid"] not in told_cids and now < _dt(e["start"])
+        elif e["what"] == "开始":
+            ok = _dt(e["at"]) <= now < min(_dt(e["end"]), _dt(e["at"]) + timedelta(hours=START_DUE_H))
+        elif e["what"] == "维护结束":
+            ok = _dt(e["at"]) <= now <= _dt(e["at"]) + timedelta(hours=MAINT_DUE_H)
+        else:
+            ok = False
+        if ok:
+            out.append(e)
+    return out
 
 
 def mark_told(keys: list[str], now: datetime | None = None) -> dict:
