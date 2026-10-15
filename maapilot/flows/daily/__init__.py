@@ -23,7 +23,7 @@ daily run 只做编排，每一步都调别的命令（子进程 `python -m maap
   steps      daily run 的编排
   cron       定时（crontab）与 daily status
 测试替换的名字（maapilot_call、run_agent、refresh_news、maintenance_now、version_info、running、schedule_info、
-_set_step、_leftover_maa、LEFTOVER_WAIT_S、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，
+_set_step、push_session、_leftover_maa、LEFTOVER_WAIT_S、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，
 替换才生效；子模块里新用到这些名字也要这样取。
 """
 from __future__ import annotations
@@ -39,8 +39,8 @@ from maapilot.flows.daily.agent import (  # noqa: F401
     _OUTCOME, LEFTOVER_KILL_GRACE_S, LEFTOVER_WAIT_S, TIMEOUT_LEFTOVER_WAIT_S, _after_agent, _claude_bin,
     _leftover_maa, _run_group, _stop_leftover_maa, agent_command, maapilot_call, parse_transcript, run_agent)
 from maapilot.flows.daily.prompts import (  # noqa: F401
-    REPORT_RULES, _titles, _ver, evidence_lines, expired_line, expired_prompt, goals_prompt, maintenance_prompt,
-    recovery_prompt, update_prompt)
+    REPORT_RULES, _titles, _ver, evidence_lines, expired_line, expired_prompt, goals_prompt, long_command_rule,
+    maintenance_prompt, recovery_prompt, update_prompt)
 from maapilot.flows.daily.tasks import (  # noqa: F401
     SKLAND_TIMEOUT_S, _annihilation_failed, _annihilation_skip, _box_fresh, _box_from_skland, _depot_snapshot,
     _guard, _maa_task, depot_change)
@@ -50,10 +50,11 @@ from maapilot.flows.daily.farm import (  # noqa: F401
 from maapilot.flows.daily.preflight import (  # noqa: F401
     _expired_agent, _game_version, _goals_change, _maintenance_agent, _preflight, expire_goals, goals_diff,
     goals_snapshot, maintenance_now, refresh_news, version_info)
-from maapilot.flows.daily.steps import _finish, _steps, run  # noqa: F401
+from maapilot.flows.daily.steps import _finish, _steps, run, session_message  # noqa: F401
+from maapilot.hosts import push as push_session  # noqa: F401 - 测试替换 daily.push_session
 from maapilot.flows.daily.cron import (  # noqa: F401
     _CRON_HM, _OLD_MARKS, _TIME, TAG, _crontab, _entries, _mine, _next_at, _old, _parse_times, _path_dirs,
-    _times_of, check_confirmed, unconfirmed, cron_lines, read_crontab, record_confirmed, schedule, schedule_cmd, schedule_info, status,
+    _times_of, cron_lines, read_crontab, schedule, schedule_cmd, schedule_info, status,
     unschedule, unschedule_cmd, write_crontab)
 
 

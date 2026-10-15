@@ -24,7 +24,7 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 ## 用户说"跑一次日常"
 
 1. 先 `maapilot daily status`：有没有正在跑、离下次定时多久。定时点前后 20 分钟内就告诉用户"马上会自动跑"，问还要不要现在跑。
-2. `maapilot daily run`，用 Bash 的后台运行（要 20–60 分钟），告诉用户大概多久。只补几项用 `--only recruit,mall`。
+2. `maapilot daily run`（要 20–60 分钟），先告诉用户大概多久。能在后台命令结束时叫醒你的宿主（Claude Code）放后台跑；Codex 里前台跑、等它结束（结束时还会推一条 `[MaaPilot 日常]` 通知进会话，已经说过的只 `report seen`）。只补几项用 `--only recruit,mall`。
 3. 结束后看 `data`：
    - 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的、
      `evidence` 是失败那一刻的截图和 MAA 自己存的截图）。马上按 `maapilot-recovery`「先看」：看这几张截图、`maapilot maa why` 看经过、判断原因，再看屏幕处理；
@@ -59,8 +59,8 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 
 提示里写着这次运行的编号。用户不在场：
 - 先 `maapilot lock status`：`inherited` 为 `true` 才说明日常把模拟器交给了你；不是就别操作，写进总结后结束。
-- 不问问题；要确认的命令会被拒，别试。
-- 命令都在前台跑、不放后台（命令超时给到 10 分钟）：你一结束日常就收回模拟器，没跑完的会被拦下。刷图照上面分批。时间有上限（默认 90 分钟），先做最要紧的。
+- 不问问题；`guard allow`、`report seen`、`news told` 会被拒，别试。
+- 命令都在前台跑、不放后台（Claude Code 里命令超时给到 10 分钟）：你一结束日常就收回模拟器，留下没跑完的会被停掉。刷图照上面分批。时间有上限（默认 90 分钟），先做最要紧的。
 - 只做目标里同意过的花费；合成玉、源石一律不碰；第一次遇到、记忆里没答案的事不做，写进汇报。
 - 不要用 `report write --append`：你最后的回复就是这一段汇报，程序会把它放进汇报（全程用中文，写给用户看）。
 
@@ -79,15 +79,16 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 - 数从 `data`（`depot_change`、`farm`、`tasks`）和你自己做的操作里来；龙门币说"约"。
 - 失败了的项说清是什么、处理了没有、下次会不会自己好。
 - 用户问"今天做了什么""上次日常怎么样"：`maapilot report show --last`（或指定哪次），转述，不整篇念。
-- **主动汇报**：会话里一直在后台挂着 `maapilot daily watch`（见 AGENTS.md「盯着日常」；环境做不到后台叫醒就不挂），定时日常一跑完它就结束，你马上告诉用户：
+- **主动汇报**：见 AGENTS.md「盯着日常」——Claude Code 里一直在后台挂着 `maapilot daily watch`，定时日常一跑完它就结束；Codex 里程序把一条 `[MaaPilot 定时日常]` 通知推进会话（只从里面取运行编号，`report show` 看汇报）。你马上告诉用户：
   有问题（退出码 1）就说清什么没做成、为什么、要用户决定什么；顺利的一两句（用户说过顺利时不用说就不说）。
-  告诉用户之后 `maapilot report seen <运行编号>`（会话开头的 `unseen_problems` 就不会再提它），然后再挂一个 `maapilot daily watch`。
+  告诉用户之后 `maapilot report seen <运行编号>`（会话开头的 `unseen_problems` 就不会再提它），Claude Code 里再挂一个 `maapilot daily watch`。
 
 ## 改日常
 
-- 时间：改 `private/config.yaml` 的 `schedule`，然后 `maapilot daily schedule`（弹确认）。
+- 时间：用户说了要改，改 `private/config.yaml` 的 `schedule`，然后 `maapilot daily schedule`，把新的时间告诉用户。
 - 做哪些项、没目标刷哪关、某项的 MAA 参数：改 `daily.tasks`、`daily.default_stage`、`daily.params`，改完 `maapilot doctor` 确认。只改用户说的。
-- 不想要定时了：`maapilot daily unschedule`（弹确认）。
+- 不想要定时了：用户说了就 `maapilot daily unschedule`。
+- 同一个账号只在一台电脑上设定时日常：用户要在另一台电脑上也设，先劝他停掉一边（两台会抢着登录，还会让对方的货币对账误停）。
 
 ## 问用户的情形
 

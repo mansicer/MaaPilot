@@ -188,11 +188,16 @@ def progress_result(name: str, steps: list[str], run, plan: dict | None = None) 
     details = run.extra("OperProgressDetail")
     summary = (run.extra("OperProgressSummary") or [None])[-1]
     rows = []
+    # 训练室选人没认出（MaaCore 日志里有这句）说明已经过了干员列表、进了训练室：失败的是专精那一步，不是找干员
+    trainee_missing = any(TRAINEE_NOT_FOUND in w for w in run.warnings or [])
     for i, d in enumerate(details):
         detail = _enum(d.get("result_detail"), RESULT_DETAILS)
         result = _enum(d.get("result"), RESULTS)
         # 找干员失败时只有一条（没有成功的、后面也没有了）；其余按 MaaCore 的执行顺序（精英化 → 技能等级 → 各技能专精）对上
-        locate_failed = detail == "OperatorNotFound" or (len(details) == 1 and len(steps) > 1 and result == "Failed")
+        in_trainee_picker = trainee_missing and detail == "RecognitionFailed" and i < len(steps) \
+            and _mastery_of(steps[i]) is not None
+        locate_failed = detail == "OperatorNotFound" or (len(details) == 1 and len(steps) > 1 and result == "Failed"
+                                                         and not in_trainee_picker)
         step = "找干员" if locate_failed else (steps[i] if i < len(steps) else "?")
         row = {"step": step, "result": result, "detail": detail, "text": DETAIL_TEXT.get(detail, detail)}
         if "elite" in d:
@@ -271,16 +276,20 @@ def progress(name: str, elite: int | None, skill_level: int | None, mastery: lis
 TRAINEE_NOT_FOUND = "select_training_trainee | oper not found"
 
 
-def _mastery_fallback_step(data: dict) -> tuple[int, int] | None:
-    """第一条没做成的是"技能K 专M"且是认不出页面 → (K, M)；否则 None。"""
-    bad = next((r for r in data.get("steps") or [] if r.get("result") != "Success"), None)
-    if not bad or bad.get("detail") != "RecognitionFailed":
-        return None
-    step = bad.get("step") or ""
+def _mastery_of(step: str) -> tuple[int, int] | None:
+    """步骤名"技能K 专M" → (K, M)；别的步骤 → None。"""
     if not (step.startswith("技能") and " 专" in step):
         return None
     k, _, m = step[len("技能"):].partition(" 专")
     return (int(k), int(m)) if k.isdigit() and m.isdigit() else None
+
+
+def _mastery_fallback_step(data: dict) -> tuple[int, int] | None:
+    """第一条没做成的（前面的都做成了）是"技能K 专M"且是认不出页面 → (K, M)；否则 None。"""
+    bad = next((r for r in data.get("steps") or [] if r.get("result") != "Success"), None)
+    if not bad or bad.get("detail") != "RecognitionFailed":
+        return None
+    return _mastery_of(bad.get("step") or "")
 
 
 def _mastery_fallback(name: str, data: dict, km: tuple[int, int], run) -> dict:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from maapilot import cliutil, paths
+from maapilot import cliutil, hosts, paths
 from maapilot.flows import goals as goalsmod
 from maapilot.flows import report as reportmod
 from maapilot.flows.daily.agent import _after_agent
@@ -48,17 +48,18 @@ def _goals_change(r: _Run, before: dict | None) -> None:
 
 
 def refresh_news() -> bool:
-    """官方公告缓存旧了就重拉。→ 拉了没有。"""
+    """官方公告缓存旧了就重拉。→ 拉了没有。不跟国服日程的服（news.applies）不拉。"""
     from maapilot.knowledge import news
-    if not news.stale():
+    if not news.applies() or not news.stale():
         return False
     news.refresh()
     return True
 
 
 def maintenance_now() -> dict | None:
+    """国服公告写的维护时段里 → 那条维护；别的服（YoStar、txwy）维护时间不一样，不按它跳过日常。"""
     from maapilot.knowledge import news
-    return news.maintenance_now()
+    return news.maintenance_now() if news.applies() else None
 
 
 def version_info() -> dict:
@@ -157,7 +158,7 @@ def _game_version(r: _Run, cfg: dict, headless: bool, env: dict, lk, order: list
     lk.heartbeat(step=UPDATE)
     r.data["agents"] += 1
     t0 = time.monotonic()
-    agent = daily.run_agent(cfg, update_prompt(r.data["run_id"], info), env,
+    agent = daily.run_agent(cfg, update_prompt(r.data["run_id"], info, host=hosts.name(cfg)), env,
                             paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{UPDATE}.jsonl", recovery=True)
     _after_agent(r, env, lk)
     ok = bool(agent.get("recovered"))

@@ -1,4 +1,4 @@
-"""`maapilot news list / show / told`：官方游戏内公告里的维护和活动日程（只有官服；不碰模拟器）。契约见 docs/cli.md「news」。"""
+"""`maapilot news list / show / told`：官方游戏内公告里的维护和活动日程（国服：官服、B 服；不碰模拟器）。契约见 docs/cli.md「news」。"""
 from __future__ import annotations
 
 from maapilot.cliutil import BAD_REQUEST, FAILED, CliError
@@ -7,9 +7,9 @@ from maapilot.tools import common
 
 def _official() -> None:
     from maapilot import config
-    srv = config.server(config.load_or_defaults())
-    if srv != "Official":
-        raise CliError("unsupported_server", f"公告只支持官服（现在是 {srv}）", exit=BAD_REQUEST)
+    from maapilot.knowledge import news
+    if not news.applies():
+        raise CliError("unsupported_server", f"公告只支持国服（官服、B 服；现在是 {config.server()}）", exit=BAD_REQUEST)
 
 
 def _brief(i: dict) -> dict:
@@ -59,6 +59,10 @@ def show(cid: str) -> dict:
 
 def told(keys: list[str]) -> dict:
     from maapilot.knowledge import news
+    from maapilot.tools import confirm
+    if confirm._unattended():                        # 用户不在场：标成已告知，会话里就不会再提了
+        raise CliError("not_allowed", "定时日常叫起的 agent 不能把日程标成已告知（用户还没看到）", exit=BAD_REQUEST,
+                       hint="写进你的总结")
     known = {e["key"] for e in news.events()}
     bad = [k for k in keys if k not in known]
     if bad:
@@ -85,7 +89,7 @@ def cmd_told(args):
 
 
 def register(sub) -> None:
-    g = sub.add_parser("news", help="官方公告里的维护、活动日程（只有官服）")
+    g = sub.add_parser("news", help="官方公告里的维护、活动日程（国服：官服、B 服）")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
     p = gs.add_parser("list", help="正在维护吗、接下来几天的维护和活动、到点还没告诉用户的（缓存超过 6 小时会重新拉）")
     p.add_argument("--refresh", action="store_true", help="不管缓存，现在就拉一次")

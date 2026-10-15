@@ -1,4 +1,6 @@
 private/
+# reset 留下的备份（里面有账号数据和森空岛凭据）
+private.bak-*/
 .venv/
 __pycache__/
 *.pyc
@@ -9,3 +11,6 @@ resource/model/
 .DS_Store
 .claude/settings.local.json
 debug/
+.claude/worktrees/
+# Codex 的本机设置（项目的规则在 .codex/rules/，入库）
+.codex/config.toml

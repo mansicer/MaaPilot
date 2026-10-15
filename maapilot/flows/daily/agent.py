@@ -1,17 +1,18 @@
-"""子进程与无头 agent：调 maapilot 命令（maapilot_call）、起无头 claude -p（run_agent）、agent 结束后收拾留下的 maa。"""
+"""子进程与无头 agent：调 maapilot 命令（maapilot_call）、起无头 agent（run_agent，claude -p 或 codex exec，见 maapilot.hosts）、
+agent 结束后收拾它留下的 maa、maapilot 命令和 maacore_runner。"""
 from __future__ import annotations
 
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
-from maapilot import cliutil, paths
+from maapilot import cliutil, hosts, paths
 from maapilot.cliutil import FAILED
 from maapilot.crew import lock as lockmod
 from maapilot.flows._common import rel
@@ -20,27 +21,128 @@ from maapilot.flows import daily          # 测试替换的名字经包取（dai
 
 # --- 子进程 ----------------------------------------------------------------------------------------------------------
 
+def _ps() -> dict[int, tuple[int, int, str]]:
+    """本机进程表：pid → (ppid, pgid, 命令行)；读不了 → {}。"""
+    try:
+        out = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,command="], capture_output=True, text=True,
+                             timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    rows = {}
+    for ln in out.splitlines():
+        f = ln.split(None, 3)
+        if len(f) >= 3 and all(x.lstrip("-").isdigit() for x in f[:3]):
+            rows[int(f[0])] = (int(f[1]), int(f[2]), f[3] if len(f) > 3 else "")
+    return rows
+
+
+def _descendants(pid: int, table: dict | None = None) -> dict[int, tuple[int, str]]:
+    """pid 的子孙进程：pid → (pgid, 命令行)。"""
+    table = _ps() if table is None else table
+    kids: dict[int, list[int]] = {}
+    for p, (pp, _, _) in table.items():
+        kids.setdefault(pp, []).append(p)
+    out, todo = {}, [pid]
+    while todo:
+        for p in kids.get(todo.pop(), []):
+            if p not in out:
+                out[p] = (table[p][1], table[p][2])
+                todo.append(p)
+    return out
+
+
+def _descendant_groups(pid: int) -> set[int]:
+    """pid 的子孙进程所在的进程组（不含 pid 自己的组）。codex 每条命令都另起一个进程组，杀 codex 的组带不走它们。"""
+    groups = {g for g, _ in _descendants(pid).values()}
+    groups.discard(pid)
+    return groups
+
+
+def _self_and_ancestors(table: dict | None = None) -> set[int]:
+    """日常自己和它的祖先进程：收拾 agent 留下的进程时绝不能碰。"""
+    table = _ps() if table is None else table
+    out, p = set(), os.getpid()
+    while p and p not in out:
+        out.add(p)
+        p = table.get(p, (0,))[0]
+    return out
+
+
+TRACK_EVERY_S = 3                 # 跑无头 agent 时每隔几秒记一次它的子孙（它自己一结束，子孙就挂到 1 号进程下，找不回来了）
+
+
+class _Tracker:
+    """后台定时记下一个进程的子孙（pid → (pgid, 命令行)），结束后用来收拾它留下的进程。"""
+
+    def __init__(self, pid: int, every_s: float | None = None):
+        self.pid, self.every_s, self.seen = pid, every_s or TRACK_EVERY_S, {}
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._loop, daemon=True)
+        self._t.start()
+
+    def sample(self) -> None:
+        try:
+            self.seen.update(_descendants(self.pid))
+        except Exception:                               # noqa: BLE001 - 记不到就算了
+            pass
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            self.sample()
+            self._stop.wait(self.every_s)
+
+    def stop(self) -> dict[int, tuple[int, str]]:
+        self._stop.set()
+        self._t.join(timeout=15)
+        return dict(self.seen)
+
+
+def _killpgs(groups, sig) -> None:
+    for g in groups:
+        try:
+            os.killpg(g, sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
 def _run_group(cmd: list[str], *, env: dict, timeout_s: float | None, stdout=subprocess.PIPE,
-               cwd: Path | None = None) -> tuple[int | None, str, bool]:
-    """跑一个子进程（自成进程组）；超时 → 先 TERM 再 KILL 整个进程组。→ (退出码或 None, stdout 文本, 是否超时)。"""
+               cwd: Path | None = None, track: dict | None = None) -> tuple[int | None, str, bool]:
+    """跑一个子进程（自成进程组）；超时 → 先 TERM 再 KILL 整个进程组，连同子孙另起的进程组（最后一律再 KILL 一次子孙的组，
+    主进程收到 TERM 就走了也一样）。track 给一个 dict：跑的过程中定时把子孙进程（pid → (pgid, 命令行)）记进去。
+    → (退出码或 None, stdout 文本, 是否超时)。"""
     p = subprocess.Popen(cmd, cwd=str(cwd or paths.ROOT), env=env, stdout=stdout, stderr=None,
                          stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                          start_new_session=True)
+    tracker = _Tracker(p.pid) if track is not None else None
     try:
-        out, _ = p.communicate(timeout=timeout_s)
-        return p.returncode, out or "", False
-    except subprocess.TimeoutExpired:
+        try:
+            out, _ = p.communicate(timeout=timeout_s)
+            return p.returncode, out or "", False
+        except subprocess.TimeoutExpired:
+            pass
+        if tracker:
+            tracker.sample()
+        seen = {**(tracker.seen if tracker else {}), **_descendants(p.pid)}   # 主进程一死，子孙就找不回来了：先记下
+        groups = {g for g, _ in seen.values()} - {p.pid, os.getpgrp()}
+        result: tuple[int | None, str, bool] = (None, "", True)
         for sig, wait in ((signal.SIGTERM, 15), (signal.SIGKILL, 5)):
+            _killpgs(groups, sig)
             try:
                 os.killpg(p.pid, sig)
             except (ProcessLookupError, PermissionError):
-                break
+                pass
             try:
                 out, _ = p.communicate(timeout=wait)
-                return p.returncode, out or "", True
+                result = (p.returncode, out or "", True)
+                break
             except subprocess.TimeoutExpired:
                 continue
-        return None, "", True
+        _killpgs(groups, signal.SIGKILL)                # 主进程 TERM 后就走了，子孙的组可能还在：一律 KILL
+        return result
+    finally:
+        if tracker:
+            seen = tracker.stop()
+            track.update(seen)
 
 
 def maapilot_call(args: list[str], env: dict, timeout_s: float | None = None) -> tuple[int, dict]:
@@ -60,55 +162,36 @@ def maapilot_call(args: list[str], env: dict, timeout_s: float | None = None) ->
     return (code if code is not None else FAILED), env_
 
 
+_LAST_AGENT: dict = {"descendants": {}}       # 最近一个无头 agent 跑的时候记下的子孙进程
+
 # --- 无头 agent ------------------------------------------------------------------------------------------------------
 
 def _claude_bin(cfg: dict) -> str:
-    c = str((cfg.get("tools") or {}).get("claude") or "claude")
-    return shutil.which(c) or c
+    return hosts.binary(cfg, "claude")
 
 
 def agent_command(claude: str, prompt: str) -> list[str]:
-    """无头 agent 的命令行：要弹确认的一律自动拒绝。显式带上项目的权限设置（--settings）：
-    文件夹没被 Claude Code 信任过时，无头 claude 不读项目的 .claude/settings.json。"""
-    return [claude, "-p", prompt, "--output-format", "stream-json", "--verbose",
-            "--settings", str(paths.ROOT / ".claude" / "settings.json"),
-            "--permission-mode", "default", "--permission-prompts", "none"]
+    """无头 claude 的命令行（见 maapilot.hosts.command）。"""
+    return hosts.command("claude", claude, prompt, Path(os.devnull))
 
 
 _OUTCOME = re.compile(r"结果[：:]\s*(完成|没做成|做完|失败|处理好了|没处理好)")
 
 
-def parse_transcript(path: Path) -> dict:
-    """stream-json 输出里最后一条 result：总结、出错没有、花费。"""
-    res = None
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line.startswith("{"):
-                    continue
-                try:
-                    ev = json.loads(line)
-                except ValueError:
-                    continue
-                if ev.get("type") == "result":
-                    res = ev
-    except OSError:
-        pass
-    if res is None:
-        return {"summary": None, "is_error": True}
-    summary = (res.get("result") or "").strip() or None
+def parse_transcript(path: Path, host: str = "claude") -> dict:
+    """agent 的输出记录：总结、出错没有、花费，加上总结里"结果：…"那行算出的 recovered。"""
+    info = hosts.parse(host, path)
     m = None
-    for m in _OUTCOME.finditer(summary or ""):
+    for m in _OUTCOME.finditer(info.get("summary") or ""):
         pass
-    recovered = None if m is None else m.group(1) in ("完成", "做完", "处理好了")
-    return {"summary": summary, "is_error": bool(res.get("is_error")), "recovered": recovered,
-            "cost_usd": res.get("total_cost_usd"), "turns": res.get("num_turns")}
+    info["recovered"] = None if m is None else m.group(1) in ("完成", "做完", "处理好了")
+    return info
 
 
 def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: bool = False,
               timeout_min: float | None = None) -> dict:
-    """起一个无头 claude -p 并等它结束。→ {ok, summary, recovered, timed_out, transcript, duration_s, …}。"""
+    """起一个无头 agent（config.yaml 的 agent：claude / codex）并等它结束。
+    → {ok, host, summary, recovered, timed_out, transcript, duration_s, …}。"""
     dcfg = cfg.get("daily") or {}
     if timeout_min:
         timeout_s = float(timeout_min) * 60
@@ -118,16 +201,19 @@ def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: 
         timeout_s = float(dcfg.get("agent_timeout_min") or AGENT_TIMEOUT_MIN) * 60
     transcript.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
-    cmd = agent_command(_claude_bin(cfg), prompt)
+    host = hosts.name(cfg)
+    cmd = hosts.command(host, hosts.binary(cfg, host), prompt, transcript)
     cliutil.log(f"[daily] 叫无头 agent（最长 {int(timeout_s // 60)} 分钟），记录在 {rel(transcript)}")
+    seen: dict = {}
+    _LAST_AGENT["descendants"] = seen                  # agent 结束后收拾它留下的进程（_after_agent）
     try:
         with open(transcript, "w", encoding="utf-8") as out:
-            code, _, timed_out = _run_group(cmd, env=env, timeout_s=timeout_s, stdout=out)
+            code, _, timed_out = _run_group(cmd, env=env, timeout_s=timeout_s, stdout=out, track=seen)
     except OSError as e:
-        return {"ok": False, "error": f"起不来 claude（{cmd[0]}）：{e}", "recovered": False,
+        return {"ok": False, "host": host, "error": f"起不来 {host}（{cmd[0]}）：{e}", "recovered": False,
                 "transcript": rel(transcript), "duration_s": 0}
-    info = parse_transcript(transcript)
-    info.update(ok=(code == 0 and not timed_out and not info.get("is_error")), exit=code, timed_out=timed_out,
+    info = parse_transcript(transcript, host)
+    info.update(host=host, ok=(code == 0 and not timed_out and not info.get("is_error")), exit=code, timed_out=timed_out,
                 transcript=rel(transcript), duration_s=round(time.monotonic() - t0, 1))
     if timed_out:
         info["recovered"] = False
@@ -146,12 +232,54 @@ def _leftover_maa() -> list[int]:
 
 def _after_agent(r: _Run, env: dict, lk) -> None:
     """无头 agent 结束（或超时被杀）之后：换锁的 token，它留下还在跑的 maapilot 命令不能再进来；
-    还有 maa 进程在跑（agent 起的，没随它一起结束）就等一会儿，还不走就结束掉。"""
+    还有 maa 进程在跑（agent 起的，没随它一起结束）就等一会儿，还不走就结束掉；
+    它起的 maapilot 命令、maacore_runner 还在（按它跑的时候记下的子孙认，不按命令行大范围找）也结束掉。"""
     try:
         env[lockmod.TOKEN_ENV] = lk.rotate_token()
     except Exception as e:                               # noqa: BLE001
         cliutil.log(f"[daily] 换锁 token 失败：{e}")
     _stop_leftover_maa(r, daily.LEFTOVER_WAIT_S, "agent 结束后")
+    seen, _LAST_AGENT["descendants"] = _LAST_AGENT.get("descendants") or {}, {}
+    _stop_leftover_procs(r, seen, "agent 结束后")
+
+
+_LEFTOVER_CMD = re.compile(r"(?:^|[\s/])maapilot(?:\s|$)|-m\s+maapilot\.cli\b|maapilot\.crew\.maacore_runner\b")
+
+
+def _leftover_procs(seen: dict) -> list[int]:
+    """agent 跑的时候记下的子孙里，现在还在的 maapilot 命令和 maacore_runner：pid 和命令行都对得上（pid 没被别的进程复用），
+    不是日常自己或它的祖先。"""
+    if not seen:
+        return []
+    table = _ps()
+    mine = _self_and_ancestors(table)
+    return sorted(pid for pid, (_, cmd) in seen.items()
+                  if pid in table and table[pid][2] == cmd and pid not in mine and _LEFTOVER_CMD.search(cmd or ""))
+
+
+def _stop_leftover_procs(r: _Run, seen: dict, when: str) -> list[int]:
+    """agent 起的、它结束后还在跑的 maapilot 命令和 maacore_runner：TERM，再不走就 KILL。返回结束掉的。"""
+    try:
+        pids = _leftover_procs(seen)
+    except Exception as e:                               # noqa: BLE001
+        cliutil.log(f"[daily] 查 agent 留下的进程失败：{e}")
+        return []
+    if not pids:
+        return []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        end = time.monotonic() + LEFTOVER_KILL_GRACE_S
+        while time.monotonic() < end and set(_leftover_procs(seen)) & set(pids):
+            time.sleep(0.5)
+        if not set(_leftover_procs(seen)) & set(pids):
+            break
+    r.data["alerts"].append(f"{when}还有 agent 起的 maapilot 进程在跑（pid {', '.join(map(str, pids))}），已结束掉")
+    r.event("leftover_procs", pids=pids, when=when)
+    return pids
 
 
 LEFTOVER_KILL_GRACE_S = 10

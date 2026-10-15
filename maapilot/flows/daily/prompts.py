@@ -11,6 +11,13 @@ REPORT_RULES = ("用户偏好在 private/memory/MEMORY.md（目录）和同目�
                 "不要用 maapilot report write 往汇报里追加：你最后的回复就是总结，程序会把它放进这次的汇报。")
 
 
+def long_command_rule(host: str = "claude") -> str:
+    """长命令（maa 任务、刷图、更新游戏）怎么跑：各宿主的说法不同（config.yaml 的 agent，见 maapilot.hosts）。"""
+    if host == "codex":
+        return "长命令在前台跑，等它结束再继续（不要放后台：后台命令结束时叫不醒你）"
+    return "长命令在前台跑、Bash 超时设 600000 毫秒（10 分钟），不放后台"
+
+
 def evidence_lines(ev: dict | None, task: str) -> list[str]:
     """失败取证（maa 命令的 data.evidence）→ 给 agent 的几行提示。"""
     if not ev:
@@ -28,7 +35,7 @@ def evidence_lines(ev: dict | None, task: str) -> list[str]:
 
 
 def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: list[str] | None = None,
-                    cli: list[str] | None = None) -> str:
+                    cli: list[str] | None = None, *, host: str = "claude") -> str:
     """argv：`maapilot maa` 后面的部分；不是 maa 任务的项（识别干员练度）用 cli 给整条 maapilot 命令。"""
     log = (data or {}).get("log")
     cli = cli or ["maa", *(argv or [task])]
@@ -44,7 +51,7 @@ def recovery_prompt(run_id: str, task: str, err: dict, data: dict | None, argv: 
         "被登出、掉线（停在开始唤醒的标题页）：用户不在场，直接重新登录（maapilot maa startup）再重跑这一项，并写进总结。",
         "不做别的日常项、不刷理智、不改目标。要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
-        "长命令（maa 任务）在前台跑、Bash 超时设 600000 毫秒，不放后台。",
+        long_command_rule(host) + "（maa 任务就是长命令）。",
         REPORT_RULES,
         "结束时用几句中文写做了什么、现在怎样；最后一行单独写「结果：完成」或「结果：没做成」。",
     ]).replace("\n\n", "\n")
@@ -60,7 +67,8 @@ def expired_line(expired: list) -> str:
             "看一眼还有没有没做完的（例如活动商店没换完、活动关没三星），写进总结告诉用户。")
 
 
-def goals_prompt(run_id: str, active: list[dict], tasks: list[dict], expired: list | None = None) -> str:
+def goals_prompt(run_id: str, active: list[dict], tasks: list[dict], expired: list | None = None, *,
+                 host: str = "claude") -> str:
     done = "、".join(f"{reportmod.label(t['task'])}{'' if t.get('ok') else '（没做成）'}" for t in tasks) or "无"
     titles = "；".join(f"{g['title']}（{g.get('object') or '?'}）" for g in active)
     return "\n".join([
@@ -72,7 +80,7 @@ def goals_prompt(run_id: str, active: list[dict], tasks: list[dict], expired: li
         "在 goals.md 里更新分解与进展，做完的目标移除。",
         "用户不在场：目标之外的花费、要用户决定或确认的事一律不做，写进总结。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
-        "长命令在前台跑、Bash 超时设 600000 毫秒，不放后台；刷图按 skill 里说的分批（--times 每批几次）。",
+        long_command_rule(host) + "；刷图按 skill 里说的分批（--times 每批几次）。",
         REPORT_RULES,
         "结束时用几句中文写做了什么、花了什么、目标进展到哪，以及要用户决定的事；最后一行单独写「结果：完成」或「结果：没做成」。",
     ])
@@ -125,7 +133,7 @@ def _ver(v: dict | None) -> str:
     return str((v or {}).get("version") or "?")
 
 
-def update_prompt(run_id: str, info: dict) -> str:
+def update_prompt(run_id: str, info: dict, *, host: str = "claude") -> str:
     """游戏客户端旧了：叫无头 agent 更新、第一次启动。"""
     terms = ("用户协议 / 隐私政策更新的弹窗：直接点「同意」，写进总结。" if info.get("accept_terms") else
              "用户协议 / 隐私政策更新的弹窗：不要点同意，停下，写进总结（要用户决定的事），最后写「结果：没做成」。")
@@ -134,7 +142,7 @@ def update_prompt(run_id: str, info: dict) -> str:
         f"模拟器上的游戏客户端旧了（装的是 {_ver(info.get('installed'))}，最新是 {_ver(info.get('latest'))}），"
         "不更新什么日常都做不了。你只做更新游戏这一件事。",
         "先 maapilot lock status：inherited 应为 true（日常把模拟器锁交给了你）；不是就别操作，写进总结后结束。",
-        "1. 跑 maapilot game update（前台跑、Bash 超时设 600000 毫秒，不放后台）。可能超过 10 分钟：Bash 超时了就再跑一次同一条命令，"
+        f"1. 跑 maapilot game update（{long_command_rule(host)}）。可能超过 10 分钟：命令超时被停下就再跑一次同一条命令，"
         "它会接着下载，直到它说装好了。",
         "2. 跑 maapilot maa startup，处理第一次启动：加载 skill maapilot-recovery，截图看停在哪，游戏里要下载资源的提示点确认、"
         "公告弹窗关掉，直到回到游戏首页。",

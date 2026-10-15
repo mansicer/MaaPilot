@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")) + [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md"]
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
           "daily", "guard", "lock", "reset", "skland", "news", "game", "copilot")
-# 要用户在对话里同意的命令（权限设置里是询问）（design.md 第 7 节、docs/cli.md 命令总览）
-ASK = ("guard allow", "daily schedule", "daily unschedule", "lock release", "reset")
+# 权限设置里是询问的命令：只有记下花合成玉 / 源石的同意（design.md 第 7 节、docs/cli.md 命令总览）
+ASK = ("guard allow",)
 # 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）
 USER_ONLY = ("skland token",)
 # 开发用的命令：不写进 skill、不给放行规则（用户的 agent 用会弹确认、无头时被拒）

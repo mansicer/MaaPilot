@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from maapilot import config, paths
-from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, NEEDS_USER, CliError
+from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
 from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
@@ -71,13 +71,26 @@ def _parse_times(times: list[str]) -> list[tuple[int, int]]:
     return sorted(set(out))
 
 
+def _uses_codex(cfg: dict) -> bool:
+    """定时日常要用到 codex：agent 是 codex，或者记过用户的 Codex 会话（跑完要 codex queue 推结果）。"""
+    from maapilot import hosts
+    try:
+        if hosts.name(cfg) == "codex":
+            return True
+    except CliError:
+        pass
+    return bool((hosts.sessions().get("codex") or {}).get("thread"))
+
+
 def _path_dirs(cfg: dict) -> str:
-    """定时任务的 PATH：项目的 .venv/bin（叫起来的 agent 直接用 maapilot）、maa、claude、adb 所在目录 + 系统目录。"""
+    """定时任务的 PATH：项目的 .venv/bin（叫起来的 agent 直接用 maapilot）、maa、agent（claude / codex）、adb 所在目录
+    （要用到 codex 时也带上它的目录）+ 系统目录。"""
+    from maapilot import hosts
     dirs = [str(paths.ROOT / ".venv" / "bin")]
-    tools = cfg.get("tools") or {}
-    for prog in (tools.get("maa") or "maa", tools.get("claude") or "claude",
-                 (cfg.get("emulator") or {}).get("adb") or "adb"):
-        found = shutil.which(str(prog))
+    found_all = [shutil.which(str(prog)) for prog in _exec_paths(cfg).values()]
+    if _uses_codex(cfg):
+        found_all.append(hosts.codex_path(cfg))
+    for found in found_all:
         if found:
             d = str(Path(found).parent)
             if d not in dirs:
@@ -94,6 +107,8 @@ def cron_lines(times: list[tuple[int, int]], cfg: dict) -> list[str]:
     envs = f"PATH={q(_path_dirs(cfg))} PYTHONUTF8=1"
     if os.environ.get("MAAPILOT_PRIVATE"):
         envs += f" MAAPILOT_PRIVATE={q(paths.PRIVATE)}"
+    if os.environ.get("CODEX_HOME"):                    # Codex 的设置（信任这个文件夹）放在别处时，定时日常也要找得到
+        envs += f" CODEX_HOME={q(os.environ['CODEX_HOME'])}"
     cmd = (f"{envs} {q(paths.ROOT / '.venv' / 'bin' / 'maapilot')} daily run --trigger schedule"
            f" >> {q(paths.LOGS / 'cron.log')} 2>&1")
     return [f"{m} {h} * * * {cmd} {TAG} {paths.ROOT}" for h, m in times]
@@ -145,14 +160,16 @@ def unschedule(dry_run: bool) -> dict:
     return out
 
 
-# --- 要执行的程序（maapilot.tools.confirm）---------------------------------------------------------------------------
-# 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa / tools.claude、emulator.adb）。
-# 会话里 `daily schedule` 时把这些路径放进输出（agent 转告用户），并记在 private/guard/schedule.json；
-# 定时日常开始时路径和记下的不一样就不跑，等用户在会话里看过、再跑一次 `daily schedule`。
+# --- 要执行的程序 ------------------------------------------------------------------------------------------------
+# 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa、tools.<agent>（claude / codex）、emulator.adb）。
+# `daily schedule` 的输出带上它们的完整路径（`exec`），agent 在对话里告诉用户。
 
 def _exec_paths(cfg: dict) -> dict:
+    """{maa, <agent 宿主名>, adb}。"""
+    from maapilot import hosts
     tools = cfg.get("tools") or {}
-    return {"maa": str(tools.get("maa") or "maa"), "claude": str(tools.get("claude") or "claude"),
+    host = hosts.name(cfg)
+    return {"maa": str(tools.get("maa") or "maa"), host: str(tools.get(host) or host),
             "adb": str((cfg.get("emulator") or {}).get("adb") or "adb")}
 
 
@@ -160,59 +177,19 @@ def _resolved(ex: dict) -> dict:
     return {k: shutil.which(v) or v for k, v in ex.items()}
 
 
-def _confirmed_file() -> Path:
-    return paths.GUARD / "schedule.json"
-
-
-def record_confirmed(cfg: dict) -> None:
-    from maapilot.tools import common
-    common.write_json(_confirmed_file(), {"at": common.iso(), "exec": _exec_paths(cfg)})
-
-
-def unconfirmed(cfg: dict) -> dict | None:
-    """要执行的程序里和确认过的不一样的 {名: {confirmed, now}}；没记过 → None（不算改过）。只读。"""
-    from maapilot.tools import common
-    rec = common.read_json(_confirmed_file())
-    if not rec:
-        return None
-    changed = {k: {"confirmed": (rec.get("exec") or {}).get(k), "now": v}
-               for k, v in _exec_paths(cfg).items() if (rec.get("exec") or {}).get(k) != v}
-    return changed or None
-
-
-def check_confirmed(cfg: dict) -> None:
-    """定时日常开头：config.yaml 里要执行的程序和设定时确认过的一样。没记过（旧版装的）→ 记下现在的。"""
-    from maapilot.tools import common
-    if not common.read_json(_confirmed_file()):
-        record_confirmed(cfg)
-        return
-    changed = unconfirmed(cfg)
-    if changed:
-        raise CliError("config_unconfirmed", "设置里定时日常要执行的程序改过、用户还没确认，这次定时日常不跑",
-                       exit=NEEDS_USER, data={"changed": changed},
-                       hint="在会话里把改过的程序告诉用户，用户同意后 maapilot daily schedule")
-
-
 def schedule_cmd(times: str | None, replace_old: bool, dry_run: bool) -> dict:
-    """`daily schedule`：输出里带上要执行的程序（`exec`，完整路径）；有变化时定时日常里一律拒绝，会话里写并记下程序路径。"""
+    """`daily schedule`：输出里带上定时日常要执行的程序（`exec`，完整路径）。"""
+    from maapilot import hosts
+    from maapilot.tools import host_cmd
     cfg = config.load()
-    if dry_run:
-        return {**schedule(times, replace_old, True), "exec": _resolved(_exec_paths(cfg))}
-    plan = schedule(times, replace_old, True)
-    from maapilot.tools import common
-    rec = common.read_json(_confirmed_file()) or {}
-    if plan["changed"] or rec.get("exec") != _exec_paths(cfg):
-        from maapilot.tools import confirm
-        confirm.require("改定时日常")
-    out = schedule(times, replace_old, False)
-    record_confirmed(cfg)
-    return {**out, "exec": _resolved(_exec_paths(cfg))}
+    if not dry_run and hosts.name(cfg) == "codex" and host_cmd.codex_trusted(paths.ROOT) is not True:
+        # 不信任时 Codex 不加载项目的 .codex/rules/：叫起的 codex 用不了 maapilot，也拦不住直接跑 adb / maa
+        raise CliError("codex_untrusted", "定时日常要用 Codex，但 Codex 还没信任这个文件夹，项目的命令规则不生效",
+                       exit=ENVIRONMENT, hint="maapilot host install codex")
+    return {**schedule(times, replace_old, dry_run), "exec": _resolved(_exec_paths(cfg))}
 
 
 def unschedule_cmd(dry_run: bool) -> dict:
-    if not dry_run and unschedule(True)["removed"]:
-        from maapilot.tools import confirm
-        confirm.require("取消定时日常")
     return unschedule(dry_run)
 
 

@@ -13,7 +13,8 @@ from maapilot.cliutil import ENVIRONMENT, BAD_REQUEST, CliError
 DEFAULTS = {
     "emulator": {"address": None, "adb": "adb"},
     "server": "Official",
-    "tools": {"maa": "maa", "claude": "claude"},
+    "agent": "claude",
+    "tools": {"maa": "maa", "claude": "claude", "codex": "codex"},
     "schedule": ["04:40", "16:40"],
     "daily": {"tasks": ["startup", "recruit", "infrast", "mall", "annihilation", "award"],
               "default_stage": "1-7", "params": {}, "agent_timeout_min": 90, "recovery_timeout_min": 30,
@@ -94,7 +95,7 @@ def package(cfg: dict | None = None) -> str:
 
 
 def tool(name: str, cfg: dict | None = None) -> str:
-    """tools.<name>（maa / claude）：定时任务里 PATH 很短，setup 写绝对路径。"""
+    """tools.<name>（maa / claude / codex）：定时任务里 PATH 很短，setup 写绝对路径。"""
     cfg = cfg if cfg is not None else load_or_defaults()
     return str((cfg.get("tools") or {}).get(name) or name)
 

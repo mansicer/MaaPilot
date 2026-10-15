@@ -273,20 +273,39 @@ def check_maa_cli(ctx: Ctx) -> dict:
                  path=path)
 
 
-def check_claude(ctx: Ctx) -> dict:
-    """定时日常要叫无头 claude：找得到它、给出绝对路径（setup 写进 tools.claude）。只是提示，不影响 ok_all。"""
-    from maapilot import config
-    claude = config.tool("claude", ctx.cfg)
-    path = ctx.probe.which(claude)
+def check_agent(ctx: Ctx) -> dict:
+    """定时日常要叫的无头 agent（config.yaml 的 agent：claude / codex，项名就是它）：找得到它、给出绝对路径
+    （setup 写进 tools.<宿主>）、信任过这个文件夹（没信任时项目的放行 / 禁止规则不生效）。一般只是提示，不影响 ok_all；
+    agent 是 codex 而 Codex 没信任这个文件夹时是必须项：规则不加载，叫起的 codex 拦不住直接跑 adb / maa。"""
+    from maapilot import config, hosts
+    try:
+        host = hosts.name(ctx.cfg or {})
+    except CliError as e:
+        return _item("agent", False, e.message, "把 config.yaml 的 agent 改成 claude 或 codex", required=False)
+    prog = config.tool(host, ctx.cfg)
+    path = ctx.probe.which(prog)
     if path is None:
-        return _item("claude", False, f"找不到 claude（{claude}）", "在 config.yaml 的 tools.claude 写 claude 的绝对路径",
+        return _item(host, False, f"找不到 {host}（{prog}）", f"在 config.yaml 的 tools.{host} 写 {host} 的绝对路径",
                      required=False)
+    if host == "codex":
+        trusted = codex_trusted(paths.ROOT)
+        if trusted is False:
+            return _item(host, False, f"{path}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
+                         "maapilot host install codex", required=True, path=path, trusted=False)
+        return _item(host, True, path, required=False, path=path, trusted=trusted)
     trusted = claude_trusted(paths.ROOT)
     if trusted is False:
-        return _item("claude", False, f"{path}；这个文件夹还没被 Claude Code 信任，定时日常叫起的 agent 用不了放行的命令",
+        return _item(host, False, f"{path}；这个文件夹还没被 Claude Code 信任，定时日常叫起的 agent 用不了放行的命令",
                      "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示", required=False, path=path,
                      trusted=False)
-    return _item("claude", True, path, required=False, path=path, trusted=trusted)
+    return _item(host, True, path, required=False, path=path, trusted=trusted)
+
+
+def codex_trusted(root: Path) -> bool | None:
+    """Codex 是否信任这个文件夹（$CODEX_HOME/config.toml 的 [projects."<路径>"] trust_level = "trusted"；上级目录也算）。
+    读不到 → None。只读。"""
+    from maapilot.tools import host_cmd
+    return host_cmd.codex_trusted(root)
 
 
 def claude_trusted(root: Path) -> bool | None:
@@ -392,7 +411,7 @@ def check_setup(ctx: Ctx) -> dict:
 
 DEVICE_CHECKS = ("emulator", "screen", "input", "game")
 CHECKS = [("config", check_config), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
-          ("input", check_input), ("maa_cli", check_maa_cli), ("claude", check_claude), ("maa_config", check_maa_config),
+          ("input", check_input), ("maa_cli", check_maa_cli), ("agent", check_agent), ("maa_config", check_maa_config),
           ("maa_core", check_maa_core), ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
           ("schedule", check_schedule), ("setup", check_setup)]
 
@@ -508,11 +527,11 @@ def brief(probe: Probe | None = None) -> dict:
     except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
         data["unseen_problems"] = []
     data["memory"] = memory_brief() if setup_done else None
+    data["session"] = session_brief()
     data["goals"] = goals_brief()
     data["news"] = news_brief()
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
-    data["schedule_unconfirmed"] = schedule_unconfirmed_brief() if sched["installed"] else None
     data["lines"] = brief_lines(data)
     return data
 
@@ -527,13 +546,13 @@ def memory_brief() -> dict | None:
         return None
 
 
-def schedule_unconfirmed_brief() -> dict | None:
-    """config.yaml 里定时日常要执行的程序和用户确认过的不一样（定时日常会拒绝运行）。"""
+def session_brief() -> dict | None:
+    """记下这是哪个宿主的会话（Codex 的会话编号用来推送定时日常的结果，见 maapilot.hosts）。→ {host, thread} 或 None。"""
     try:
-        from maapilot import config
-        from maapilot.flows import daily
-        return daily.unconfirmed(config.load())
-    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        from maapilot import hosts
+        rec = hosts.record_session()
+        return {k: rec.get(k) for k in ("host", "thread")} if rec else None
+    except Exception:                                   # noqa: BLE001 - 记不下不影响启动检查
         return None
 
 
@@ -565,11 +584,11 @@ def goals_brief() -> list[dict] | None:
 
 
 def news_brief() -> dict | None:
-    """缓存里的官方日程（不联网；只有官服）：正在维护、3 天内的维护和活动、到点还没告诉用户的。"""
+    """缓存里的官方日程（不联网；只有国服：官服和 B 服共用一个日程）：正在维护、3 天内的维护和活动、到点还没告诉用户的。"""
     try:
         from maapilot import config
         from maapilot.knowledge import news
-        if config.server(config.load_or_defaults()) != "Official":
+        if config.server(config.load_or_defaults()) not in news.CN_SERVERS:
             return None
         d = news.load()
         if not d.get("items"):
@@ -587,9 +606,6 @@ def brief_lines(d: dict) -> list[str]:
         u = d["guard_stop"].get("unexplained") or {}
         what = "、".join(f"{'源石' if k == 'originite' else '合成玉'}少了 {-v}" for k, v in u.items())
         lines.append(f"对账停机中：{what}，没经用户同意。先告诉用户、问清楚。")
-    if d.get("schedule_unconfirmed"):
-        lines.append("设置里定时日常要执行的程序改过、用户还没确认，定时日常不会跑："
-                     + "、".join(d["schedule_unconfirmed"]) + "。先告诉用户，用户同意后 maapilot daily schedule。")
     goals = d.get("goals")
     if goals:
         lines.append(f"进行中的目标 {len(goals)} 个（做别的事前想想会不会用掉它们要的材料）：" + "；".join(

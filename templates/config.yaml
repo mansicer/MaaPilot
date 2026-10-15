@@ -9,10 +9,16 @@ emulator:
 # 游戏客户端（MAA 的 client_type）：Official 官服 / Bilibili B 服 / YoStarEN 国际服 / YoStarJP 日服 / YoStarKR 韩服 / txwy 繁中服
 server: Official
 
-# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（`command -v maa` / `command -v claude`）。
+# 定时日常叫起的 agent：claude（Claude Code）或 codex（Codex）。用户平时在哪个里面跟助手说话就用哪个。
+# 改成 codex 前先 `maapilot host install codex`；改完要重新 `maapilot daily schedule`。
+agent: claude
+
+# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（`command -v maa` / `command -v claude` / `command -v codex`）。
+# 只用到 agent 选的那一个（claude 或 codex）。
 tools:
   maa: maa
   claude: claude
+  codex: codex
 
 # 游戏客户端更新（maapilot game version / update，目前只支持官服）。
 game:

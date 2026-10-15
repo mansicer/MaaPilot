@@ -8,6 +8,7 @@
     <img alt="Python" src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white">
     <img alt="platform" src="https://img.shields.io/badge/platform-macOS-blueviolet">
     <img alt="Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-D97757">
+    <img alt="Codex" src="https://img.shields.io/badge/agent-Codex-412991">
     <img alt="MAA" src="https://img.shields.io/badge/powered%20by-MAA-ff69b4">
     <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </div>
@@ -18,7 +19,7 @@
 
 每天定时做完日常；练干员、合材料、打关卡，跟它说一声就行
 
-底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code) 里的 agent 判断做什么
+底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 里的 agent 判断做什么
 
 </div>
 
@@ -26,7 +27,9 @@
 
 ## 下载与安装
 
-需要：一台 Mac、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)（Codex 等其他 agent 的适配在做了）。
+需要：一台 Mac、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一。
+
+### 用 Claude Code
 
 ```sh
 git clone https://github.com/mansicer/MaaPilot.git
@@ -36,6 +39,18 @@ claude
 
 第一次打开时，Claude Code 会问要不要信任这个文件夹，选信任（定时日常要用到）。
 屏幕上会提示还没设置，随便说一句（比如"开始"）就进入设置：助手会带你确认模拟器、装好 MAA、问你日常几点跑、做哪些，十几分钟就好。
+
+### 用 Codex
+
+```sh
+git clone https://github.com/mansicer/MaaPilot.git
+cd MaaPilot
+codex
+```
+
+第一次打开时 Codex 问要不要信任这个文件夹，选信任。随便说一句（比如"开始"）就进入设置，步骤和上面一样。
+- 装运行环境要联网，Codex 会请你批准在沙箱外跑这几条命令，点同意就行；
+- 设置里助手会请你同意一次 `maapilot host install codex`（在 Codex 的设置里信任这个文件夹），定时日常要靠它。
 
 ## 亮点功能
 
@@ -52,7 +67,7 @@ claude
 
 ### 怎么跟它说
 
-打开 Claude Code 后直接说想做的事：
+在这个文件夹里打开 Claude Code 或 Codex，直接说想做的事：
 
 - "现在跑一次日常" / "今天做了什么"
 - "把遥练到精2" / "给能天使专三" / "目标进度怎么样"
@@ -62,10 +77,11 @@ claude
 
 ### 放心的地方
 
-- **合成玉、源石**每次花之前都会在对话里问你，你答应了才花；你不在的时候（定时日常）一律不花。助手动过游戏之后没经你同意就少了，程序会发现并停下日常（你自己在游戏里花的不算）。
-- 练干员、合材料这类花费，第一次会先报数，你同意了才做。
-- 其他拿不准的事，第一次遇到时问你，之后按你说的办；你不在的时候（定时日常）就先不做，写进汇报等你回来。
-- 改定时日常、从头设置也要你在对话里点头。设定时日常时会告诉你到时要在你不在时运行哪些程序；之后设置里这些程序被改了，定时日常就先停下，等你确认。
+- **合成玉、源石**是程序死守的唯一一道关：每次花之前都会在对话里问你，你答应了才花；你不在的时候（定时日常）一律不花。助手动过游戏之后没经你同意就少了，程序会发现并停下日常（你自己在游戏里花的不算）。
+- 其他事都以你在对话里说的为准：练干员、合材料这类花费先报数，你同意了才做；改定时日常、从头设置、别的拿不准的事，也是问过你、你点头了才做，之后按你说的办。
+  你不在的时候（定时日常）就先不做，写进汇报等你回来。设定时日常时会告诉你到时要在你不在时运行哪些程序。
+- 公告、作业说明、识别出来的字这些外来的文字，助手只当资料看，不会当成你的吩咐。
+- 同一个账号只在一台电脑上设定时日常：两台会抢着登录，还会让对方以为合成玉被偷偷花了。
 - 你回答过的偏好（汇报要多详细、理智液用不用……）记在本机的 `private/memory/` 里，换一个 agent 也照样记得。
 - 账号数据只存在本机的 `private/` 文件夹里，不进 git。想从头设置就跟助手说"从头设置"：旧数据会整个留成备份（`private.bak-…`），不会删掉。
 
@@ -88,7 +104,7 @@ claude
 
 - 游戏自动化：[MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights)（MaaCore，干员培养等任务）、[maa-cli](https://github.com/MaaAssistantArknights/maa-cli)（日常任务）
 - 识别与操作框架：[MaaFramework](https://github.com/MaaXYZ/MaaFramework)
-- Agent：[Claude Code](https://claude.com/claude-code)
+- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)
 
 ### 开源库
 

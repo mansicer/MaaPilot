@@ -1,6 +1,6 @@
-"""要用户同意的命令（maapilot.tools.confirm）：guard allow、daily schedule / unschedule、reset。
+"""定时日常里不做的事（maapilot.tools.confirm）：只有记下花合成玉 / 源石的同意（guard allow）。
 
-用户可能远程连着会话，不弹本机的框：会话里 agent 在对话里问过就放行；定时日常（用户不在场）里一律拒绝。
+会话里 agent 在对话里问过用户就放行；定时日常（用户不在场）里一律拒绝。其余命令（schedule、reset……）不设关卡。
 """
 from __future__ import annotations
 
@@ -36,6 +36,30 @@ def test_unattended_never_allows(capsys, monkeypatch):
     assert guard.load_allowances() == []
 
 
+def test_empty_daily_env_still_counts_as_unattended(capsys, monkeypatch):
+    monkeypatch.setenv(daily.DAILY_ENV, "")
+    c, out = run(capsys, "guard", "allow", "源石", "1", "--reason", "x")
+    assert c == 3 and guard.load_allowances() == []
+
+
+def test_child_of_running_daily_is_unattended(capsys, monkeypatch, attended):
+    """agent 把环境变量清掉也不行：是正在跑的日常进程的子孙就算定时日常里。"""
+    from maapilot.tools import confirm
+    monkeypatch.setattr(daily, "running", lambda: {"run_id": "r1", "pid": 4242})
+    monkeypatch.setattr(confirm, "_ancestors", lambda pid: [999, 4242])
+    c, out = run(capsys, "guard", "allow", "源石", "1", "--reason", "x")
+    assert c == 3 and "r1" in out["error"]["message"]
+    monkeypatch.setattr(confirm, "_ancestors", lambda pid: [999])           # 用户会话里，日常恰好在跑
+    c, out = run(capsys, "guard", "allow", "源石", "1", "--reason", "x")
+    assert c == 0
+
+
+def test_ancestors_of_this_process():
+    import os
+    from maapilot.tools import confirm
+    assert os.getppid() in confirm._ancestors(os.getpid())
+
+
 @pytest.fixture
 def cron(tmp_path, monkeypatch, attended):
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
@@ -45,54 +69,18 @@ def cron(tmp_path, monkeypatch, attended):
     return tmp_path / "crontab.txt"
 
 
-def test_schedule_reports_programs_and_records(capsys, cron):
+def test_schedule_reports_programs(capsys, cron):
     c, out = run(capsys, "daily", "schedule", "--dry-run")
     assert c == 0 and set(out["data"]["exec"]) == {"maa", "claude", "adb"}
     assert cron.read_text(encoding="utf-8") == OTHER
     c, out = run(capsys, "daily", "schedule")
     assert c == 0 and "maapilot-v2" in cron.read_text(encoding="utf-8") and "exec" in out["data"]
-    assert common.read_json(paths.GUARD / "schedule.json")["exec"] == {"maa": "maa", "claude": "claude", "adb": "adb"}
 
 
-def test_unattended_schedule_change_refused(capsys, cron, monkeypatch):
-    run(capsys, "daily", "schedule")
+def test_schedule_and_unschedule_have_no_gate(capsys, cron, monkeypatch):
+    """改定时日常不设关卡（以用户在对话里的同意为准）。"""
     monkeypatch.setenv(daily.DAILY_ENV, "20261015-0440")
-    c, out = run(capsys, "daily", "schedule")                                  # 没变：照常
-    assert c == 0
     c, out = run(capsys, "daily", "schedule", "--times", "05:00")
-    assert c == 3 and out["error"]["code"] == "needs_user"
+    assert c == 0
     c, out = run(capsys, "daily", "unschedule")
-    assert c == 3 and "maapilot-v2" in cron.read_text(encoding="utf-8")
-
-
-def test_changed_programs_block_scheduled_daily(capsys, cron):
-    run(capsys, "daily", "schedule")
-    paths.CONFIG.write_text(paths.CONFIG.read_text(encoding="utf-8").replace("claude: claude", "claude: /tmp/evil"),
-                            encoding="utf-8")
-    c, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert c == 3 and out["error"]["code"] == "config_unconfirmed"
-    assert out["data"]["changed"] == {"claude": {"confirmed": "claude", "now": "/tmp/evil"}}
-    from maapilot.tools import doctor
-    assert doctor.schedule_unconfirmed_brief() == out["data"]["changed"]
-    lines = doctor.brief_lines({"setup_done": True, "guard_stop": None, "goals": [], "goals_active": 0,
-                                "last_daily": None, "schedule": {"installed": True, "times": []}, "news": {},
-                                "sources": [], "unseen_problems": [], "schedule_unconfirmed": out["data"]["changed"]})
-    assert any("还没确认" in l and "claude" in l for l in lines)
-    c, out = run(capsys, "daily", "schedule")                                  # 会话里用户同意后重跑：记下新的
-    assert c == 0 and daily.unconfirmed(__import__("maapilot.config", fromlist=["load"]).load()) is None
-
-
-def test_first_scheduled_run_trusts_existing_setup(cron):
-    from maapilot import config
-    cfg = config.load()
-    daily.check_confirmed(cfg)                                                 # 旧版装的：没记过 → 记下现在的
-    assert daily.unconfirmed(cfg) is None and (paths.GUARD / "schedule.json").exists()
-
-
-def test_reset_refused_when_unattended(capsys, monkeypatch, tmp_path):
-    monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, OTHER)))
-    paths.PRIVATE.mkdir(parents=True, exist_ok=True)
-    paths.CONFIG.write_text("emulator: {address: 'emu:1'}\n", encoding="utf-8")
-    monkeypatch.setenv(daily.DAILY_ENV, "20261015-0440")
-    c, out = run(capsys, "reset")
-    assert c in (2, 3) and paths.CONFIG.exists()
+    assert c == 0 and "maapilot-v2" not in cron.read_text(encoding="utf-8")

@@ -42,7 +42,8 @@ def _quiet(monkeypatch):
 
 
 def test_waits_for_a_run_that_finishes_later(monkeypatch):
-    rep("20261004-0440", finished=now() - timedelta(hours=10))          # 之前跑完的不算
+    rep("20261004-0440", finished=now() - timedelta(hours=10))          # 之前跑完、告诉过用户的不算
+    reportmod.mark_seen("20261004-0440")
     sleeps = []
 
     def sleep(s):
@@ -91,7 +92,7 @@ def test_crashed_run_counts_as_aborted(monkeypatch):
 
 
 def test_timeout_and_cli(capsys):
-    rep("20261004-0440", finished=now() - timedelta(hours=10))
+    rep("20261004-0440", finished=now() - timedelta(hours=30))          # 太早的没告诉过也不补
     code, env = run(capsys, "daily", "watch", "--timeout-min", "0")
     assert code == 0 and env["ok"] and env["error"] is None                # 等满了不算出错
     assert env["data"]["kind"] == "timeout" and env["data"]["seen"] is True

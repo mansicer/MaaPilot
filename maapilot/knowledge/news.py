@@ -1,9 +1,10 @@
-"""官方游戏内公告（只有官服）：活动预告、停机维护、版本更新。契约见 docs/cli.md「news」。
+"""官方游戏内公告（国服：官服、B 服同一套日程）：活动预告、停机维护、版本更新。契约见 docs/cli.md「news」。
 
 接口就是游戏里"公告"那一栏（不用登录）：列表 `bulletinList`，全文 `bulletin/<cid>`（HTML）。
 程序只做可靠的事：拉下来、去掉 HTML、按固定写法抽出时间段（"10月09日 12:00 - 10月30日 03:59"、"维护时间：2026年10月09日06:00 ~ 12:00"），
 分成 活动 / 维护 / 其他 三类。正文原样给 agent 读，抽不出的时间由 agent 自己看。
-缓存在 private/state/news.json：`{at, items: [...], told: {<事件键>: 时间}}`。
+缓存在 private/state/news.json：`{at, items: [...], told: {<事件键>: 时间}, handed: {<事件键>: 时间}}`。
+told：告诉过用户了（`news told`）；handed：`daily watch` 已经因为它结束过一次（交给了 agent，不再因为它结束；启动检查照样列到 told 为止）。
 """
 from __future__ import annotations
 
@@ -26,6 +27,13 @@ STALE_H = 6                     # 缓存超过几小时，日常开头再拉一�
 START_DUE_H = 72                # 活动开始后几小时内还算"没说过要说"
 MAINT_DUE_H = 72                # 维护结束后几小时内还算"没说过要说"（之后游戏多半已经在日常里更新了）
 RECENT_DAYS = 30                # 只看最近多少天发的公告（常驻的说明类公告很旧，不看）
+CN_SERVERS = ("Official", "Bilibili")   # 这些服用的是国服公告里的维护、活动日程；其他服（YoStar、txwy）日程不一样，不看
+
+
+def applies(cfg: dict | None = None) -> bool:
+    """这台的服务器跟不跟国服的公告日程走（维护跳过日常、日程提醒都只对这些服）。"""
+    from maapilot import config
+    return config.server(cfg) in CN_SERVERS
 
 
 def _path():
@@ -200,11 +208,24 @@ def save(d: dict) -> None:
     tmp.replace(p)
 
 
+_MARKS = ("told", "handed")
+
+
+def _save_marks(d: dict) -> None:
+    """存之前再读一次盘上的 told / handed 合进来：拉公告要几秒，期间别的进程（`news told`、`daily watch`）记下的不能丢。"""
+    cur = load()
+    for k in _MARKS:
+        if cur.get(k) or d.get(k):
+            d[k] = {**(cur.get(k) or {}), **(d.get(k) or {})}
+    save(d)
+
+
 def refresh(now: datetime | None = None, get=_get) -> dict:
     now = now or datetime.now(GAME_TZ)
+    items = fetch(now, get)
     d = load()
-    d.update({"at": now.isoformat(timespec="seconds"), "items": fetch(now, get)})
-    save(d)
+    d.update({"at": now.isoformat(timespec="seconds"), "items": items})
+    _save_marks(d)
     return d
 
 
@@ -302,14 +323,30 @@ def due(d: dict | None = None, now: datetime | None = None) -> list[dict]:
     return out
 
 
-def mark_told(keys: list[str], now: datetime | None = None) -> dict:
+def _mark(field: str, keys: list[str], now: datetime | None) -> dict:
     d = load()
-    told = d.setdefault("told", {})
+    marks = d.setdefault(field, {})
     at = (now or datetime.now(GAME_TZ)).isoformat(timespec="seconds")
     for k in keys:
-        told[k] = at
-    save(d)
-    return told
+        marks[k] = at
+    _save_marks(d)
+    return d[field]
+
+
+def mark_told(keys: list[str], now: datetime | None = None) -> dict:
+    return _mark("told", keys, now)
+
+
+def mark_handed(keys: list[str], now: datetime | None = None) -> dict:
+    """`daily watch` 因为这些时间点结束过一次了：之后的 watch 不再因为它们结束（agent 没 told 就重挂也不会立刻又醒）。"""
+    return _mark("handed", keys, now)
+
+
+def unhanded_due(d: dict | None = None, now: datetime | None = None) -> list[dict]:
+    """due 里还没交给过 `daily watch` 的（watch 只为这些结束）。"""
+    d = load() if d is None else d
+    handed = d.get("handed") or {}
+    return [e for e in due(d, now) if e["key"] not in handed]
 
 
 def lines(d: dict | None = None, now: datetime | None = None, days: float = 3) -> list[str]:

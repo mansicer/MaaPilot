@@ -1,19 +1,45 @@
-"""要用户在场同意的操作：`guard allow`、`daily schedule / unschedule`（有改动时）、`reset`。
+"""定时日常里不做的事：只有记下花合成玉 / 源石的同意（`guard allow`）。
 
-用户可能不在这台电脑前（远程连着会话），所以不弹本机的框：agent 在对话里问、用户在对话里答应了，再跑这些命令。
-程序只管一件事：定时日常叫起的无头 agent 里（环境带 MAAPILOT_DAILY_RUN）用户不在场，一律拒绝（退出码 3），什么都不做。
-会话里的放行靠 agent 守 AGENTS.md 的硬规则，加上宿主的权限设置（Claude Code：这几条是"询问"）。
+其他操作都以用户在对话里的同意为准，程序不另设关卡（AGENTS.md、docs/design.md「只有一道硬防线」）。
+花费的同意必须是用户亲口说的：定时日常叫起的无头 agent 里用户不在场，一律拒绝（退出码 3），什么都不做。
+判断"是不是定时日常叫起的"：环境里有 MAAPILOT_DAILY_RUN（有就算，空的也算），或者这条命令是正在跑的日常进程的子孙
+（agent 把环境变量清掉也认得出来）。
 """
 from __future__ import annotations
 
 import os
+import subprocess
 
 from maapilot.cliutil import NEEDS_USER, CliError
 
 
+def _ancestors(pid: int) -> list[int]:
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    parent = {}
+    for ln in out.splitlines():
+        parts = ln.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            parent[int(parts[0])] = int(parts[1])
+    chain, p = [], parent.get(pid)
+    while p and p not in chain and p != 1:
+        chain.append(p)
+        p = parent.get(p)
+    return chain
+
+
 def _unattended() -> str | None:
+    """定时日常的运行编号（看不出编号时给 "?"）；不是 → None。"""
     from maapilot.flows.daily.base import DAILY_ENV
-    return os.environ.get(DAILY_ENV)
+    if DAILY_ENV in os.environ:
+        return os.environ[DAILY_ENV] or "?"
+    from maapilot.flows import daily
+    run = daily.running()
+    if run and run.get("pid") and int(run["pid"]) in _ancestors(os.getpid()):
+        return run.get("run_id") or "?"
+    return None
 
 
 def require(what: str) -> None:

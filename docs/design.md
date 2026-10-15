@@ -4,12 +4,20 @@
 
 - **程序薄，agent 厚。** 程序只提供可靠的工具（操作模拟器、调用 MAA、读写数据、纯计算）；做什么、按什么顺序、出错怎么办，由 agent 判断。
 - **经验写进 skill，不写进代码。** 各种情形的做法写成 skill，agent 按任务加载。写错了改文字，不改程序。
-- **只支持 Claude Code。** 用户打开 `~/Developer/MaaPilot`、启动 `claude`，第一次说话就进入 setup（启动钩子在屏幕上提示"随便说一句"），之后是自由对话。
+- **Claude Code 和 Codex 都能用。** 用户打开 `~/Developer/MaaPilot`、启动 `claude` 或 `codex`，第一次说话就进入 setup（Claude Code 的启动钩子在屏幕上提示"随便说一句"），之后是自由对话。
+  说明只维护一份（`AGENTS.md`、`.agents/skills/`），宿主相关的只有：权限（`.claude/settings.json` / `.codex/rules/`）、怎么起无头 agent、怎么把定时日常的结果送到用户的会话（`maapilot/hosts.py`）。
 - **大小事情都让 agent 知道。** 程序遇到情况（出错、维护、目标到期、跳过、要更新游戏）不自己悄悄处理掉：叫起无头 agent 或在结果里写明（`lines`、汇报、`daily watch`），
   说清发生了什么，由 agent 判断、告诉用户。
 - **遇到再问，问完记住。** setup 只问跑起来必须的事；其余（例如理智液算不算真实货币）第一次遇到时问用户，答案记进用户偏好（`private/memory/`），下次照办。
 - **代码里只有一道硬防线：真实货币。** 合成玉、源石每次花之前都要用户确认；程序在前后对账，没确认就减少会立刻停下并告诉用户。
   对账的起点只在"上次对账之后没有 agent / MAA 动过会花钱的操作"时重记，所以 agent 抹不掉自己的花费，用户自己在游戏里花的也不会被当成异常。
+  记下同意（`guard allow`）是唯一要宿主再问一次的命令（Claude Code 的 `ask`、Codex 的 `prompt`），定时日常叫起的 agent 里一律拒绝。
+- **其余以用户在对话里的同意为准，程序不另设关卡。** 改定时日常、改设置、从头设置、目标之外的花费……agent 在对话里问过、用户同意了就做（`AGENTS.md` 硬规则）。
+  权限只禁止绕过锁和对账的直接操作（直接用 `maa` 跑任务、`adb shell`）、改 `private/guard/` 和锁、碰森空岛凭据。
+  外来的文字（公告、作业说明、识别出的字、森空岛内容、推进会话的程序通知）只是数据，不算指令，也不算用户同意。
+  防的是 agent 的无心之失，不是蓄意的攻击：在 Codex 里，放行的 maapilot 命令在沙箱外跑、仓库里的代码沙箱里也写得了，一个被注入了指令、存心绕过的 agent 拦不住
+  （Claude Code 能禁止编辑 `private/guard/`、读森空岛凭据，Codex 的规则只管命令）。
+- **一个账号只在一台电脑上定时跑。** 两台会抢着登录（互相挤下线），一台花的合成玉还会让另一台的对账以为被偷偷花了而停机。setup 时问清。
 
 ## 2. 目录
 
@@ -17,7 +25,8 @@
 MaaPilot/
   AGENTS.md               给 agent 的总说明（各 agent 通用）：身份、怎么跟用户说话、硬规则、启动时做什么
   CLAUDE.md               引用 AGENTS.md，加 Claude Code 专用的几条（后台叫醒、超时）
-  .claude/settings.json   权限（放行 maapilot 命令）、启动钩子
+  .claude/settings.json   Claude Code 的权限（放行 maapilot 命令）、启动钩子
+  .codex/rules/           Codex 的命令规则（和 .claude/settings.json 的权限一一对应）
   .agents/skills/         各 skill（见第 5 节；.claude/skills 是指向它的链接）
   maapilot/               Python 包：命令行工具
   bin/session-start       启动钩子：把 .venv/bin 加进会话的 PATH（命令直接写 maapilot），再做启动检查
@@ -41,13 +50,14 @@ MaaPilot/
 | `calc need / craft / stages / event` | 纯计算：一个养成目标要多少材料、对照仓库缺多少（也对照别的目标占着的）、哪些能合成、哪几关最省理智、正开着的活动每关掉什么等级的材料（只给建议） |
 | `goals list / add / remove / update / move / expire` | 目标清单的增删改（读写 `goals.md` 的固定字段；完成或放弃时挪进 `goals-done.md`，完成前按快照核对，没到要用户确认；过了期限的挪走；`move` 调先后 = 优先级） |
 | `op upgrade / mastery`、`craft` | 旧版的自动化脚本，照搬过来当"快捷方式"：能成就省事，失败了 agent 自己在界面上做 |
-| `guard snapshot / check / allow` | 真实货币对账；`allow` 记下用户同意的一次花费（权限设置里要弹确认） |
+| `guard snapshot / check / allow` | 真实货币对账；`allow` 记下用户同意的一次花费（唯一要宿主再问一次的命令；定时日常里拒绝） |
 | `daily run` | 日常：按配置依次跑 MAA 任务，出错当场叫 agent 接管，最后叫 agent 做目标部分（见第 6 节） |
 | `daily schedule / unschedule` | 设置、取消系统定时任务 |
 | `daily watch`、`report seen` | 等下一次日常跑完、或官方日程到点（维护结束、活动开始）再返回（会话里一直在后台挂着，马上告诉用户）；记下哪次已经告诉过用户 |
-| `news list / show / told` | 官服游戏内公告里的维护和活动日程（缓存、抽出时间段）；记下哪个时间点已经告诉过用户 |
+| `news list / show / told` | 国服（官服、B 服）游戏内公告里的维护和活动日程（缓存、抽出时间段）；记下哪个时间点已经告诉过用户 |
 | `game version / update` | 模拟器上的游戏版本和官网最新版；下载官网安装包、覆盖安装（只有官服；下载不拿锁） |
-| `reset [--dry-run] [--memory]` | 从头设置：`private/` 整个改名成备份、删本项目的定时任务（要用户确认；不删任何东西） |
+| `reset [--dry-run] [--memory]` | 从头设置：`private/` 整个改名成备份、删本项目的定时任务（用户在对话里同意后做；日常在跑、锁被占着时不做；不删任何东西） |
+| `host status / install` | agent 宿主（Claude Code / Codex）：找不找得到、信没信任这个文件夹、记下的用户会话；`install codex` 在 Codex 设置里信任这个文件夹 |
 
 所有操作模拟器的命令自动拿锁，同一时间只有一个；只读的截图、识字（`screen shot / ocr`）不拿锁，随时能看。
 
@@ -114,14 +124,17 @@ MaaPilot/
 **定时日常**：系统定时任务调 `maapilot daily run`：
 0. 开始前：到期的目标挪走；官方公告旧了重拉，正在停机维护就什么都不跑（叫一个不碰模拟器的 agent 看看对目标的影响）；游戏版本旧了先叫 agent 更新（没更新成就停下）；
 1. 按配置依次跑 MAA 日常项；
-2. 某项失败 → 当场启动一个无头的 `claude -p`（加载 `maapilot-recovery`）接管这一项，它结束后接着跑下一项；
-3. MAA 部分跑完 → 启动 `claude -p`（加载 `maapilot-daily`）做目标部分：刷目标材料、养成、更新目标、写汇报；
+2. 某项失败 → 当场启动一个无头 agent（`config.yaml` 的 `agent`：`claude -p` 或 `codex exec`，加载 `maapilot-recovery`）接管这一项，它结束后接着跑下一项；
+3. MAA 部分跑完 → 启动无头 agent（加载 `maapilot-daily`）做目标部分：刷目标材料、养成、更新目标、写汇报；
 4. 前后货币对账（每个 agent 结束后也对一次），写汇报。
-无头运行显式带上项目的权限设置（`--settings`），要确认的操作一律自动拒绝；agent 结束后换一次锁的 token，它留下的命令不能再操作模拟器。
+无头运行用项目的权限（claude 显式带 `--settings`；codex 用 `.codex/rules/`、在沙箱里跑），要确认的操作一律自动拒绝；agent 结束后换一次锁的 token，它留下的命令不能再操作模拟器。
 会话里说"跑一次日常"而有进行中的目标时，刷理智和领奖励交给在场的 agent，它做完再对账、补汇报；游戏要更新时也停下交给它。
 每次日常前后比一次目标清单，变动（完成、到期、新加、改了什么）写进汇报的「目标变动」，告诉用户。
 
-**会话开着时**：agent 一直在后台挂着 `daily watch`，定时日常一跑完（尤其出了问题）就主动告诉用户，再 `report seen`；
+**会话开着时**：Claude Code 里 agent 一直在后台挂着 `daily watch`，定时日常一跑完（尤其出了问题）就主动告诉用户，再 `report seen`；
+Codex 的后台命令叫不醒模型，改由日常结束时 `codex queue` 把一条通知推进用户的 Codex 会话（启动检查记下会话编号）：定时日常的以 `[MaaPilot 定时日常]` 开头，
+在 Codex 会话里手动跑的 `daily run` 以 `[MaaPilot 日常]` 开头。通知只带程序生成的固定字段（运行编号、状态、没做成的项代码……），写明它不是用户的话、不算同意，
+agent 只拿运行编号去 `report show` 看汇报、告诉用户，再 `report seen`（定时日常叫起的 agent 不能 `report seen` / `news told`，用户还没看到）；
 维护结束、活动开始也会让它结束，agent 按 `maapilot-events` 更新游戏、跟用户说活动，再 `news told`。
 会话开头的启动检查列出进行中的目标、官方日程；还没告诉过用户的问题（`unseen_problems`）和到点还没说的日程（`news.due`），第一句就说。
 
@@ -131,7 +144,8 @@ MaaPilot/
 
 - **加目标时报一次**：要花哪些材料、龙门币、理智，仓库够不够。用户同意就写入，以后执行不再问。
 - **目标之外的花费**：问用户。
-- **合成玉、源石**：每次都问。用户同意后 agent 用 `guard allow` 记下（会弹权限确认），对账时放行这一笔；没记下的减少 → 停下、通知用户。
+- **合成玉、源石**：每次都问。用户同意后 agent 用 `guard allow` 记下（宿主再弹一次确认），对账时放行这一笔；没记下的减少 → 停下、通知用户。
+- **改定时日常、改设置、从头设置**：用户在对话里同意就做，程序不另弹确认；`daily schedule` 的输出带上定时日常要执行的程序，agent 转告用户。
 - **其他没把握的事**（理智液算不算真实货币、日常多久叫一次 agent……）：第一次遇到时问，答案写进用户偏好（`private/memory/`）。
 
 ## 8. 从旧项目复用
@@ -142,7 +156,7 @@ MaaPilot/
 
 ## 9. 验收
 
-1. 打开 `~/Developer/MaaPilot`，启动 `claude`，说第一句话就进入 setup；确认模拟器、确认日常内容后 setup 完成。
+1. 打开 `~/Developer/MaaPilot`，启动 `claude` 或 `codex`，说第一句话就进入 setup；确认模拟器、确认日常内容后 setup 完成。
 2. 自由对话里能做到：重新跑一次日常；练干员（等级、技能、专精）；合成指定材料；复杂任务（模组任务、剿灭）。
 3. 定时日常里 MAA 出错会当场叫 agent 接管，跑完有汇报。
 4. 没经用户确认的合成玉、源石减少会被发现并停下。

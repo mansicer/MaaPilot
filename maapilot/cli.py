@@ -32,6 +32,7 @@ GROUPS = [
     "maapilot.tools.game",
     "maapilot.tools.copilot_cmd",
     "maapilot.tools.news_cmd",
+    "maapilot.tools.host_cmd",
     "maapilot.tools.dev_cmd",            # 开发用（dev review），不给用户的 agent
     "maapilot.flows.goals",
     "maapilot.flows.daily",

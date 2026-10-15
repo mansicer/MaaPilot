@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 
-from maapilot import cliutil, paths
+from maapilot import cliutil, hosts, paths
 from maapilot.cliutil import BUSY, NEEDS_USER
 from maapilot.flows import report as reportmod
 from maapilot.flows.daily.agent import _after_agent, _stop_leftover_maa
@@ -46,7 +46,8 @@ def depot_change(before: dict | None, after: dict | None) -> list[dict] | None:
 # --- 对账 ------------------------------------------------------------------------------------------------------------
 
 def _guard(r: _Run, which: str, env: dict, after: str) -> None:
-    """guard snapshot / check。check 不过 → 记下并 _Stop；命令本身没做成 → 告警，接着跑。"""
+    """guard snapshot / check。check 不过 → 记下并 _Stop；命令本身没做成 → 告警、记 guard_unreadable（算问题，
+    要告诉用户），接着跑。之后有一次 check 做成了（以上一次的记录为准对上了账）就去掉 guard_unreadable。"""
     code, env_ = daily.maapilot_call(["guard", which], env, timeout_s=15 * 60)
     r.event(f"guard_{which}", after=after, exit=code, error=env_.get("error"))
     if which == "snapshot" and code not in (0, NEEDS_USER):   # 读仓库没成（10-12 04:40：换日后首页多半有弹窗）：
@@ -55,9 +56,12 @@ def _guard(r: _Run, which: str, env: dict, after: str) -> None:
         r.event(f"guard_{which}", after=after, exit=code, error=env_.get("error"), retry=True)
     if which == "snapshot" and code != NEEDS_USER:       # 退出码 3：上次之后有人动过，改做的对账没过
         if code != 0:
+            r.data["guard_unreadable"] = True
             r.data["alerts"].append(f"开始前没能记下合成玉、源石（{(env_.get('error') or {}).get('message')}），"
                                     "这次对账以上一次的记录为准")
         return
+    if code in (0, NEEDS_USER):
+        r.data.pop("guard_unreadable", None)
     if code == NEEDS_USER:
         g = env_.get("data") or {}
         r.data["guard"] = {"ok": False, "after": after, **{k: g.get(k) for k in ("before", "after", "unexplained")}}
@@ -68,6 +72,7 @@ def _guard(r: _Run, which: str, env: dict, after: str) -> None:
         r.data["guard"] = {"ok": True}
     else:
         r.data["guard"] = {"ok": None, "error": (env_.get("error") or {}).get("message")}
+        r.data["guard_unreadable"] = True
 
 
 def _box_fresh() -> str | None:
@@ -145,7 +150,8 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
         elif headless:
             r.data["agents"] += 1
             daily._set_step(f"{task}:agent")
-            info = daily.run_agent(cfg, recovery_prompt(r.data["run_id"], task, err, data, args, cli=cli), env,
+            info = daily.run_agent(cfg, recovery_prompt(r.data["run_id"], task, err, data, args, cli=cli,
+                                                               host=hosts.name(cfg)), env,
                                    paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{task}.jsonl",
                                    recovery=True)
             _after_agent(r, env, lk)

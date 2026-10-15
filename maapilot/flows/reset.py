@@ -6,7 +6,7 @@
 crontab 只删以 `# maapilot-v2 <本仓库>` 结尾的行（复用 daily unschedule），别的行不动。
 `--memory`：用户偏好不留：private/memory/ 不复制回来，Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
 
-日常在跑、模拟器锁被占着、在日常叫起来的 agent 里（环境里有 MAAPILOT_DAILY_RUN 或继承的锁）→ 不做。权限是"询问"。契约见 docs/cli.md「reset」。
+日常在跑、模拟器锁被占着（包括日常叫起来的 agent 继承着锁）→ 不做。契约见 docs/cli.md「reset」。
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 
 from maapilot import paths
-from maapilot.cliutil import BAD_REQUEST, BUSY, CliError
+from maapilot.cliutil import BUSY, CliError
 from maapilot.tools import common
 
 PROJECTS_ENV = "MAAPILOT_CLAUDE_PROJECTS_DIR"     # 测试用：Claude Code 的 projects 目录
@@ -44,9 +44,6 @@ def memory_dir(root: Path | None = None) -> Path:
 def _refuse_if_busy() -> None:
     from maapilot.crew import lock
     from maapilot.flows import daily
-    if os.environ.get(daily.DAILY_ENV) or os.environ.get(lock.TOKEN_ENV):
-        raise CliError("not_allowed", "这是日常叫起来的 agent（或继承了模拟器锁），不能重置",
-                       hint="重置只在用户在场、亲口要求时做", exit=BAD_REQUEST)
     run = daily.running()
     if run:
         raise CliError("daily_running", f"日常 {run.get('run_id')} 正在跑（{run.get('step') or '?'}），先等它跑完",
@@ -124,14 +121,12 @@ def reset(dry_run: bool, memory: bool) -> dict:
 
 def cmd(args):
     if not args.dry_run:
-        from maapilot.tools import confirm
         _refuse_if_busy()
-        confirm.require("从头设置")
     return reset(args.dry_run, args.memory)
 
 
 def register(sub) -> None:
-    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份、删本项目的定时任务（用户在对话里同意后才跑）")
+    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份、删本项目的定时任务（用户在对话里同意后再跑）")
     p.add_argument("--dry-run", action="store_true", help="只列出会挪走、删掉什么，不动")
     p.add_argument("--memory", action="store_true", help="用户偏好也不留（private/memory/ 随备份走，Claude Code 的自动记忆也挪成备份）")
     p.set_defaults(func=cmd, command="reset")

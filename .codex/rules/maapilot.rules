@@ -1,0 +1,30 @@
+# MaaPilot：Codex 的命令规则（和 .claude/settings.json 的权限一一对应，tests/test_hosts.py 检查）。
+# allow 在沙箱外跑、不弹确认；prompt 每次问用户（无头 codex exec 里等于拒绝）；forbidden 一律拒绝。
+# 只有合成玉 / 源石的放行（guard allow）要问；其余以用户在对话里的同意为准。
+# 禁止的只有绕过锁和对账的直接操作（直接用 maa 跑任务、直接 adb shell）和森空岛凭据。
+ALLOW = [
+    ["maapilot", ["doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report", "reset"]],
+    ["maapilot", "daily", ["run", "status", "watch", "schedule", "unschedule"]],
+    ["maapilot", "guard", ["snapshot", "check", "status"]],
+    ["maapilot", "lock", ["status", "release"]],
+    ["maapilot", "skland", "status"],
+    ["maapilot", "host", ["status", "install"]],
+    ["maapilot", "news", ["list", "show", "told"]],
+    ["maapilot", "game", ["version", "update"]],
+    ["maapilot", "copilot", ["find", "show", "strip"]],
+    ["sleep", "300"],
+]
+PROMPT = [
+    ["maapilot", "guard", "allow"],
+]
+FORBIDDEN = [
+    ["maa", ["run", "fight", "copilot", "ssscopilot", "roguelike", "reclamation", "startup", "closedown"]],
+    ["adb", ["shell", "-s"]],
+    ["maapilot", "skland", "token"],
+]
+for p in ALLOW:
+    prefix_rule(pattern = p, decision = "allow")
+for p in PROMPT:
+    prefix_rule(pattern = p, decision = "prompt")
+for p in FORBIDDEN:
+    prefix_rule(pattern = p, decision = "forbidden", justification = "MaaPilot：只通过 maapilot 操作模拟器")

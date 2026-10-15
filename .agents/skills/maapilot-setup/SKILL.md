@@ -14,8 +14,8 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 说清你是谁、接下来做什么，例如："你好！我是你的明日方舟助手，能帮你每天自动做日常、练干员、合材料。先花十几分钟把环境设好：确认模拟器、装 MAA、问你几个日常的偏好。先问一句：电脑上已经装好安卓模拟器、装了明日方舟吗？"
 
-用户说要从头设置（全部重来）：先 `maapilot reset --dry-run` 把会挪走什么、删掉哪个定时任务给用户看，用户同意再 `maapilot reset`（弹确认；
-用户偏好记录也要清才加 `--memory`），然后请用户重新开一次会话。
+用户说要从头设置（全部重来）：先 `maapilot reset --dry-run` 把会挪走什么、删掉哪个定时任务给用户看，用户同意再 `maapilot reset`（
+用户偏好记录也要清才加 `--memory`；日常在跑或模拟器被占着时它不做，等一会儿再来），然后请用户重新开一次会话。
 
 重新设置（`private/setup.json` 已经在）时：先 `maapilot doctor` 看哪些已经好了，只重做用户想改的和没通过的部分。
 
@@ -28,7 +28,8 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
    - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
 3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
    再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
-4. 装好后 `maapilot doctor --offline`（启动钩子已经把 `.venv/bin` 加进了 PATH，同一个会话就能用；万一提示找不到命令，就用 `.venv/bin/maapilot` 跑这一次，并请用户之后重开一次会话）。能出结果就接着往下做。
+4. 装好后 `maapilot doctor --offline`（Claude Code 的启动钩子已经把 `.venv/bin` 加进了 PATH，同一个会话就能用；提示找不到命令（例如在 Codex 里）就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
+   在 Codex 里装东西要联网，沙箱里没有网络：命令会请用户批准在沙箱外跑，告诉用户这是装运行环境、点同意。
 
 ## 1. 模拟器
 
@@ -61,18 +62,19 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。你的 agent 可能要用户批准这两条命令 |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
-| `claude` | `trusted: false`：请用户在这个文件夹里正常启动一次 claude 并接受信任提示（不然定时日常叫起的 agent 用不了放行的命令）；这项只是提示 |
+| `claude` / `codex` | 定时日常叫起的 agent（`config.yaml` 的 `agent`）。`trusted: false`：Claude Code——请用户在这个文件夹里正常启动一次 claude 并接受信任提示（这项只是提示）；Codex——征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。Codex 这项是必须的：不信任时项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住不该跑的，`daily schedule` 会拒绝 |
 
 装软件前说清装什么、为什么；用户不同意就停在这里，告诉用户缺了它哪些事做不了。
 
-然后把 `tools.maa`、`tools.claude` 改成绝对路径（定时任务的 PATH 很短）：`doctor` 的 `maa_cli`、`claude` 两项的 `path` 就是，写进 `private/config.yaml`。`claude` 项没通过时问用户 claude 装在哪。
+定时日常叫哪个 agent：你现在跑在哪个里面（Claude Code 还是 Codex），`agent` 就写哪个（`claude` / `codex`），不用问用户；用户想换再改。
+然后把 `tools.maa`、`tools.<agent>` 改成绝对路径（定时任务的 PATH 很短）：`doctor` 的 `maa_cli`、`claude` / `codex` 两项的 `path` 就是，写进 `private/config.yaml`。那一项没通过时问用户它装在哪。
 
 ## 3. 试启动、第一次读账号
 
 1. `maapilot maa startup`（启动游戏回首页，一两分钟）。成功后看 `data.home`：不是 `true` 就 `maapilot screen shot` 看停在哪，按 `maapilot-recovery`「回首页」回去；
    是 `true` 也截一张图，看一眼确实在首页（右上有"终端"）。
    失败：按 `maapilot-recovery` 看屏幕。常见：停在登录页（账号没登录过 → 请用户在模拟器里手动登录一次）、公告弹窗、正在更新资源（等它下完）。
-2. `maapilot state depot`（读仓库，一两分钟），再 `maapilot state box`（读干员，几分钟，放后台跑）。
+2. `maapilot state depot`（读仓库，一两分钟），再 `maapilot state box`（读干员，几分钟；Claude Code 里放后台跑，Codex 里前台跑、等它结束）。
 3. 告诉用户读到了什么，一两句："读到了：龙门币约 120 万、合成玉 3200、干员 86 名。"读不到就说哪样没读到，稍后日常会再读。
 
 ## 4. 问日常（一次一个问题）
@@ -103,15 +105,17 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 ## 5. 写配置、设定时、收尾
 
-1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行；会弹确认框时告诉用户点同意就是保存设置）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`tools`。改完 `maapilot doctor` 再确认一次。
-2. 先 `maapilot daily schedule --dry-run`，把时间和 `exec` 里要执行的程序路径告诉用户，用户同意后 `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`）；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
+1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`agent`、`tools`。改完 `maapilot doctor` 再确认一次。
+2. 设定时前问一句：这个账号是不是已经在别的电脑上设了定时日常？是的话这里就不设（两台会抢着登录，还会让对方的货币对账以为钱被偷偷花了），跳到第 3 步；用户想换到这台，请他先在那台停掉。
+   `agent` 是 `codex` 时，先确认 `doctor` 的 `codex` 项通过（`maapilot host install codex` 做过），不然 `daily schedule` 会拒绝（`codex_untrusted`）。
+   `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`），把设好的时间和输出里 `exec` 的几个程序（定时日常会在用户不在时运行它们）告诉用户；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
-   - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude 问"今天做了什么"就行；
+   - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude（或 codex）问"今天做了什么"就行；
    - 可以直接说想做的事："把某某练到精2""合 10 个聚酸酯组""打一次剿灭""现在跑一次日常"；
    - 花合成玉、源石的事每次都会先问；别的第一次遇到时问，之后按用户的回答办。
 5. 问一句要不要现在就跑一次日常（`maapilot-daily`），不跑也没关系。
-6. 开始盯着日常：后台挂一个 `maapilot daily watch`（见 AGENTS.md「盯着日常」；环境做不到后台叫醒就不挂），以后一直挂着。
+6. 开始盯着日常（见 AGENTS.md「盯着日常」）：Claude Code 里后台挂一个 `maapilot daily watch`，以后一直挂着；Codex 里不用挂，日常跑完程序会把通知推进会话。
 
 ## 问用户的情形
 
@@ -120,7 +124,8 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 - 服务器认不出时；
 - 日常几次几点、做哪些、没目标刷哪关；
 - 游戏更新后的用户协议要不要直接同意；
-- 旧版定时任务要不要停。
+- 旧版定时任务要不要停；
+- 这个账号是不是已经在别的电脑上定时跑着。
 
 除此之外不要问（理智液、汇报详略、代选这类以后遇到再问）。
 

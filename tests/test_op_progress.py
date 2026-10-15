@@ -349,3 +349,37 @@ def test_run_task_collects_core_log_warnings(monkeypatch, tmp_path):
     """)
     run = maacore.run_task("OperProgress", {}, label="t", timeout_s=30)
     assert run.warnings == [NOT_FOUND]
+
+
+@pytest.mark.parametrize("args,rows,km", [
+    # 两个专精，第一个就卡在训练室选人：只有一条，但不是找干员
+    (["--mastery", "1:1", "--mastery", "3:2"], [detail("Failed", "RecognitionFailed")], (1, 1)),
+    # 第一个专精做完、第二个卡在训练室选人
+    (["--mastery", "1:1", "--mastery", "3:2"],
+     [detail("Success", "AlreadySatisfied", skill_mastery=[1, 0, 0]), detail("Failed", "RecognitionFailed")], (3, 2)),
+    # 精英化本来就到了，专精卡在训练室选人
+    (["--elite", "2", "--allow-catalyst", "--mastery", "3:1"],
+     [detail("Success", "AlreadySatisfied", elite=2), detail("Failed", "RecognitionFailed")], (3, 1)),
+])
+def test_trainee_not_found_on_later_mastery_falls_back(ops, fake_device, monkeypatch, capsys, args, rows, km):
+    _progress_env(monkeypatch, core_run(*rows, summary(failed=1), warnings=[NOT_FOUND]))
+    calls = []
+    monkeypatch.setattr(op, "mastery", lambda name, skill, rank: calls.append((skill, rank))
+                        or {"operator": name, "skill": skill, "status": "started", "rank": rank, "hours": 8})
+    assert cli.main(["op", "progress", "能天使", *args]) == 0
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert calls == [km] and "找干员" not in [r["step"] for r in d["steps"]]
+    assert "基建设施里工作" in d["fallback"]["reason"]
+
+
+def test_single_recognition_failure_without_trainee_warning_is_still_locating(ops):
+    _, steps = op.progress_plan("能天使", None, None, ["1:1", "3:2"])
+    with pytest.raises(CliError) as e:
+        op.progress_result("能天使", steps, core_run(detail("Failed", "RecognitionFailed"), summary(failed=1)))
+    assert e.value.data["steps"][0]["step"] == "找干员"
+    # 精英化排第一：就算日志里有训练室那句，也不会把精英化那条当成专精
+    _, steps = op.progress_plan("能天使", 2, None, ["3:1"])
+    with pytest.raises(CliError) as e:
+        op.progress_result("能天使", steps, core_run(detail("Failed", "RecognitionFailed"), summary(failed=1),
+                                                     warnings=[NOT_FOUND]))
+    assert e.value.data["steps"][0]["step"] == "找干员"

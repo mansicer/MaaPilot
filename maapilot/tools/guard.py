@@ -7,13 +7,14 @@
 一件都没认出 → 读不到（退出码 1），不做判断。
 
 文件（private/guard/，只由程序写）：
-- snapshot.json  `{at, originite, orundum}`：上次通过时的数；
+- snapshot.json  `{at, originite, orundum, exact}`：上次通过时的数；exact = 两个数都是首页顶栏的精确值；
 - allowances.jsonl  每行一笔用户同意的花费 `{at, item, amount, reason, used, used_amount}`；
 - stop.json  `{at, before, after, unexplained, run_id?}`：在就是停机中（`doctor --brief`、`daily run` 会看）；
 - dirty.json  `{since, commands}`：上次对账（或快照）之后跑过可能花东西的命令（点击、MAA 任务、快捷操作；
   `cliutil.device()` 拿锁时调 `mark_dirty`）。
 
-check：上千的数减少不到 1000 当作读数误差（ROUNDING）；其余减少量先扣掉快照之后记下的、还没用完的放行（按时间先后）；还有没放行的减少 → 写 stop.json、退出码 3；
+check：上千的数减少不到 1000 当作读数误差（ROUNDING）——只在有一边不是顶栏精确值时；这样放过的项不更新快照里的数
+（起点不往下挪，几次几百的小花费累计到 1000 照样会被发现）。其余减少量先扣掉快照之后记下的、还没用完的放行（按时间先后）；还有没放行的减少 → 写 stop.json、退出码 3；
 通过 → 更新快照、删 stop.json 和 dirty.json。增加不算问题。读不到时什么都不改（dirty 留着，下次照样要对）。
 
 snapshot：只在"快照之后没人碰过会花钱的操作"时重记起点（这样用户自己在游戏里花的不会被当成异常）；
@@ -96,26 +97,33 @@ def currencies(depot_items: dict) -> dict:
 
 
 def read_now() -> dict:
-    """识别仓库（同时更新 depot 快照），再回首页读顶栏，返回 {originite, orundum}。不拿锁。"""
+    """识别仓库（同时更新 depot 快照），再回首页读顶栏，返回 {originite, orundum, exact}。不拿锁。
+    exact：用上了顶栏的精确值（merge_topbar 认了顶栏）。"""
     from maapilot.tools.state import read_depot, read_home
     depot = currencies(read_depot()["items"])
     try:
         top = read_home()[0]
     except Exception:                                  # 顶栏读不到就只用仓库识别的数
         top = None
-    return merge_topbar(depot, top)
+    return {**merge_topbar(depot, top), "exact": _topbar_ok(depot, top)}
+
+
+def _topbar_ok(depot: dict, top: dict | None) -> bool:
+    """顶栏的两个数都和仓库识别对得上（不小于它、差不到取整的一格）。"""
+    if not top:
+        return False
+    for k in ITEMS:
+        d, t = int(depot.get(k) or 0), top.get(k)
+        if t is None or not d <= t < d + (1000 if d >= 10000 else 1):
+            return False
+    return True
 
 
 def merge_topbar(depot: dict, top: dict | None) -> dict:
     """仓库识别把上万的数取整（真机：合成玉 16566 认成 16000），单笔几百的花费可能看不出来。
-    首页顶栏是精确值，但 OCR 可能读错：和仓库识别对得上（不小于它、差不到取整的一格）才用顶栏的数。"""
-    if not top:
+    首页顶栏是精确值，但 OCR 可能读错：和仓库识别对得上才用顶栏的数；有一样对不上就说明顶栏读歪了，都不用。"""
+    if not _topbar_ok(depot, top):
         return dict(depot)
-    for k in ITEMS:                                    # 有一样对不上就说明顶栏读歪了，都不用
-        d, t = int(depot.get(k) or 0), top.get(k)
-        step = 1000 if d >= 10000 else 1
-        if t is None or not d <= t < d + step:
-            return dict(depot)
     return {k: int(top[k]) for k in ITEMS}
 
 
@@ -156,9 +164,9 @@ def open_allowances(since: str | None, rows: list[dict] | None = None) -> list[d
 
 
 def take_snapshot(values: dict | None = None) -> dict:
-    """记下现在的数（values 省略时读一次仓库）。不拿锁、不做判断（给 check 用；命令走 snapshot()）。"""
+    """记下现在的数（values 省略时读一次仓库；可带 exact）。不拿锁、不做判断（给 check 用；命令走 snapshot()）。"""
     values = values if values is not None else read_now()
-    snap = {"at": common.iso(), **values}
+    snap = {"at": common.iso(), **{k: values.get(k) for k in ITEMS}, "exact": bool(values.get("exact"))}
     common.write_json(snapshot_file(), snap)
     _clear_dirty()
     return snap
@@ -183,9 +191,11 @@ def snapshot() -> dict:
 ROUNDING = 1000      # 上千的数读不准（仓库识别把上万的取整，顶栏也可能读不到）：减少不到这么多不算花费
 
 
-def evaluate(before: dict, after: dict, allowances: list[dict]) -> tuple[dict, dict, dict]:
+def evaluate(before: dict, after: dict, allowances: list[dict], exact: bool = False,
+             tolerated: set | None = None) -> tuple[dict, dict, dict]:
     """纯函数：(allowed 每种放行合计, used {allowance 下标: 用掉多少}, unexplained 每种没放行的减少（负数）)。
-    前后有一个数上千时，减少不到 ROUNDING 当作读数误差，不算花费（用户 2026-10-05 定：不考虑只花了几百合成玉的情况）。"""
+    前后有一个数上千时，减少不到 ROUNDING 当作读数误差，不算花费（用户 2026-10-05 定：不考虑只花了几百合成玉的情况）；
+    exact（前后都是顶栏精确值）时没有读数误差，不放过。这样放过的项加进 tolerated（给 check 留住快照里的数）。"""
     allowed = {k: 0 for k in ITEMS}
     used: dict[int, int] = {}
     unexplained = {}
@@ -195,7 +205,9 @@ def evaluate(before: dict, after: dict, allowances: list[dict]) -> tuple[dict, d
         allowed[k] = sum(int(r.get("amount", 0)) - int(r.get("used_amount", 0)) for _, r in rows)
         if dec <= 0:
             continue
-        if dec < ROUNDING and max(int(before.get(k) or 0), int(after.get(k) or 0)) >= ROUNDING:
+        if not exact and dec < ROUNDING and max(int(before.get(k) or 0), int(after.get(k) or 0)) >= ROUNDING:
+            if tolerated is not None:
+                tolerated.add(k)
             continue
         left = dec
         for i, r in rows:
@@ -214,14 +226,17 @@ def evaluate(before: dict, after: dict, allowances: list[dict]) -> tuple[dict, d
 def check(values: dict | None = None, *, run_id: str | None = None) -> dict:
     """对账。通过返回 data；没放行的减少抛 CliError(currency_decreased, 退出码 3)。不拿锁。"""
     snap = common.read_json(snapshot_file())
-    after = values if values is not None else read_now()
+    raw = values if values is not None else read_now()
+    after, exact = {k: raw.get(k) for k in ITEMS}, bool(raw.get("exact"))
     if not snap:
-        take_snapshot(after)
+        take_snapshot(raw)
         return {"baseline": True, "after": after, "detail": "还没有快照：这次的数记为起点"}
     before = {k: snap.get(k) for k in ITEMS}
     all_rows = load_allowances()
     open_rows = open_allowances(snap.get("at"), all_rows)
-    allowed, used, unexplained = evaluate(before, after, open_rows)
+    tolerated: set = set()
+    allowed, used, unexplained = evaluate(before, after, open_rows, exact=bool(snap.get("exact")) and exact,
+                                          tolerated=tolerated)
     data = {"before": before, "after": after, "allowed": allowed, "unexplained": unexplained}
     if unexplained:
         stop = {"at": common.iso(), "before": before, "after": after, "unexplained": unexplained}
@@ -238,7 +253,8 @@ def check(values: dict | None = None, *, run_id: str | None = None) -> dict:
         r["used"] = r["used_amount"] >= int(r.get("amount", 0))
     if used:
         _save_allowances(all_rows)                   # open_rows 是 all_rows 里的同一批对象
-    take_snapshot(after)
+    # 当作读数误差放过的项留住原来的数：起点不往下挪，几次小花费累计够了照样拦得住
+    take_snapshot({**after, **{k: before[k] for k in tolerated}, "exact": exact and not tolerated})
     was_stopped = stopped() is not None
     try:
         stop_file().unlink()

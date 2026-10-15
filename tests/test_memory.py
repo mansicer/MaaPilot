@@ -32,3 +32,38 @@ def test_no_claude_memory_no_dir():
 def test_index_built_when_claude_had_none():
     _claude_memory({"a.md": "x"})
     assert memory.import_claude() == ["a.md"] and memory.index_lines() == ["- [a](a.md)"]
+
+
+def test_imports_into_existing_dir_without_overwriting():
+    """setup 之类先建了 private/memory/（还没有 MEMORY.md）也照样搬；已经有的同名文件不覆盖。"""
+    _claude_memory({"MEMORY.md": "- [理智液](sanity.md) — 旧的\n", "sanity.md": "旧的", "shop.md": "先不换"})
+    dst = memory.memory_dir()
+    dst.mkdir(parents=True)
+    (dst / "sanity.md").write_text("新的", encoding="utf-8")
+    assert memory.import_claude() == ["MEMORY.md", "shop.md"]
+    assert (dst / "sanity.md").read_text(encoding="utf-8") == "新的" and (dst / "shop.md").exists()
+    assert (dst / memory.MARKER).read_text(encoding="utf-8").startswith(str(reset.memory_dir()))
+    assert (reset.memory_dir() / "sanity.md").read_text(encoding="utf-8") == "旧的"          # 原来的不动
+
+
+def test_index_lists_existing_files_too():
+    _claude_memory({"a.md": "x"})
+    dst = memory.memory_dir()
+    dst.mkdir(parents=True)
+    (dst / "b.md").write_text("y", encoding="utf-8")
+    assert memory.import_claude() == ["a.md"] and memory.index_lines() == ["- [a](a.md)", "- [b](b.md)"]
+
+
+def test_imports_only_once_even_if_index_deleted():
+    _claude_memory({"a.md": "x"})
+    assert memory.import_claude() == ["a.md"]
+    (memory.memory_dir() / "MEMORY.md").unlink()                                 # 用户特意删掉目录
+    (memory.memory_dir() / "a.md").unlink()
+    assert memory.import_claude() == [] and not (memory.memory_dir() / "a.md").exists()
+
+
+def test_existing_index_blocks_import():
+    _claude_memory({"a.md": "x"})
+    memory.memory_dir().mkdir(parents=True)
+    (memory.memory_dir() / "MEMORY.md").write_text("- [b](b.md)\n", encoding="utf-8")
+    assert memory.import_claude() == [] and not (memory.memory_dir() / "a.md").exists()

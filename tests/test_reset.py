@@ -117,14 +117,6 @@ def test_reset_refuses_when_busy(capsys, world, monkeypatch):
     code, env = run(capsys, "reset", "--dry-run")
     assert code == 4 and env["error"]["code"] == "busy" and "token" not in env["data"]["holder"]
     paths.LOCK_FILE.unlink()
-    # 日常叫起来的 agent 里
-    monkeypatch.setenv(daily.DAILY_ENV, "20261002-1640")
-    code, env = run(capsys, "reset")
-    assert code == 2 and env["error"]["code"] == "not_allowed"
-    monkeypatch.delenv(daily.DAILY_ENV)
-    monkeypatch.setenv(lock.TOKEN_ENV, "abc")
-    code, env = run(capsys, "reset")
-    assert code == 2 and env["error"]["code"] == "not_allowed"
     # 什么都没动
     assert (paths.PRIVATE / "config.yaml").exists() and MINE in world["crontab"].read_text(encoding="utf-8")
 

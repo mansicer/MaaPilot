@@ -121,6 +121,10 @@ def seen_runs() -> dict:
 
 
 def mark_seen(run_id: str | None) -> dict:
+    from maapilot.tools import confirm
+    if confirm._unattended():                          # 无头 agent 标了，用户就再也看不到这次的问题
+        raise CliError("not_allowed", "定时日常叫起的 agent 不能把汇报标成已读（用户还没看到）", exit=BAD_REQUEST,
+                       hint="写进你的总结；用户会话里的 agent 说完才标")
     rid = run_id or (runs() or [None])[0]
     if rid is None:
         raise CliError("no_report", "还没有日常汇报", exit=BAD_REQUEST)
@@ -132,11 +136,11 @@ def mark_seen(run_id: str | None) -> dict:
 
 
 def has_problem(d: dict) -> bool:
-    """跑完了但不顺利：没做成的项、对账停下、没跑完、交给 agent 的。还在跑的不算。"""
+    """跑完了但不顺利：没做成的项、对账停下、没能对账（读不到仓库）、没跑完、交给 agent 的。还在跑的不算。"""
     st = d.get("status")
     if st in (None, "running", "maintenance"):         # 停机维护没跑：不算问题（启动检查会单独提维护）
         return False
-    return st != "done" or d.get("ok") is False or bool(d.get("failed"))
+    return st != "done" or d.get("ok") is False or bool(d.get("failed")) or bool(d.get("guard_unreadable"))
 
 
 def source_alerts(d: dict) -> list[str]:
@@ -169,7 +173,7 @@ def problem_brief(d: dict) -> dict:
 
 STATUS_WORDS = {"done": "跑完了", "stopped": "因为货币对账停下了", "aborted": "没跑完", "handed_off": "停下交给了 agent",
                 "running": "还在跑", "maintenance": "赶上官方停机维护，没跑",
-                "update_failed": "因为游戏没更新成停下了"}
+                "update_failed": "因为游戏没更新成停下了", "refused": "开头就被拦下，没开始"}
 
 
 def summary_lines(d: dict) -> list[str]:
@@ -190,6 +194,8 @@ def summary_lines(d: dict) -> list[str]:
         names = {"orundum": "合成玉", "originite": "源石"}
         lines.append(f"对账：{b['guard_stop'].get('reason') or '停下了'}"
                      + ("（" + "、".join(f"{names.get(k, k)} {v:+}" for k, v in u.items()) + "）" if u else ""))
+    if d.get("guard_unreadable") and not b.get("guard_stop"):
+        lines.append("没能核对合成玉 / 源石（读不到仓库），这次的花费没有对账")
     if b.get("handoff"):
         lines.append(f"停在：{label(b['handoff'].get('task') or '?')}（{b['handoff'].get('error')}）")
     lines += [f"告警：{a}" for a in b["alerts"]]
@@ -378,6 +384,8 @@ def render(d: dict) -> str:
     elif status == "handed_off":
         h = d.get("handoff") or {}
         out.append(f"停在{label(h.get('task', ''))}：没做成，交给在场的 agent 处理，处理完接着跑后面的。")
+    elif status == "refused":
+        out.append("**开头就被拦下，没开始：" + ((d.get("error") or {}).get("message") or "原因不明") + "。**")
     elif status == "stopped":
         out.append("**停下了：" + (d.get("stop_reason") or "合成玉或源石有没经同意的减少") + "。**")
     elif failed:

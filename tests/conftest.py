@@ -14,6 +14,10 @@ def _tmp_private(tmp_path, monkeypatch):
     monkeypatch.setenv("MAAPILOT_MAA_LOG_DIR", str(tmp_path / "no-maa-log"))
     # 用户偏好搬家不读真的 ~/.claude（要测的测试自己指定）
     monkeypatch.setenv("MAAPILOT_CLAUDE_PROJECTS_DIR", str(tmp_path / "no-claude-projects"))
+    # Codex 的用户配置不读写真的 ~/.codex；启动检查不把跑测试的会话当成用户的会话
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    for k in ("CODEX_THREAD_ID", "CLAUDECODE"):
+        monkeypatch.delenv(k, raising=False)
     # 活动关卡不读本机 maa-cli 缓存里真的活动列表（要测的测试自己指定）
     monkeypatch.setenv("MAAPILOT_MAA_ACTIVITY_FILE", str(tmp_path / "no-maa-activity.json"))
     monkeypatch.setenv("MAAPILOT_MAA_TASKS_FILE", str(tmp_path / "no-maa-tasks.json"))
