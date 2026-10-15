@@ -97,6 +97,22 @@ def test_kill_tree_stops_whole_tree(tree):
         assert took < 5
 
 
+
+@pytest.mark.skipif(sys.platform != "win32", reason="只查 Windows 的 Ctrl+Break")
+@pytest.mark.xfail(strict=False, reason="诊断：不经 venv 启动器的 python 收到 Ctrl+Break 能不能在 grace 里走"
+                                       "（XPASS = 能，问题在启动器；XFAIL = Ctrl+Break 本身没送到）")
+def test_ctrl_break_stops_python_without_venv_launcher(tmp_path):
+    f = tmp_path / "pids"
+    base = getattr(sys, "_base_executable", sys.executable)
+    p = procs.spawn([base, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').write(f'{os.getpid()} 0')\n"
+                                 "time.sleep(60)\n", str(f)])
+    me, _ = _pids(f)
+    assert me == p.pid
+    t0 = time.monotonic()
+    procs.kill_tree(p, 5)
+    assert time.monotonic() - t0 < 5 and p.returncode != 1             # 1 是结束 Job 时给的退出码
+
+
 @posix
 def test_kill_tree_escalates_to_kill(tmp_path):
     """不理 TERM 的进程：等 grace 秒后 KILL。"""

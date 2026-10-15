@@ -178,7 +178,8 @@ def test_token_command_saves_privately(fake, capsys, monkeypatch):
     assert TOKEN not in out.out and TOKEN not in out.err
     p = skland_cmd.store_path()
     assert json.loads(p.read_text(encoding="utf-8"))["token"] == TOKEN and json.loads(p.read_text(encoding="utf-8"))["did"] == "BDEV"
-    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    if os.name != "nt":                                                  # Windows 没有 Unix 权限位，chmod 只管只读
+        assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
     code, env, out = run(capsys, "skland", "status")
     assert code == 0 and env["data"]["configured"] is True and env["data"]["token_expired"] is False
     assert TOKEN not in out.out

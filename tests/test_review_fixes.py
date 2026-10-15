@@ -7,9 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from maapilot import cli, cliutil, paths
 from maapilot.crew import lock
