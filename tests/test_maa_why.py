@@ -19,6 +19,8 @@ def run(capsys, *argv):
 
 
 P = "[Px95034][Tx15413]"
+# asst.log 里是本机本地时间：记录和 --since 用本机的时区写（CI 上本机是 UTC，这台 Mac 是 +08:00）
+TZ = datetime(2026, 10, 2, 16).astimezone().isoformat()[-6:]
 
 
 def L(ts: str, level: str, msg: str) -> str:
@@ -114,7 +116,7 @@ def maa_dir(tmp_path, monkeypatch):
                  "2026.10.02-16.30.10.1_raw.png"):
         (d / "interface" / name).write_bytes(b"png")
     (d / "other" / "2026.10.02-16.05.00.66_raw.png").write_bytes(b"png")
-    (d / "interface" / "notes.txt").write_text("x")
+    (d / "interface" / "notes.txt").write_text("x", encoding="utf-8")
     monkeypatch.setenv(maalog.DIR_ENV, str(d))
     return d
 
@@ -137,8 +139,8 @@ def test_read_window_only_reads_the_window(maa_dir):
 def test_read_window_spans_rotated_file(tmp_path):
     d = tmp_path / "dbg"
     d.mkdir()
-    (d / "asst.bak.log").write_text("\n".join(filler(datetime(2026, 10, 2, 9, 0), 100, 1.0)) + "\n")
-    (d / "asst.log").write_text("\n".join(filler(datetime(2026, 10, 2, 9, 2), 100, 1.0)) + "\n")
+    (d / "asst.bak.log").write_text("\n".join(filler(datetime(2026, 10, 2, 9, 0), 100, 1.0)) + "\n", encoding="utf-8")
+    (d / "asst.log").write_text("\n".join(filler(datetime(2026, 10, 2, 9, 2), 100, 1.0)) + "\n", encoding="utf-8")
     rows, info = maalog.read_window(datetime(2026, 10, 2, 9, 1, 30), datetime(2026, 10, 2, 9, 2, 30), d)
     assert len(info["files"]) == 2 and rows[0][0].startswith("2026-10-02 09:01:30")
     assert rows[-1][0].startswith("2026-10-02 09:02:30")
@@ -196,11 +198,11 @@ def _record(**kw):
 
 
 def test_maa_why_default_is_last_failed_task(maa_dir, capsys):
-    _record(at="2026-10-02T16:09:18+08:00", command="maa infrast", args={}, ok=False, exit=1, duration_s=496.0,
+    _record(at="2026-10-02T16:09:18" + TZ, command="maa infrast", args={}, ok=False, exit=1, duration_s=496.0,
             error="maa_failed", run_id="20261002-1558", shot_now="/x/fail-infrast.png")
-    _record(at="2026-10-02T16:24:17+08:00", command="maa mall", args={}, ok=True, exit=0, duration_s=179.9)
+    _record(at="2026-10-02T16:24:17" + TZ, command="maa mall", args={}, ok=True, exit=0, duration_s=179.9)
     (paths.LOGS / "maa").mkdir()
-    (paths.LOGS / "maa" / "20261002-160102-infrast.log").write_text("[2026-10-02 16:09:18 ERROR] Infrast Error\n")
+    (paths.LOGS / "maa" / "20261002-160102-infrast.log").write_text("[2026-10-02 16:09:18 ERROR] Infrast Error\n", encoding="utf-8")
     lock_before = paths.LOCK_FILE.exists()
     code, env = run(capsys, "maa", "why")
     assert code == 0, env
@@ -219,7 +221,7 @@ def test_maa_why_default_is_last_failed_task(maa_dir, capsys):
 
 
 def test_maa_why_since_until_and_not_found(maa_dir, capsys):
-    code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00+08:00", "--until", "2026-10-02T16:09:20+08:00")
+    code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00" + TZ, "--until", "2026-10-02T16:09:20" + TZ)
     assert code == 0 and env["data"]["waits"] and "record" not in env["data"]
     code, env = run(capsys, "maa", "why")
     assert code == 2 and env["error"]["code"] == "not_found"
@@ -229,6 +231,6 @@ def test_maa_why_since_until_and_not_found(maa_dir, capsys):
 
 def test_maa_why_without_maa_log_dir(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv(maalog.DIR_ENV, str(tmp_path / "missing"))
-    code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00+08:00")
+    code, env = run(capsys, "maa", "why", "--since", "2026-10-02T16:06:00" + TZ)
     assert code == 0 and env["data"]["log"]["dir"] is None and "hint" in env["data"]
     assert env["data"]["lines"] == 0 and env["data"]["screenshots"] == []

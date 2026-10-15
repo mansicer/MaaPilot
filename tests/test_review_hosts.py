@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 
 import pytest
@@ -13,6 +14,7 @@ from maapilot.cliutil import ENVIRONMENT, CliError
 from maapilot.flows.daily import cron
 from maapilot.tools import common, doctor, host_cmd
 from tests.test_daily import _no_real_crontab, env, fake_crontab, run, script  # noqa: F401 - fixture
+from tests.portable import needs_cron
 from tests.test_hosts import codex, _use_codex  # noqa: F401 - fixture
 
 
@@ -89,7 +91,7 @@ def test_push_follows_recency_unless_agent_is_codex(env, codex):
 def test_push_finds_codex_outside_path(env, codex, monkeypatch, tmp_path):
     prog, calls = codex
     hosts.record_session({"CODEX_THREAD_ID": "th-1"})
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")                        # 定时任务里 PATH 很短
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))                # 定时任务里 PATH 很短
     monkeypatch.setattr(hosts, "CODEX_FALLBACKS", ())
     assert hosts.codex_path({}) is None
     r = hosts.push("x", {})
@@ -107,6 +109,7 @@ def _cron_env(line: str) -> dict:
     return dict(p.split("=", 1) for p in parts if "=" in p and not p.startswith("/") and p.split("=")[0].isupper())
 
 
+@needs_cron
 def test_cron_line_has_codex_home_and_dir(env, codex, monkeypatch, tmp_path):
     prog, _ = codex
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ch"))
@@ -120,6 +123,7 @@ def test_cron_line_has_codex_home_and_dir(env, codex, monkeypatch, tmp_path):
     assert "CODEX_HOME" not in cron.cron_lines([(4, 40)], cfg)[0]
 
 
+@needs_cron
 def test_schedule_refuses_untrusted_codex(capsys, env, codex, tmp_path, monkeypatch):
     prog, _ = codex
     monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, "")))
@@ -140,7 +144,7 @@ def test_schedule_refuses_untrusted_codex(capsys, env, codex, tmp_path, monkeypa
 
 class _Probe(doctor.Probe):
     def which(self, prog):
-        return prog if prog.startswith("/") else None
+        return prog if os.path.isabs(prog) else None
 
 
 def test_untrusted_codex_is_required(codex):

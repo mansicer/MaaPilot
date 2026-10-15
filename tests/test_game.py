@@ -207,7 +207,7 @@ def test_update_full(env, capsys, monkeypatch):
     install = [a for a in adb.calls if "install" in a][0]
     assert install[-2:] == ["-r", str(game.cache_dir() / "arknights-hg-2781.apk")]
     assert list(game.cache_dir().iterdir()) == []          # 装完删掉安装包
-    assert not (paths.PRIVATE / "lock.json").exists() or json.loads((paths.PRIVATE / "lock.json").read_text()) is None
+    assert not (paths.PRIVATE / "lock.json").exists() or json.loads((paths.PRIVATE / "lock.json").read_text(encoding="utf-8")) is None
 
 
 def test_update_resumes_partial_download(env, capsys, monkeypatch):

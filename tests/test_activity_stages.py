@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from maapilot import cli
+from maapilot import cli, paths
 from maapilot.cliutil import CliError
 from maapilot.knowledge import maa_activity, stages
 from maapilot.knowledge.calendar import GAME_TZ
@@ -13,6 +13,9 @@ from maapilot.tools import data as datamod
 from maapilot.tools import maa_cmd
 
 NOW = datetime.now(GAME_TZ)
+# 关卡名 ↔ 关卡 id、材料都查 data/ 的游戏数据表（gitignore 的，CI 上没有）
+pytestmark = pytest.mark.skipif(not all((paths.DATA / f).exists() for f in ("stage_table.json", "item_table.json")),
+                                reason="没有 data/ 游戏数据表")
 
 
 def _t(d: datetime) -> str:

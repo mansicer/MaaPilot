@@ -225,7 +225,7 @@ time.sleep(1.5)
         code, _, timed_out = daily._run_group([str(agent)], env=dict(os.environ), timeout_s=30,
                                               stdout=subprocess.DEVNULL, track=seen)
         assert code == 0 and not timed_out
-        left = int(pidfile.read_text())
+        left = int(pidfile.read_text(encoding="utf-8"))
         assert left in seen and _alive(left)
         agentmod._LAST_AGENT["descendants"] = seen
         r = _R()
@@ -235,7 +235,7 @@ time.sleep(1.5)
     finally:
         other.kill()
         try:
-            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+            os.kill(int(pidfile.read_text(encoding="utf-8")), signal.SIGKILL)
         except (OSError, ValueError):
             pass
 
@@ -261,7 +261,7 @@ open({str(pidfile)!r}, "w").write(str(p.pid))
 time.sleep(60)
 """)
     code, _, timed_out = daily._run_group([str(parent)], env=dict(os.environ), timeout_s=2, track={})
-    child = int(pidfile.read_text())
+    child = int(pidfile.read_text(encoding="utf-8"))
     try:
         assert timed_out and _wait_dead(child)
     finally:

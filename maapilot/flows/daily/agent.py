@@ -142,13 +142,16 @@ def run_agent(cfg: dict, prompt: str, env: dict, transcript: Path, *, recovery: 
     transcript.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     host = hosts.name(cfg)
-    cmd = hosts.command(host, hosts.binary(cfg, host), prompt, transcript)
+    binary_ = hosts.binary(cfg, host)
+    via_stdin = hosts.prompt_on_stdin(binary_)
+    cmd = hosts.command(host, binary_, prompt, transcript, stdin=via_stdin)
     cliutil.log(f"[daily] 叫无头 agent（最长 {int(timeout_s // 60)} 分钟），记录在 {rel(transcript)}")
     seen: dict = {}
     _LAST_AGENT["descendants"] = seen                  # agent 结束后收拾它留下的进程（_after_agent）
     try:
         with open(transcript, "w", encoding="utf-8") as out:
-            code, _, timed_out = _run_group(cmd, env=env, timeout_s=timeout_s, stdout=out, track=seen)
+            code, _, timed_out = _run_group(cmd, env=env, timeout_s=timeout_s, stdout=out, track=seen,
+                                            input=prompt if via_stdin else None)
     except OSError as e:
         return {"ok": False, "host": host, "error": f"起不来 {host}（{cmd[0]}）：{e}", "recovered": False,
                 "transcript": rel(transcript), "duration_s": 0}

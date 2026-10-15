@@ -54,9 +54,9 @@ def test_killing_maapilot_stops_maa_group(tmp_path, sig):
     priv = tmp_path / "private"
     priv.mkdir()
     fake = tmp_path / "maa"
-    fake.write_text(FAKE_MAA.format(py=sys.executable, d=str(tmp_path)))
+    fake.write_text(FAKE_MAA.format(py=sys.executable, d=str(tmp_path)), encoding="utf-8")
     fake.chmod(0o755)
-    (priv / "config.yaml").write_text(f"emulator: {{address: 'emu:1'}}\ntools: {{maa: {str(fake)!r}}}\n")
+    (priv / "config.yaml").write_text(f"emulator: {{address: 'emu:1'}}\ntools: {{maa: {str(fake)!r}}}\n", encoding="utf-8")
     env = {**os.environ, "MAAPILOT_PRIVATE": str(priv), "MAA_CONFIG_DIR": str(tmp_path / "cfg")}
     p = subprocess.Popen([sys.executable, "-c", RUNNER], env=env, start_new_session=True,
                          cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -65,15 +65,15 @@ def test_killing_maapilot_stops_maa_group(tmp_path, sig):
         while not (tmp_path / "child.pid").exists() and time.monotonic() < end:
             time.sleep(0.1)
         assert (tmp_path / "child.pid").exists(), "假的 maa 没起来"
-        maa_pid = int((tmp_path / "maa.pid").read_text())
-        child_pid = int((tmp_path / "child.pid").read_text())
+        maa_pid = int((tmp_path / "maa.pid").read_text(encoding="utf-8"))
+        child_pid = int((tmp_path / "child.pid").read_text(encoding="utf-8"))
         p.send_signal(sig)
         assert p.wait(timeout=15) == 128 + sig
         assert _gone(maa_pid) and _gone(child_pid)
     finally:
         for f in ("maa.pid", "child.pid"):
             try:
-                os.killpg(int((tmp_path / f).read_text()), signal.SIGKILL)
+                os.killpg(int((tmp_path / f).read_text(encoding="utf-8")), signal.SIGKILL)
             except (OSError, ValueError):
                 pass
         if p.poll() is None:

@@ -97,13 +97,19 @@ def same_path(a, b) -> bool:
     return norm(a) == norm(b)
 
 
+def is_link(p: Path | str) -> bool:
+    """符号链接或 Windows 的目录联接（指向的地方不在了也算）。"""
+    p = Path(p)
+    return p.is_symlink() or p.is_junction()
+
+
 def make_dir_link(link: Path, target: Path) -> str:
     """让 link 指向目录 target：macOS / Linux 用符号链接；Windows 用目录联接（不要管理员权限），不行就复制一份。
-    → "symlink" / "junction" / "copy"。link 已存在（文件或空链接）时先删掉。"""
+    → "symlink" / "junction" / "copy"。link 已存在（文件、链接、联接，包括指向的目录不在了的）时先删掉。"""
     import shutil
     link, target = Path(link), Path(target)
-    if link.is_symlink() or link.is_file():
-        link.unlink()
+    if is_link(link) or link.is_file():
+        link.unlink()                                 # 目录联接也是这样删（不碰它指向的目录）
     elif link.is_dir():
         shutil.rmtree(link)
     if not WINDOWS:

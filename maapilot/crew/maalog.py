@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def debug_dir(cfg: dict | None = None) -> Path | None:
         from maapilot import config
         from maapilot.crew import maa
         from maapilot.oscompat import procs
-        maa_bin = config.tool("maa", cfg)
+        maa_bin = shutil.which(config.tool("maa", cfg)) or config.tool("maa", cfg)
         r = procs.run_text([maa_bin, "dir", "log"], timeout=15, env=maa.env())
         lines = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
         if r.returncode == 0 and lines and Path(lines[-1]).is_dir():

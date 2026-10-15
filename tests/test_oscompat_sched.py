@@ -11,6 +11,7 @@ from maapilot.flows import daily
 from maapilot.flows.daily import cron as dcron
 from maapilot.oscompat import hints, sched, venv
 from maapilot.tools import doctor
+from tests.portable import WINDOWS, needs_cron
 from tests.test_daily import _no_real_crontab, fake_crontab, OTHER  # noqa: F401 - fixture
 
 
@@ -32,6 +33,7 @@ def windows(monkeypatch):
 
 # --- cron 后端 -------------------------------------------------------------------------------------------------------
 
+@needs_cron
 def test_cron_backend_round_trip(tmp_path, monkeypatch, cfg):
     monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, OTHER)))
     b = sched.backend()
@@ -66,6 +68,7 @@ def test_cron_times_and_old_lines_still_recognized():
     assert not b.mine(line.replace(f"# maapilot-v2 {paths.ROOT}", "# maapilot-v2 /elsewhere"))
 
 
+@needs_cron
 def test_doctor_uses_probe_for_crontab():
     from tests.test_tools import FakeProbe
     line = f"40 4 * * * x daily run --trigger schedule # maapilot-v2 {paths.ROOT}\n*/15 * * * * maapilot job tick\n"
@@ -150,9 +153,10 @@ def test_skills_link_plain_file_fixed(repo, monkeypatch):
     monkeypatch.setattr(paths, "ROOT", repo)
     item = doctor.check_skills_link(None)
     assert not item["ok"] and item["state"] == "file" and item["fix"] == "maapilot doctor --fix" and item["required"] is False
-    assert doctor.fix_skills_link(repo) == "symlink"
+    assert doctor.fix_skills_link(repo) == ("junction" if WINDOWS else "symlink")
     assert doctor.skills_link(repo) == "ok" and (link / "maapilot-daily" / "SKILL.md").exists()
-    assert os.readlink(link) == os.path.join("..", ".agents", "skills")    # 相对链接，仓库挪了也还能用
+    if not WINDOWS:                                                       # 目录联接只能写绝对路径
+        assert os.readlink(link) == os.path.join("..", ".agents", "skills")    # 相对链接，仓库挪了也还能用
     assert doctor.check_skills_link(None)["ok"]
 
 
@@ -162,6 +166,19 @@ def test_skills_link_missing_and_broken(repo):
     assert doctor.skills_link(repo) == "broken"
     doctor.fix_skills_link(repo)
     assert doctor.skills_link(repo) == "ok"
+
+
+
+@pytest.mark.skipif(not WINDOWS, reason="目录联接只有 Windows 有")
+def test_skills_link_broken_junction_fixed(repo, tmp_path):
+    """联接指向的目录没了（仓库挪过）：算 broken，--fix 先删掉旧联接再建。"""
+    import _winapi
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    _winapi.CreateJunction(str(gone), str(repo / ".claude" / "skills"))
+    gone.rmdir()
+    assert doctor.skills_link(repo) == "broken"
+    assert doctor.fix_skills_link(repo) == "junction" and doctor.skills_link(repo) == "ok"
 
 
 def test_real_repo_skills_link_ok():

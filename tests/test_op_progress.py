@@ -201,7 +201,7 @@ def test_goes_home_before_and_after(ops, fake_device, monkeypatch, capsys):
     assert seen == {"task": "OperProgress", "homes": 1,
                     "params": {"plans": [{"name": "能天使", "role": "SNIPER", "skill_level": 7}]}}
     assert len(homes) == 2 and d["home"] is True and fake_device == ["op progress"]
-    rows = [json.loads(l) for l in (paths.LOGS).glob("*.jsonl").__next__().read_text().splitlines()]
+    rows = [json.loads(l) for l in (paths.LOGS).glob("*.jsonl").__next__().read_text(encoding="utf-8").splitlines()]
     assert rows[-1]["command"] == "op progress" and rows[-1]["result"]["steps"] == ["技能升到 7 级：AlreadySatisfied"]
 
 

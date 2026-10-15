@@ -23,9 +23,13 @@ ROOT = paths.ROOT
 FAKE_CODEX = """
 import json, os, sys, time
 log = os.environ["FAKE_CODEX_LOG"]
-with open(log, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "daily": os.environ.get("MAAPILOT_DAILY_RUN")}, ensure_ascii=False) + "\\n")
 a = sys.argv[1:]
+via_stdin = a[0] == "exec" and a[-1] == "-"            # 提示从 stdin 给（Windows 上 codex.cmd 那样）：记下来时放回去
+if via_stdin:
+    a[-1] = sys.stdin.read()
+with open(log, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"argv": a, "stdin": via_stdin, "daily": os.environ.get("MAAPILOT_DAILY_RUN")},
+                       ensure_ascii=False) + "\\n")
 if a[0] == "exec":
     print(json.dumps({"type": "thread.started", "thread_id": "t-1"}))
     text = os.environ.get("FAKE_CODEX_RESULT", "处理好了。\\n结果：完成")
@@ -62,6 +66,20 @@ def _use_codex(prog):
 
 
 # --- 无头 agent ------------------------------------------------------------------------------------------------------
+
+def test_prompt_on_stdin_only_for_batch_files(tmp_path, monkeypatch):
+    """Windows 上 npm 装的 .cmd 经 cmd.exe 转，多行参数会被截断：提示改走 stdin；单行的推送消息洗掉 cmd 会改的字符。"""
+    from maapilot.oscompat import procs
+    t = tmp_path / "agent.jsonl"
+    assert hosts.command("codex", "/x/codex", "做事", t, stdin=True)[-1] == "-"
+    argv = hosts.command("claude", "/x/claude", "做事", t, stdin=True)
+    assert argv[:3] == ["/x/claude", "-p", "--output-format"] and "做事" not in argv
+    assert procs.batch_arg('a\r\nb "c" 100%') == "a  b 'c' 100％"
+    monkeypatch.setattr(procs, "WINDOWS", True)
+    assert procs.is_batch(r"C:\npm\codex.CMD") and procs.is_batch("x.bat") and not procs.is_batch(r"C:\x\codex.exe")
+    monkeypatch.setattr(procs, "WINDOWS", False)
+    assert not procs.is_batch("/x/codex.cmd") and not hosts.prompt_on_stdin("/x/claude.cmd")
+
 
 def test_codex_command_line(tmp_path):
     t = tmp_path / "agent.jsonl"
@@ -120,7 +138,7 @@ time.sleep(60)
 """)
     code, _, timed_out = daily._run_group([str(parent)], env=dict(os.environ), timeout_s=2)
     assert timed_out
-    child = int(pidfile.read_text())
+    child = int(pidfile.read_text(encoding="utf-8"))
     for _ in range(50):
         try:
             os.kill(child, 0)
@@ -198,13 +216,14 @@ def test_install_codex_trusts_the_folder(capsys, env, codex, monkeypatch):
     cfgfile.parent.mkdir(parents=True)
     cfgfile.write_text('model = "x"\n[projects."/somewhere/else"]\ntrust_level = "trusted"\n', encoding="utf-8")
     code, out = run(capsys, "host", "install", "codex", "--dry-run")
-    assert code == 0 and out["data"]["changed"] is False and str(ROOT) in out["data"]["append"]
+    key = json.dumps(str(ROOT))                                              # TOML 里的写法（Windows 上反斜杠要转义）
+    assert code == 0 and out["data"]["changed"] is False and key in out["data"]["append"]
     assert host_cmd.codex_trusted(ROOT) is False
     code, out = run(capsys, "host", "install", "codex")
     assert code == 0 and out["data"]["changed"] and out["data"]["trusted"] is True and out["data"]["rules"]["ok"]
     assert cfgfile.read_text(encoding="utf-8").startswith('model = "x"\n')   # 原来的不动
     code, out = run(capsys, "host", "install", "codex")                         # 再跑：不重复加
-    assert out["data"]["changed"] is False and cfgfile.read_text(encoding="utf-8").count(str(ROOT)) == 1
+    assert out["data"]["changed"] is False and cfgfile.read_text(encoding="utf-8").count(key) == 1
     code, out = run(capsys, "host", "status")
     assert out["data"]["agent"] == "codex" and out["data"]["hosts"]["codex"]["trusted"] is True
 

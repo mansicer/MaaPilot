@@ -69,7 +69,13 @@ def last_message_file(transcript: Path) -> Path:
     return transcript.with_suffix(".last.txt")
 
 
-def command(host: str, binary_: str, prompt: str, transcript: Path) -> list[str]:
+def prompt_on_stdin(binary_: str) -> bool:
+    """提示从 stdin 给、不放在参数里：Windows 上 npm 装的 claude.cmd / codex.cmd 经 cmd.exe 转，多行参数会被截断。"""
+    return procs.is_batch(binary_)
+
+
+def command(host: str, binary_: str, prompt: str, transcript: Path, *, stdin: bool = False) -> list[str]:
+    """无头 agent 的命令行。stdin=True：提示不放进参数（claude -p 不带提示、codex exec 写 -，都从 stdin 读）。"""
     if host == "codex":
         # --skip-git-repo-check：项目不是 git 仓库（下载的压缩包）也能跑；--ephemeral：无头会话不留在用户的会话列表里
         argv = [binary_, "exec", "-C", str(paths.ROOT), "--sandbox", "workspace-write", "--json",
@@ -77,9 +83,9 @@ def command(host: str, binary_: str, prompt: str, transcript: Path) -> list[str]
                 "-o", str(last_message_file(transcript)), "-c", "notify=[]"]
         for f in CODEX_DISABLE:
             argv += ["--disable", f]
-        return argv + [prompt]
+        return argv + ["-" if stdin else prompt]
     # claude：文件夹没被 Claude Code 信任过时，无头 claude 不读项目的 .claude/settings.json，所以显式带上
-    return [binary_, "-p", prompt, "--output-format", "stream-json", "--verbose",
+    return [binary_, "-p", *([] if stdin else [prompt]), "--output-format", "stream-json", "--verbose",
             "--settings", str(paths.ROOT / ".claude" / "settings.json"),
             "--permission-mode", "default", "--permission-prompts", "none"]
 
@@ -215,7 +221,7 @@ def push(text: str, cfg: dict | None = None) -> dict:
     if not prog:
         return {"pushed": False, "thread": cx["thread"],
                 "reason": "找不到 codex（在 config.yaml 的 tools.codex 写它的绝对路径）"}
-    argv = [prog, "queue", "--thread", cx["thread"], "--message", text]
+    argv = [prog, "queue", "--thread", cx["thread"], "--message", procs.batch_arg(text) if procs.is_batch(prog) else text]
     try:
         p = procs.run_text(argv, timeout=QUEUE_TIMEOUT_S, cwd=str(paths.ROOT))
     except (OSError, subprocess.TimeoutExpired) as e:

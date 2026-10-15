@@ -15,6 +15,7 @@ from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.flows import daily, reset
 from maapilot.tools import common
+from tests.portable import needs_cron
 from tests.test_daily import OTHER, fake_crontab
 
 
@@ -55,6 +56,7 @@ def test_project_slug_matches_claude_code():
     assert reset.project_slug(Path("/private/tmp/claude-501/x_y.z")) == "-private-tmp-claude-501-x-y-z"
 
 
+@needs_cron
 def test_dry_run_changes_nothing(capsys, world):
     before = sorted(str(f) for f in paths.PRIVATE.rglob("*"))
     cron_before = world["crontab"].read_text(encoding="utf-8")
@@ -70,6 +72,7 @@ def test_dry_run_changes_nothing(capsys, world):
     assert (world["memory"] / "MEMORY.md").exists()
 
 
+@needs_cron
 def test_reset_moves_private_and_removes_only_our_cron_lines(capsys, world):
     code, env = run(capsys, "reset")
     assert code == 0, env
@@ -162,6 +165,7 @@ def test_reset_private_in_use(capsys, world, monkeypatch):
     assert (paths.PRIVATE / "config.yaml").exists() and MINE in world["crontab"].read_text(encoding="utf-8")
 
 
+@needs_cron
 def test_reset_unschedule_failure_puts_private_back(capsys, world, monkeypatch):
     from maapilot.cliutil import ENVIRONMENT, CliError
 

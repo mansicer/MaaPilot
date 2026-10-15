@@ -54,8 +54,10 @@ def log_dir() -> Path:
 
 
 def maa_bin() -> str:
+    """tools.maa；找得到就给实际的文件（Windows 上写成 C:\\…\\maa 时补上 .exe / .cmd，CreateProcess 只会补 .exe）。"""
     from maapilot import config
-    return config.tool("maa")
+    t = config.tool("maa")
+    return shutil.which(t) or t
 
 
 def env() -> dict:

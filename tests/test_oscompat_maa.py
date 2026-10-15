@@ -69,7 +69,7 @@ def _adb_path(profile: Path):
 def test_install_config_writes_adb_path(_tmp_private, tmp_path):
     adb = tmp_path / "MuMu Player" / "shell" / ("adb.exe" if sys.platform == "win32" else "adb")
     adb.parent.mkdir(parents=True)
-    adb.write_text("")
+    adb.write_text("", encoding="utf-8")
     adb.chmod(0o755)
     _cfg(_tmp_private, str(adb))
     assert maa.install_config() == list(maa.CONFIG_FILES)
@@ -81,7 +81,7 @@ def test_install_config_writes_adb_path(_tmp_private, tmp_path):
     # 换了 adb：已有的 profile 也跟着改（不重复写一行）
     other = tmp_path / "other" / adb.name
     other.parent.mkdir()
-    other.write_text("")
+    other.write_text("", encoding="utf-8")
     other.chmod(0o755)
     _cfg(_tmp_private, str(other))
     assert maa.install_config() == []

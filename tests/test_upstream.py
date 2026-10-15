@@ -341,7 +341,7 @@ def test_gamedata_sync_keeps_old_table_and_records(monkeypatch):
     monkeypatch.setattr(datasync, "_get", lambda url, timeout=60: json.dumps(bad).encode())
     with pytest.raises(UpstreamFormat, match="stage_table.stages\\[\\].code"):
         datasync.sync()
-    assert json.loads((paths.DATA / "stage_table.json").read_text()) == {"old": True}
+    assert json.loads((paths.DATA / "stage_table.json").read_text(encoding="utf-8")) == {"old": True}
     assert "stage_table" in bad_fields()["gamedata"]
 
 

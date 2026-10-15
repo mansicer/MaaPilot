@@ -2,9 +2,6 @@
 maapilot 子命令换成进程内的假实现；无头 agent 是一个假的 claude 脚本（真的子进程）；crontab 是一个假脚本。"""
 import json
 import os
-import stat
-import sys
-import textwrap
 from datetime import timedelta
 
 import pytest
@@ -14,6 +11,7 @@ from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.flows import daily
 from maapilot.flows._common import now
+from tests.portable import fake_program, needs_cron
 
 
 def run(capsys, *argv):
@@ -21,22 +19,24 @@ def run(capsys, *argv):
     return code, json.loads(capsys.readouterr().out)
 
 
-def script(path, body):
-    path.write_text(f"#!{sys.executable}\n" + textwrap.dedent(body), encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    return path
+script = fake_program
 
 
+# 提示没跟在 -p 后面就是从 stdin 给的（Windows 上 claude.cmd 那样）：记下来时放回 -p 后面，测试照样看 argv[1]
 FAKE_CLAUDE = """
 import json, os, sys, time
 rec = os.environ["FAKE_CLAUDE_LOG"]
+a = sys.argv[1:]
+i = a.index("-p")
+via_stdin = i + 1 >= len(a) or a[i + 1].startswith("--")
+if via_stdin:
+    a.insert(i + 1, sys.stdin.read())
 with open(rec, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(),
+    f.write(json.dumps({"argv": a, "stdin": via_stdin, "cwd": os.getcwd(),
                         "token": os.environ.get("MAAPILOT_LOCK_TOKEN"),
                         "daily": os.environ.get("MAAPILOT_DAILY_RUN")}, ensure_ascii=False) + "\\n")
 if os.environ.get("FAKE_CLAUDE_SLEEP"):
     time.sleep(float(os.environ["FAKE_CLAUDE_SLEEP"]))
-prompt = sys.argv[sys.argv.index("-p") + 1]
 print(json.dumps({"type": "system", "subtype": "init"}))
 text = os.environ.get("FAKE_CLAUDE_RESULT", "关掉了一个公告弹窗，重跑后做完了。\\n结果：完成")
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": text,
@@ -80,7 +80,7 @@ def env(tmp_path, monkeypatch):
             snap = behavior["depot"].pop(0) if behavior["depot"] else None
             if snap is not None:
                 paths.STATE.mkdir(parents=True, exist_ok=True)
-                (paths.STATE / "depot.json").write_text(json.dumps({"at": f"t{len(calls)}", "items": snap}))
+                (paths.STATE / "depot.json").write_text(json.dumps({"at": f"t{len(calls)}", "items": snap}), encoding="utf-8")
             if args[1] == "check" and behavior["guard_check"]:
                 code = behavior["guard_check"].pop(0)
                 if code == 3:
@@ -279,7 +279,7 @@ def test_guard_failure_after_agent_stops_run(capsys, env):
 
 def test_guard_stop_refuses_to_start(capsys, env):
     paths.GUARD.mkdir(parents=True, exist_ok=True)
-    (paths.GUARD / "stop.json").write_text("{}")
+    (paths.GUARD / "stop.json").write_text("{}", encoding="utf-8")
     code, out = run(capsys, "daily", "run")
     assert code == 3 and out["error"]["code"] == "guard_stop" and env["calls"] == []
 
@@ -303,6 +303,18 @@ def test_agent_timeout_kills_it(capsys, env, monkeypatch):
     assert agent["timed_out"] is True and agent["recovered"] is False and agent["duration_s"] < 25
 
 
+
+def test_prompt_on_stdin_for_cmd_shim(capsys, env, monkeypatch):
+    """Windows 上 npm 装的 claude.cmd 经 cmd.exe 转，参数里换行后面的会丢：多行提示改从 stdin 给。"""
+    from maapilot import hosts
+    monkeypatch.setattr(hosts, "prompt_on_stdin", lambda binary_: True)
+    env["behavior"]["fail"] = {"infrast"}
+    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    assert code == 0, out
+    (call,) = claude_calls(env)
+    assert call["stdin"] is True and "\n" in call["argv"][1] and "maapilot maa infrast" in call["argv"][1]
+
+
 def test_missing_claude_is_reported(capsys, env):
     cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
     cfg["tools"]["claude"] = "/nonexistent/claude"
@@ -314,11 +326,11 @@ def test_missing_claude_is_reported(capsys, env):
 
 def test_overlap_and_nested(capsys, env, monkeypatch):
     (paths.PRIVATE / "daily-run.json").write_text(json.dumps({"run_id": "x", "pid": os.getpid(),
-                                                              "host": __import__("socket").gethostname()}))
+                                                              "host": __import__("socket").gethostname()}), encoding="utf-8")
     code, out = run(capsys, "daily", "run")
     assert code == 4 and out["error"]["code"] == "daily_running"
     (paths.PRIVATE / "daily-run.json").write_text(json.dumps({"run_id": "x", "pid": 99999999,
-                                                              "host": __import__("socket").gethostname()}))
+                                                              "host": __import__("socket").gethostname()}), encoding="utf-8")
     code, out = run(capsys, "daily", "run")                             # 残留的标记不挡
     assert code == 0
     monkeypatch.setenv(daily.DAILY_ENV, "20260930-0440")
@@ -357,7 +369,7 @@ def test_status_and_report_write(capsys, env, tmp_path, monkeypatch):
 
 def test_parse_transcript(tmp_path):
     p = tmp_path / "t.jsonl"
-    p.write_text('noise\n{"type":"assistant"}\n{"type":"result","is_error":true,"result":"结果：没做成"}\n')
+    p.write_text('noise\n{"type":"assistant"}\n{"type":"result","is_error":true,"result":"结果：没做成"}\n', encoding="utf-8")
     info = daily.parse_transcript(p)
     assert info["is_error"] is True and info["recovered"] is False
     assert daily.parse_transcript(tmp_path / "missing")["summary"] is None
@@ -397,6 +409,7 @@ def cron(tmp_path, monkeypatch):
     return tmp_path / "crontab.txt"
 
 
+@needs_cron
 def test_schedule_keeps_other_lines(capsys, cron):
     code, out = run(capsys, "daily", "schedule")
     assert code == 0, out
@@ -419,6 +432,7 @@ def test_schedule_keeps_other_lines(capsys, cron):
     assert out["data"]["next_at"]
 
 
+@needs_cron
 def test_schedule_dry_run_and_replace_old(capsys, cron):
     code, out = run(capsys, "daily", "schedule", "--dry-run", "--replace-old")
     assert code == 0 and cron.read_text(encoding="utf-8") == OTHER      # 没写
@@ -429,6 +443,7 @@ def test_schedule_dry_run_and_replace_old(capsys, cron):
     assert out["data"]["removed_old"]
 
 
+@needs_cron
 def test_unschedule_only_removes_ours(capsys, cron):
     other_root = "40 4 * * * /elsewhere/maapilot daily run # maapilot-v2 /elsewhere\n"
     cron.write_text(OTHER + other_root, encoding="utf-8")
@@ -444,6 +459,7 @@ def test_schedule_bad_time(capsys, cron):
     assert code == 2 and cron.read_text(encoding="utf-8") == OTHER
 
 
+@needs_cron
 def test_empty_crontab(capsys, tmp_path, monkeypatch):
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text("emulator: {address: 'emu:1'}\n", encoding="utf-8")
@@ -477,7 +493,7 @@ def test_annihilation_week_resets_and_counts_orundum(monkeypatch):
     assert maa_cmd.record_annihilation(1, 1500, drops_seen=True)["capped"] is False
     assert maa_cmd.record_annihilation(1, 300, drops_seen=True)["capped"] is True     # 累计到 1800
     (paths.STATE / "annihilation.json").write_text(json.dumps({"week": "2000-01-03", "runs": 9, "orundum": 1800,
-                                                                "capped": True}))
+                                                                "capped": True}), encoding="utf-8")
     assert maa_cmd.annihilation_week() == {"week": maa_cmd.annihilation_week()["week"], "runs": 0, "orundum": 0,
                                            "capped": False, "failures": 0}
 

@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
-import sys
-import textwrap
 
 import numpy as np
 import pytest
@@ -14,6 +11,7 @@ import pytest
 from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.tools import common
+from tests.portable import WINDOWS, fake_program
 
 HAS_DATA = (paths.DATA / "character_table.json").exists() and (paths.DATA / "stage_table.json").exists()
 needs_data = pytest.mark.skipif(not HAS_DATA, reason="没有 data/ 游戏数据表")
@@ -34,9 +32,7 @@ def cfg(_tmp_private, tmp_path, monkeypatch):
     """config.yaml + 假的 maa：FAKE_MAA_DIR 下的 stdout.txt / log.txt / rc 决定它的输出。"""
     fake_dir = tmp_path / "fakemaa"
     fake_dir.mkdir()
-    script = fake_dir / "maa"
-    script.write_text(textwrap.dedent(f"""\
-        #!{sys.executable}
+    script = fake_program(fake_dir / "maa", f"""\
         import os, sys, pathlib
         d = pathlib.Path({str(fake_dir)!r})
         (d / "argv.txt").write_text("\\n".join(sys.argv[1:]))
@@ -49,8 +45,7 @@ def cfg(_tmp_private, tmp_path, monkeypatch):
         sys.stdout.write(out.read_text() if out.exists() else "")
         rc = d / "rc"
         sys.exit(int(rc.read_text()) if rc.exists() else 0)
-        """))
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        """)
     _tmp_private.mkdir(parents=True, exist_ok=True)
     (_tmp_private / "config.yaml").write_text(
         f"emulator:\n  address: 'emu-test:1'\ntools:\n  maa: {str(script)!r}\nserver: Official\n", encoding="utf-8")
@@ -84,7 +79,7 @@ PROXY_FAIL_LOG = """[2026-10-13 05:20:43 INFO ] Current sanity: 49/205
 def test_parse_summary_and_timeline(tmp_path):
     from maapilot.crew import maa
     log = tmp_path / "x.log"
-    log.write_text(FIGHT_LOG)
+    log.write_text(FIGHT_LOG, encoding="utf-8")
     p = maa.parse_output(SUMMARY, log)
     assert p["tasks"][0]["status"] == "Completed" and p["fight_times"] == 2
     assert p["fights"] == 2 and p["drops"] == {"固源岩": 3, "龙门币": 144}
@@ -98,7 +93,7 @@ def test_proxy_failure_is_not_a_drop(tmp_path):
     from maapilot.crew import maa
     from maapilot.tools import maa_cmd
     log = tmp_path / "x.log"
-    log.write_text(PROXY_FAIL_LOG)
+    log.write_text(PROXY_FAIL_LOG, encoding="utf-8")
     p = maa.timeline(log)
     assert p["fights"] == 2 and p["proxy_failed"] == 1 and p["proxy_refund"] == 21
     assert p["drops"] == {"全新装置": 1, "未来瞻望镜": 21}
@@ -175,31 +170,31 @@ def test_fight_not_open(cfg, monkeypatch):
 
 
 def test_maa_fight_end_to_end(cfg, capsys):
-    (cfg / "stdout.txt").write_text(SUMMARY)
-    (cfg / "log.txt").write_text(FIGHT_LOG)
+    (cfg / "stdout.txt").write_text(SUMMARY, encoding="utf-8")
+    (cfg / "log.txt").write_text(FIGHT_LOG, encoding="utf-8")
     code, env = run(capsys, "maa", "fight", "ZZ-9", "--times", "2")
     assert code == 0, env
     d = env["data"]
     assert d["times_done"] == 2 and d["medicine_used"] == 0 and d["sanity"] == {"current": 70, "max": 135}
     assert {x["name"]: x["count"] for x in d["drops"]}["固源岩"] == 3
-    argv = (cfg / "argv.txt").read_text().splitlines()
+    argv = (cfg / "argv.txt").read_text(encoding="utf-8").splitlines()
     assert argv[:2] == ["run", "maapilot-fight"] and "--addr" in argv and "emu-test:1" in argv
-    assert (cfg / "env.txt").read_text() == str(paths.PRIVATE / "maa-config")
+    assert (cfg / "env.txt").read_text(encoding="utf-8") == str(paths.PRIVATE / "maa-config")
     task_file = paths.PRIVATE / "maa-config" / "tasks" / "maapilot-fight.toml"
-    assert "stone = 0" in task_file.read_text() and "medicine = 0" in task_file.read_text()
-    assert json.loads((paths.STATE / "sanity.json").read_text())["current"] == 70
-    rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()]
+    assert "stone = 0" in task_file.read_text(encoding="utf-8") and "medicine = 0" in task_file.read_text(encoding="utf-8")
+    assert json.loads((paths.STATE / "sanity.json").read_text(encoding="utf-8"))["current"] == 70
+    rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]
     assert rows[-1]["command"] == "maa fight" and rows[-1]["ok"] is True
     assert not paths.LOCK_FILE.exists()
 
 
 def test_maa_failure_and_offline(cfg, capsys):
-    (cfg / "stdout.txt").write_text("Summary\n[recruit] 10:00:00 - 10:01:00 (1m) Error\n")
-    (cfg / "log.txt").write_text("[x ERROR] something broke\n")
-    (cfg / "rc").write_text("1")
+    (cfg / "stdout.txt").write_text("Summary\n[recruit] 10:00:00 - 10:01:00 (1m) Error\n", encoding="utf-8")
+    (cfg / "log.txt").write_text("[x ERROR] something broke\n", encoding="utf-8")
+    (cfg / "rc").write_text("1", encoding="utf-8")
     code, env = run(capsys, "maa", "recruit")
     assert code == 1 and env["error"]["code"] == "maa_failed" and env["data"]["errors"]
-    (cfg / "log.txt").write_text("[x] GameOffline\n")
+    (cfg / "log.txt").write_text("[x] GameOffline\n", encoding="utf-8")
     code, env = run(capsys, "maa", "recruit")
     assert code == 1 and env["error"]["code"] == "offline"
 
@@ -222,19 +217,19 @@ def _depot_log(items: dict) -> str:
 
 
 def test_state_depot_and_show(cfg, capsys):
-    (cfg / "stdout.txt").write_text("Summary\n[Depot] 10:00:00 - 10:01:00 (1m) Completed\n")
-    (cfg / "log.txt").write_text(_depot_log({"4001": 1000, "4003": 3200, "30012": 5}))
+    (cfg / "stdout.txt").write_text("Summary\n[Depot] 10:00:00 - 10:01:00 (1m) Completed\n", encoding="utf-8")
+    (cfg / "log.txt").write_text(_depot_log({"4001": 1000, "4003": 3200, "30012": 5}), encoding="utf-8")
     code, env = run(capsys, "state", "depot")
     assert code == 0, env
     assert {i["id"]: i["count"] for i in env["data"]["items"]}["4003"] == 3200
-    (cfg / "log.txt").write_text(_depot_log({"4001": 1500, "4003": 3200, "30012": 2}))
+    (cfg / "log.txt").write_text(_depot_log({"4001": 1500, "4003": 3200, "30012": 2}), encoding="utf-8")
     code, env = run(capsys, "state", "depot")
     assert {c["id"]: c["delta"] for c in env["data"]["changed"]} == {"30012": -3, "4001": 500}
     code, env = run(capsys, "state", "show", "depot")
     assert code == 0 and env["data"]["age_min"] == 0
     code, env = run(capsys, "state", "show", "box")
     assert code == 2 and env["error"]["code"] == "no_snapshot"
-    rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()]
+    rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]
     depot = [r for r in rows if r["command"] == "state depot"]
     assert depot[-1]["depot_change"]
     assert depot[-1]["result"] == {"items": 3, "lmd": 1500, "orundum": 3200, "changed": 2}
@@ -355,13 +350,13 @@ def test_screen_does_not_need_the_lock(game, capsys, monkeypatch):
     """截图、识字是只读的：别人拿着锁（MAA 正在跑）也能做，用只读连接，不动锁、不记"可能花了东西"；点击照样被挡。"""
     monkeypatch.setattr(lock, "pid_alive", lambda pid: True)
     _foreign_lock()
-    before = paths.LOCK_FILE.read_text()
+    before = paths.LOCK_FILE.read_text(encoding="utf-8")
     code, env = run(capsys, "screen", "shot")
     assert code == 0, env
     code, env = run(capsys, "screen", "ocr", "--find", "终端")
     assert code == 0 and env["data"]["hits"][0]["text"] == "终端"
     assert game.connects == [True, True]
-    assert paths.LOCK_FILE.read_text() == before
+    assert paths.LOCK_FILE.read_text(encoding="utf-8") == before
     assert not (paths.GUARD / "dirty.json").exists()
     code, env = run(capsys, "input", "tap", "10", "20")
     assert code == 4 and env["error"]["code"] == "busy" and game.calls == []
@@ -582,11 +577,11 @@ def test_doctor_candidates_when_no_address(_tmp_private):
     (_tmp_private / "config.yaml").write_text("emulator:\n  address: ''\n", encoding="utf-8")
     probe = FakeProbe({"adb version": (0, b"adb 1\n", b""),
                        "adb devices": (0, b"List of devices attached\nemulator-5554\tdevice\n", b""),
-                       "connect 127.0.0.1:16384": (0, b"connected to 127.0.0.1:16384\n", b""),
+                       "connect 127.0.0.1:5557": (0, b"connected to 127.0.0.1:5557\n", b""),   # 5557 三个系统都探测
                        "crontab -l": (1, b"", b"crontab: no crontab for x")})
     checks = {c["name"]: c for c in doctor.run_checks(probe=probe)}
     assert not checks["config"]["ok"]
-    assert checks["emulator"]["candidates"] == ["emulator-5554", "127.0.0.1:16384"]
+    assert checks["emulator"]["candidates"] == ["emulator-5554", "127.0.0.1:5557"]
 
 
 def test_doctor_brief(capsys, monkeypatch):
@@ -595,12 +590,15 @@ def test_doctor_brief(capsys, monkeypatch):
     code, env = run(capsys, "doctor", "--brief")
     assert code == 0 and env["data"]["next"] == "setup" and env["data"]["setup_done"] is False
     paths.SETUP.parent.mkdir(parents=True, exist_ok=True)
-    paths.SETUP.write_text('{"done_at": "x", "version": 1}')
+    paths.SETUP.write_text('{"done_at": "x", "version": 1}', encoding="utf-8")
     paths.GOALS.write_text("## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n\n## 别的\n- 状态：暂停\n", encoding="utf-8")
     code, env = run(capsys, "doctor", "--brief")
     d = env["data"]
     assert d["next"] is None and d["goals_active"] == 1
-    assert d["schedule"] == {"installed": True, "times": ["04:40", "16:40"]}
+    if WINDOWS:                                                            # 任务计划程序还没接上：当作没设定时
+        assert d["schedule"]["installed"] is False and d["schedule"]["unavailable"]
+    else:
+        assert d["schedule"] == {"installed": True, "times": ["04:40", "16:40"]}
     assert any("目标" in l for l in d["lines"])
 
 
@@ -610,7 +608,7 @@ def test_doctor_fix_copies_ocr_and_config(cfg, tmp_path, monkeypatch):
     for sub, files in {"PaddleOCR/det": ["inference.onnx"], "PaddleOCR/rec": ["inference.onnx", "keys.txt"]}.items():
         (res / sub).mkdir(parents=True)
         for f in files:
-            (res / sub / f).write_text("x")
+            (res / sub / f).write_text("x", encoding="utf-8")
     ocr = tmp_path / "ocr"
     monkeypatch.setattr(paths, "OCR_MODEL", ocr)
     from maapilot.knowledge import datasync
@@ -640,9 +638,9 @@ def test_claude_trusted_reads_config(tmp_path, monkeypatch):
     from maapilot.tools.doctor import claude_trusted
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     assert claude_trusted(tmp_path / "repo") is None
-    (tmp_path / ".claude.json").write_text(json.dumps({"projects": {str(tmp_path.resolve()): {"hasTrustDialogAccepted": True}}}))
+    (tmp_path / ".claude.json").write_text(json.dumps({"projects": {str(tmp_path.resolve()): {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
     assert claude_trusted(tmp_path / "repo") is True                      # 上级目录信任也算
-    (tmp_path / ".claude.json").write_text(json.dumps({"projects": {}}))
+    (tmp_path / ".claude.json").write_text(json.dumps({"projects": {}}), encoding="utf-8")
     assert claude_trusted(tmp_path / "repo") is False
 
 

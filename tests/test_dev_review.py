@@ -128,7 +128,7 @@ def test_review_log_and_transcripts(tmp_path, capsys, monkeypatch):
     assert o["label"] == "日常 20261013-0440 goals" and "bash_nonstandard" not in o
     assert any("screen tap" in ln for ln in d["lines"])
     # 自己不往命令记录里写
-    assert not any("dev review" in ln for ln in (paths.LOGS / f"{common.now():%Y-%m-%d}.jsonl").read_text().splitlines())
+    assert not any("dev review" in ln for ln in (paths.LOGS / f"{common.now():%Y-%m-%d}.jsonl").read_text(encoding="utf-8").splitlines())
 
 
 def test_review_session_filter_and_exclude(tmp_path, capsys, monkeypatch):
@@ -150,11 +150,13 @@ def test_since_parsing_and_project_dir(tmp_path):
     from maapilot.cliutil import CliError
     with pytest.raises(CliError):
         dev_cmd.parse_since("昨天")
+    import sys
     from pathlib import Path
-    assert dev_cmd.project_dir(Path("/Users/a/Developer/MaaPilot")).name == "-Users-a-Developer-MaaPilot"
-    assert dev_cmd.project_dir(Path("/Users/a/Developer/MaaPilot/.claude/worktrees/agent-1")).name == \
-        "-Users-a-Developer-MaaPilot"
-    assert dev_cmd.project_dir(Path("/Users/a/my.repo")).name == "-Users-a-my-repo"
+    # Claude Code 在 Windows 上的目录名带盘符：C:\Users\a → C--Users-a
+    top, pre = (Path("C:/Users/a"), "C--Users-a") if sys.platform == "win32" else (Path("/Users/a"), "-Users-a")
+    assert dev_cmd.project_dir(top / "Developer/MaaPilot").name == f"{pre}-Developer-MaaPilot"
+    assert dev_cmd.project_dir(top / "Developer/MaaPilot/.claude/worktrees/agent-1").name == f"{pre}-Developer-MaaPilot"
+    assert dev_cmd.project_dir(top / "my.repo").name == f"{pre}-my-repo"
 
 
 def test_dev_not_in_help(capsys):

@@ -406,7 +406,7 @@ def skills_link(root: Path | None = None) -> str:
     link = Path(root or paths.ROOT) / ".claude" / "skills"
     if link.is_dir():
         return "ok"
-    if link.is_symlink():
+    if fs.is_link(link):                               # 包括 Windows 的目录联接
         return "broken"
     return "file" if link.is_file() else "missing"
 

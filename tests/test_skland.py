@@ -177,7 +177,7 @@ def test_token_command_saves_privately(fake, capsys, monkeypatch):
     assert env["data"]["saved"] is True and env["data"]["uid"] == "12345678"
     assert TOKEN not in out.out and TOKEN not in out.err
     p = skland_cmd.store_path()
-    assert json.loads(p.read_text())["token"] == TOKEN and json.loads(p.read_text())["did"] == "BDEV"
+    assert json.loads(p.read_text(encoding="utf-8"))["token"] == TOKEN and json.loads(p.read_text(encoding="utf-8"))["did"] == "BDEV"
     assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
     code, env, out = run(capsys, "skland", "status")
     assert code == 0 and env["data"]["configured"] is True and env["data"]["token_expired"] is False
@@ -206,13 +206,13 @@ def test_state_skland_writes_box_and_sanity(fake, capsys):
     d = env["data"]
     assert d["source"] == "skland" and d["operators"] == 2 and d["with_modules"] == 1 and d["mastered"] == 1
     assert d["operators_detail"]["阿米娅"]["skills"][1]["mastery"] == 3
-    box = json.loads((paths.STATE / "box.json").read_text())
+    box = json.loads((paths.STATE / "box.json").read_text(encoding="utf-8"))
     assert box["source"] == "skland" and box["uid"] == "12345678" and "阿米娅" in box["operators"]
-    assert json.loads((paths.STATE / "sanity.json").read_text())["source"] == "skland"
+    assert json.loads((paths.STATE / "sanity.json").read_text(encoding="utf-8"))["source"] == "skland"
     assert TOKEN not in out.out
-    log = next(paths.LOGS.glob("*.jsonl")).read_text()
+    log = next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8")
     assert "state skland" in log and TOKEN not in log and "12345678" not in log     # 不记 token、uid
-    assert json.loads(skland_cmd.store_path().read_text())["last"]["ok"] is True
+    assert json.loads(skland_cmd.store_path().read_text(encoding="utf-8"))["last"]["ok"] is True
 
 
 def test_state_skland_failure_keeps_box(fake, capsys):
@@ -221,7 +221,7 @@ def test_state_skland_failure_keeps_box(fake, capsys):
     fake.info_code = 10002
     code, env, out = run(capsys, "state", "skland")
     assert code == 3 and env["error"]["code"] == "token_invalid" and "skland token" in env["error"]["hint"]
-    assert json.loads((paths.STATE / "box.json").read_text())["at"] == "old"
+    assert json.loads((paths.STATE / "box.json").read_text(encoding="utf-8"))["at"] == "old"
     code, env, _ = run(capsys, "skland", "status")
     assert env["data"]["token_expired"] is True and env["data"]["last"]["ok"] is False
 
@@ -269,8 +269,8 @@ def test_state_sanity_prefers_skland(fake, capsys, monkeypatch):
     code, env, _ = run(capsys, "state", "sanity")
     assert code == 0, env
     assert env["data"]["source"] == "skland" and env["data"]["max"] == 135
-    assert json.loads((paths.STATE / "sanity.json").read_text())["source"] == "skland"
-    row = json.loads(next(paths.LOGS.glob("*.jsonl")).read_text().splitlines()[-1])
+    assert json.loads((paths.STATE / "sanity.json").read_text(encoding="utf-8"))["source"] == "skland"
+    row = json.loads(next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()[-1])
     assert row["command"] == "state sanity" and row["result"]["max"] == 135 and row["result"]["source"] == "skland"
     assert "current" in row["result"]
 
@@ -284,7 +284,7 @@ def test_state_sanity_falls_back_to_ocr(fake, capsys, monkeypatch):
     monkeypatch.setattr(state, "read_sanity", lambda: {"at": common.iso(), "current": 50, "max": 135, "source": "ocr"})
     code, env, _ = run(capsys, "state", "sanity")
     assert code == 0 and env["data"]["source"] == "ocr" and env["data"]["skland_error"]
-    log = next(paths.LOGS.glob("*.jsonl")).read_text()
+    log = next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8")
     row = json.loads(log.splitlines()[-1])
     assert row["result"] == {"current": 50, "max": 135, "source": "ocr", "skland_error": True}
     assert TOKEN not in log
@@ -308,7 +308,7 @@ def test_state_skland_sanity_format_change_is_recorded(fake, capsys):
     fake.info = _info_without("status", "ap")
     code, env, _ = run(capsys, "state", "skland")
     assert code == 0 and env["data"]["sanity"] is None
-    assert json.loads((paths.STATE / "box.json").read_text())["source"] == "skland"
+    assert json.loads((paths.STATE / "box.json").read_text(encoding="utf-8"))["source"] == "skland"
     assert not (paths.STATE / "sanity.json").exists()
     (u,) = sources.unhealthy()
     assert u["source"] == "skland" and u["line"] == "森空岛的数据格式变了（缺 status.ap），理智改用首页识别"
@@ -321,7 +321,7 @@ def test_state_skland_chars_format_change_fails(fake, capsys):
     code, env, _ = run(capsys, "state", "skland")
     assert code == 1 and env["error"]["code"] == "upstream_format" and "缺 chars" in env["error"]["message"]
     assert env["data"]["source"] == "skland" and env["data"]["field"] == "chars"
-    assert json.loads((paths.STATE / "box.json").read_text())["at"] == "old"
+    assert json.loads((paths.STATE / "box.json").read_text(encoding="utf-8"))["at"] == "old"
     assert "干员练度改用 MAA 识别" in sources.unhealthy()[0]["line"]
 
 

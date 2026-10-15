@@ -6,8 +6,10 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
+from pathlib import Path
 
 from maapilot import cli, cliutil, paths
 from maapilot.crew import lock
@@ -85,7 +87,7 @@ def test_snapshot_cannot_hide_a_spend(cfg, capsys, monkeypatch):
     now["v"] = {"originite": 12, "orundum": 1400}
     code, env = run(capsys, "guard", "snapshot")
     assert code == 3 and env["error"]["code"] == "currency_decreased"
-    assert guard.stopped() is not None and json.loads(guard.snapshot_file().read_text())["orundum"] == 3200
+    assert guard.stopped() is not None and json.loads(guard.snapshot_file().read_text(encoding="utf-8"))["orundum"] == 3200
     code, env = run(capsys, "guard", "snapshot")                # 停机中也不重记
     assert code == 3 and env["error"]["code"] == "guard_stop"
     code, env = run(capsys, "guard", "check")
@@ -190,22 +192,52 @@ def test_game_check_lists_installed_clients(cfg):
     assert item["installed"] == [] and "没装明日方舟" in item["detail"]
 
 
+# 启动钩子是 sh 脚本。macOS / Linux 用 /bin/sh 跑；Windows 上 Claude Code 用 Git Bash 跑，命令是
+# `"$CLAUDE_PROJECT_DIR"/bin/session-start`（Windows 路径接 /bin/…），这里照样用 Git Bash 这么跑
+def _git_bash() -> str | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    for up in (Path(git).resolve().parent.parent, Path(git).resolve().parent.parent.parent):    # Git\cmd、Git\mingw64\bin
+        if (up / "bin" / "bash.exe").exists():
+            return str(up / "bin" / "bash.exe")
+    return None
+
+
+def _run_hook(root: Path, envfile: Path) -> subprocess.CompletedProcess:
+    if sys.platform == "win32":
+        bash = _git_bash()
+        if bash is None:
+            pytest.skip("没有 Git Bash")
+        argv, env = [bash, f"{root}/bin/session-start"], {**os.environ, "CLAUDE_ENV_FILE": str(envfile)}
+    else:
+        argv, env = ["/bin/sh", str(root / "bin" / "session-start")], {"PATH": "/usr/bin:/bin",
+                                                                        "CLAUDE_ENV_FILE": str(envfile)}
+    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env)
+
+
+sh_hook = pytest.mark.skipif(sys.platform == "win32", reason="假的 maapilot.exe 是 sh 脚本，Windows 上执行不了")
+
+
 # --- 启动脚本 --------------------------------------------------------------------------------------
 
 def test_session_start_without_venv(tmp_path):
-    """还没建 .venv：启动钩子照样把 .venv/bin 写进 CLAUDE_ENV_FILE，并按钩子的格式说 no_env。"""
+    """还没建 .venv：启动钩子照样把 .venv/bin（Windows 上 .venv/Scripts）写进 CLAUDE_ENV_FILE，并按钩子的格式说 no_env。"""
     root = tmp_path / "repo"
     (root / "bin").mkdir(parents=True)
     shutil.copy(paths.ROOT / "bin" / "session-start", root / "bin" / "session-start")
     envfile = tmp_path / "env.sh"
-    p = subprocess.run(["/bin/sh", str(root / "bin" / "session-start")], capture_output=True, text=True,
-                       env={"PATH": "/usr/bin:/bin", "CLAUDE_ENV_FILE": str(envfile)})
+    p = _run_hook(root, envfile)
     out = json.loads(p.stdout)
     assert p.returncode == 0 and out["systemMessage"] and "no_env" in out["hookSpecificOutput"]["additionalContext"]
-    assert f'{root.resolve()}/.venv/bin' in envfile.read_text() or f'{root}/.venv/bin' in envfile.read_text()
+    text = envfile.read_text(encoding="utf-8")
+    if sys.platform == "win32":                       # Git Bash 里 pwd 是 /c/Users/… 的写法
+        assert text.startswith('export PATH="/') and "/repo/.venv/Scripts:$PATH" in text, text
+    else:
+        assert f'{root.resolve()}/.venv/bin' in text or f'{root}/.venv/bin' in text
 
 
-
+@sh_hook
 def test_session_start_windows_venv_layout(tmp_path):
     """Windows 的 .venv（Scripts/maapilot.exe，Claude Code 经 Git Bash 跑钩子）：PATH 写 Scripts，并执行它做启动检查。"""
     root = tmp_path / "repo"
@@ -216,10 +248,9 @@ def test_session_start_windows_venv_layout(tmp_path):
     exe.write_text('#!/bin/sh\necho "{\\"ran\\": \\"$*\\"}"\n', encoding="utf-8")
     exe.chmod(0o755)
     envfile = tmp_path / "env.sh"
-    p = subprocess.run(["/bin/sh", str(root / "bin" / "session-start")], capture_output=True, text=True,
-                       env={"PATH": "/usr/bin:/bin", "CLAUDE_ENV_FILE": str(envfile)})
+    p = _run_hook(root, envfile)
     assert p.returncode == 0 and json.loads(p.stdout) == {"ran": "doctor --hook"}, p.stderr
-    assert "/.venv/Scripts:$PATH" in envfile.read_text() and "/.venv/bin" not in envfile.read_text()
+    assert "/.venv/Scripts:$PATH" in envfile.read_text(encoding="utf-8") and "/.venv/bin" not in envfile.read_text(encoding="utf-8")
 
 
 def test_gitattributes_keeps_hook_lf():

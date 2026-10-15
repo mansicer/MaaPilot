@@ -195,8 +195,8 @@ def test_prune_debug_keeps_newest(monkeypatch):
     for i in range(5):
         p = paths.DEBUG_DIR / f"x_2026101{i}-000000.png"
         p.write_bytes(b"")
-        p.with_suffix(".json").write_text("{}")
-    (paths.DEBUG_DIR / "maafw.log").write_text("")
+        p.with_suffix(".json").write_text("{}", encoding="utf-8")
+    (paths.DEBUG_DIR / "maafw.log").write_text("", encoding="utf-8")
     core.prune_debug(keep=2)
     left = sorted(p.name for p in paths.DEBUG_DIR.iterdir())
     assert len([n for n in left if n.endswith(".png")]) == 2 and "maafw.log" in left

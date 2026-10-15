@@ -11,6 +11,7 @@ import pytest
 from maapilot import cli, paths
 from maapilot.flows import daily
 from maapilot.tools import common, guard
+from tests.portable import needs_cron
 from tests.test_daily import OTHER, fake_crontab
 
 
@@ -69,6 +70,7 @@ def cron(tmp_path, monkeypatch, attended):
     return tmp_path / "crontab.txt"
 
 
+@needs_cron
 def test_schedule_reports_programs(capsys, cron):
     c, out = run(capsys, "daily", "schedule", "--dry-run")
     assert c == 0 and set(out["data"]["exec"]) == {"maa", "claude", "adb"}
@@ -77,6 +79,7 @@ def test_schedule_reports_programs(capsys, cron):
     assert c == 0 and "maapilot-v2" in cron.read_text(encoding="utf-8") and "exec" in out["data"]
 
 
+@needs_cron
 def test_schedule_and_unschedule_have_no_gate(capsys, cron, monkeypatch):
     """改定时日常不设关卡（以用户在对话里的同意为准）。"""
     monkeypatch.setenv(daily.DAILY_ENV, "20261015-0440")

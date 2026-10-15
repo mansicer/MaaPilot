@@ -73,6 +73,17 @@ def spawn(argv, *, group: bool = True, text: bool = True, **kw) -> subprocess.Po
     return proc
 
 
+def is_batch(prog) -> bool:
+    """Windows 上 prog 是不是 .cmd / .bat（npm 装的 claude、codex 就是）。这种程序由 cmd.exe 转一道：参数里换行后面的
+    会被丢掉，双引号、%VAR%、& 也会被 cmd 改写。多行的长文字（agent 的提示）要走 stdin，单行的用 batch_arg 洗一遍。"""
+    return WINDOWS and str(prog).lower().endswith((".cmd", ".bat"))
+
+
+def batch_arg(s: str) -> str:
+    """要经 cmd.exe 转的一个参数：换行并成空格，双引号换成单引号，% 换成全角（不让 cmd 当变量展开）。"""
+    return " ".join(str(s).split("\n")).replace("\r", " ").replace('"', "'").replace("%", "％")
+
+
 def run_text(argv, timeout: float | None = None, *, input: str | None = None, **kw) -> subprocess.CompletedProcess:
     """subprocess.run 拿文本输出：UTF-8 解码（解不了的字替换掉，不抛错）、默认收下 stdout 和 stderr、
     不给 input 时 stdin 接空（不卡在等输入上）、env 不给就用 child_env()、Windows 上没控制台时不弹窗。"""
