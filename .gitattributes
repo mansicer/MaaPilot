@@ -1,0 +1,16 @@
+# 换行一律 LF（Windows 上 git 的 autocrlf 不把 bin/session-start 之类改成 CRLF，否则 Git Bash 跑不了）
+* text=auto eol=lf
+# 二进制
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.onnx binary
+*.zip binary
+*.tar.gz binary
+*.dylib binary
+*.so binary
+*.dll binary
+*.exe binary

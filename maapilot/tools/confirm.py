@@ -8,26 +8,9 @@
 from __future__ import annotations
 
 import os
-import subprocess
 
 from maapilot.cliutil import NEEDS_USER, CliError
-
-
-def _ancestors(pid: int) -> list[int]:
-    try:
-        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    parent = {}
-    for ln in out.splitlines():
-        parts = ln.split()
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            parent[int(parts[0])] = int(parts[1])
-    chain, p = [], parent.get(pid)
-    while p and p not in chain and p != 1:
-        chain.append(p)
-        p = parent.get(p)
-    return chain
+from maapilot.oscompat import procs
 
 
 def _unattended() -> str | None:
@@ -37,7 +20,7 @@ def _unattended() -> str | None:
         return os.environ[DAILY_ENV] or "?"
     from maapilot.flows import daily
     run = daily.running()
-    if run and run.get("pid") and int(run["pid"]) in _ancestors(os.getpid()):
+    if run and run.get("pid") and int(run["pid"]) in procs.ancestors():
         return run.get("run_id") or "?"
     return None
 

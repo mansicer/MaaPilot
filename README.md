@@ -27,7 +27,7 @@
 
 ## 下载与安装
 
-需要：一台 Mac、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一。
+需要：一台 Mac（Windows 正在适配：手动命令和设置可以试，定时日常还不行）、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一。
 
 ### 用 Claude Code
 

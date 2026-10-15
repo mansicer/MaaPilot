@@ -108,6 +108,7 @@ def test_scheduled_daily_runs_codex(capsys, env, codex):
     assert infra["recovered"] is True and infra["agent"]["host"] == "codex"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="脚本靠 shebang 跑、POSIX 进程组")
 def test_timeout_kills_descendant_groups(tmp_path):
     """codex 的每条命令自成进程组：超时杀 codex 时，它们也要一起走（10-15 实测：只杀 codex 会留下孤儿）。"""
     pidfile = tmp_path / "child.pid"
@@ -217,6 +218,23 @@ def test_install_refuses_when_user_said_no(capsys, env, codex, monkeypatch):
     code, out = run(capsys, "host", "install", "codex")
     assert code == 2 and out["error"]["code"] == "codex_untrusted"
 
+
+
+def test_trust_key_spelled_differently(capsys, env, codex, monkeypatch):
+    """Codex 写下的键和我们的写法不完全一样（Windows 上大小写、分隔符；这里用多余的 /. 和结尾 /）：认得出，不重复加一段。"""
+    prog, _ = codex
+    _use_codex(prog)
+    cfgfile = host_cmd.codex_home() / "config.toml"
+    cfgfile.parent.mkdir(parents=True)
+    odd = str(ROOT.parent) + "/./" + ROOT.name + "/"
+    cfgfile.write_text(f'[projects.{json.dumps(odd)}]\ntrust_level = "untrusted"\n', encoding="utf-8")
+    assert host_cmd.codex_trusted(ROOT) is False
+    code, out = run(capsys, "host", "install", "codex")
+    assert code == 2 and out["error"]["code"] == "codex_untrusted"
+    cfgfile.write_text(f'[projects.{json.dumps(odd)}]\ntrust_level = "trusted"\n', encoding="utf-8")
+    assert host_cmd.codex_trusted(ROOT) is True
+    code, out = run(capsys, "host", "install", "codex")
+    assert code == 0 and out["data"]["changed"] is False and "[projects" not in cfgfile.read_text(encoding="utf-8")[5:]
 
 # --- 两边的命令规则一致 ------------------------------------------------------------------------------------------------
 

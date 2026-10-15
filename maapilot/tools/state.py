@@ -61,8 +61,7 @@ def read_depot() -> dict:
     """识别仓库、写快照，返回 {at, items: {id: n}, changed: [...]}。失败抛 CliError(depot_failed)。"""
     from maapilot.crew import maa
     common.ensure_device()
-    if maa.config_missing():
-        maa.install_config()
+    maa.install_config()                    # 每次都同步：config.yaml 改了 adb 也能带给 maa-cli
     try:
         items = maa.depot_ids()
     except Exception as e:
@@ -77,8 +76,7 @@ def read_depot() -> dict:
 def read_box() -> dict:
     from maapilot.crew import maa
     common.ensure_device()
-    if maa.config_missing():
-        maa.install_config()
+    maa.install_config()                    # 每次都同步：config.yaml 改了 adb 也能带给 maa-cli
     try:
         ops = maa.operbox()
     except Exception as e:

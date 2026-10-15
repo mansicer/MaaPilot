@@ -206,6 +206,7 @@ def _fake_maapilot(tmp_path):
     return script(d / "maapilot", "import time\ntime.sleep(60)\n")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="脚本靠 shebang 跑、POSIX 进程组")
 def test_after_agent_stops_its_leftover_maapilot(tmp_path, monkeypatch):
     monkeypatch.setattr(agentmod, "TRACK_EVERY_S", 0.2)
     monkeypatch.setattr(daily, "LEFTOVER_WAIT_S", 0)
@@ -239,12 +240,14 @@ time.sleep(1.5)
             pass
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="用了 getpgrp")
 def test_leftover_ignores_reused_pid_and_self(monkeypatch):
     me = os.getpid()
     seen = {me: (os.getpgrp(), "python -m maapilot.cli daily run"), 1: (1, "maapilot x")}
     assert agentmod._leftover_procs(seen) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="脚本靠 shebang 跑、POSIX 进程组")
 def test_timeout_kills_groups_even_if_main_exits_on_term(tmp_path, monkeypatch):
     """主进程收到 TERM 就走了，子孙另起的组不理 TERM：最后也要 KILL 掉。"""
     monkeypatch.setattr(agentmod, "TRACK_EVERY_S", 0.2)

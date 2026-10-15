@@ -44,20 +44,20 @@ def test_empty_daily_env_still_counts_as_unattended(capsys, monkeypatch):
 
 def test_child_of_running_daily_is_unattended(capsys, monkeypatch, attended):
     """agent 把环境变量清掉也不行：是正在跑的日常进程的子孙就算定时日常里。"""
-    from maapilot.tools import confirm
+    from maapilot.oscompat import procs
     monkeypatch.setattr(daily, "running", lambda: {"run_id": "r1", "pid": 4242})
-    monkeypatch.setattr(confirm, "_ancestors", lambda pid: [999, 4242])
+    monkeypatch.setattr(procs, "ancestors", lambda pid=None: [999, 4242])
     c, out = run(capsys, "guard", "allow", "源石", "1", "--reason", "x")
     assert c == 3 and "r1" in out["error"]["message"]
-    monkeypatch.setattr(confirm, "_ancestors", lambda pid: [999])           # 用户会话里，日常恰好在跑
+    monkeypatch.setattr(procs, "ancestors", lambda pid=None: [999])           # 用户会话里，日常恰好在跑
     c, out = run(capsys, "guard", "allow", "源石", "1", "--reason", "x")
     assert c == 0
 
 
 def test_ancestors_of_this_process():
     import os
-    from maapilot.tools import confirm
-    assert os.getppid() in confirm._ancestors(os.getpid())
+    from maapilot.oscompat import procs
+    assert os.getppid() in procs.ancestors(os.getpid()) and procs.ancestors() == procs.ancestors(os.getpid())
 
 
 @pytest.fixture

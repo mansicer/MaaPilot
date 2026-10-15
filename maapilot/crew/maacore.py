@@ -24,9 +24,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from maapilot import paths
+from maapilot.oscompat import WINDOWS, procs
 
 RELEASES_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
-LIB_NAMES = ("libMaaCore.dylib", "libMaaCore.so")
+LIB_NAMES = ("libMaaCore.dylib", "libMaaCore.so", "MaaCore.dll")
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 # AsstMsg
@@ -39,6 +40,8 @@ INSTANCE_OPTIONS = {"touch_mode": "maatouch", "deployment_with_pause": 0, "adb_l
 
 RUNNER_EXIT = {10: "MaaCore 或资源加载失败", 11: "MaaCore 连不上模拟器", 12: "MaaCore 不接受这份任务参数",
                13: "MaaCore 没能开始任务", 14: "任务被叫停"}
+VCREDIST_HINT = ("Windows 上多半是缺 VC++ 运行库：装 Microsoft Visual C++ Redistributable（x64："
+                 "https://aka.ms/vs/17/release/vc_redist.x64.exe），装完再试")
 
 
 def root() -> Path:
@@ -76,6 +79,10 @@ def _asset_pattern() -> re.Pattern:
     if system == "Linux":
         arch = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(machine, machine)
         return re.compile(rf"^MAA-v[\d.]+-linux-{re.escape(arch)}\.tar\.gz$")
+    if system == "Windows":
+        arch = {"amd64": "x64", "x86_64": "x64", "x64": "x64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
+        if arch:
+            return re.compile(rf"^MAA-v[\d.]+-win-{arch}\.zip$")
     raise RuntimeError(f"不支持这个系统（{system}）")
 
 
@@ -101,9 +108,9 @@ def install(*, timeout_s: float = 600) -> dict:
         shutil.copyfileobj(r, f)
     out = tmp / "x"
     if archive.name.endswith(".zip"):
-        # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留
-        if shutil.which("unzip"):
-            subprocess.run(["unzip", "-q", str(archive), "-d", str(out)], check=True)
+        # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留。Windows 上用不着这些（PATH 上的 unzip 多半是 MSYS 的，不用）
+        if not WINDOWS and shutil.which("unzip"):
+            procs.run_text(["unzip", "-q", str(archive), "-d", str(out)], timeout=timeout_s, check=True)
         else:
             zipfile.ZipFile(archive).extractall(out)
     else:
@@ -120,7 +127,7 @@ def hot_update_dir() -> Path | None:
     """maa-cli 热更新的资源目录（`maa dir hot-update`）；拿不到 → None。"""
     from maapilot import config
     try:
-        out = subprocess.run([config.tool("maa"), "dir", "hot-update"], capture_output=True, text=True, timeout=20)
+        out = procs.run_text([config.tool("maa"), "dir", "hot-update"], timeout=20)
     except (OSError, subprocess.TimeoutExpired):
         return None
     p = Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
@@ -176,8 +183,8 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
     log_start = core_log.stat().st_size if core_log.exists() else 0
     t0 = time.monotonic()
     try:
-        proc = subprocess.Popen(runner_argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, errors="replace", start_new_session=True, cwd=str(paths.ROOT))
+        proc = procs.spawn(runner_argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           cwd=str(paths.ROOT))
     except OSError as e:
         return CoreRun(None, [], [], log, 0.0, error=f"起不来 MaaCore 子进程：{e}", version=version)
     timed_out = False
@@ -186,7 +193,7 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
             stdout, _ = proc.communicate(json.dumps(spec, ensure_ascii=False), timeout=timeout_s)
         except subprocess.TimeoutExpired:
             timed_out = True
-            maa._kill_group(proc)
+            procs.kill_tree(proc, maa.KILL_GRACE_S)
             try:
                 stdout, _ = proc.communicate(timeout=maa.KILL_GRACE_S)
             except (subprocess.TimeoutExpired, ValueError):
@@ -200,6 +207,8 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
                   warnings=_core_warnings(core_log, log_start))
     if not timed_out and proc.returncode:
         run.error = RUNNER_EXIT.get(proc.returncode, f"MaaCore 子进程退出码 {proc.returncode}")
+        if proc.returncode == 10 and WINDOWS:
+            run.error += f"（{VCREDIST_HINT}）"
     return run
 
 

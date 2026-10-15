@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import threading
@@ -16,63 +15,22 @@ from maapilot import cliutil, hosts, paths
 from maapilot.cliutil import FAILED
 from maapilot.crew import lock as lockmod
 from maapilot.flows._common import rel
+from maapilot.oscompat import procs
 from maapilot.flows.daily.base import AGENT_TIMEOUT_MIN, RECOVERY_TIMEOUT_MIN, _Run
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
 
 # --- 子进程 ----------------------------------------------------------------------------------------------------------
 
-def _ps() -> dict[int, tuple[int, int, str]]:
-    """本机进程表：pid → (ppid, pgid, 命令行)；读不了 → {}。"""
-    try:
-        out = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,command="], capture_output=True, text=True,
-                             timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
-    rows = {}
-    for ln in out.splitlines():
-        f = ln.split(None, 3)
-        if len(f) >= 3 and all(x.lstrip("-").isdigit() for x in f[:3]):
-            rows[int(f[0])] = (int(f[1]), int(f[2]), f[3] if len(f) > 3 else "")
-    return rows
-
-
-def _descendants(pid: int, table: dict | None = None) -> dict[int, tuple[int, str]]:
-    """pid 的子孙进程：pid → (pgid, 命令行)。"""
-    table = _ps() if table is None else table
-    kids: dict[int, list[int]] = {}
-    for p, (pp, _, _) in table.items():
-        kids.setdefault(pp, []).append(p)
-    out, todo = {}, [pid]
-    while todo:
-        for p in kids.get(todo.pop(), []):
-            if p not in out:
-                out[p] = (table[p][1], table[p][2])
-                todo.append(p)
-    return out
-
-
-def _descendant_groups(pid: int) -> set[int]:
-    """pid 的子孙进程所在的进程组（不含 pid 自己的组）。codex 每条命令都另起一个进程组，杀 codex 的组带不走它们。"""
-    groups = {g for g, _ in _descendants(pid).values()}
-    groups.discard(pid)
-    return groups
-
-
-def _self_and_ancestors(table: dict | None = None) -> set[int]:
+def _self_and_ancestors() -> set[int]:
     """日常自己和它的祖先进程：收拾 agent 留下的进程时绝不能碰。"""
-    table = _ps() if table is None else table
-    out, p = set(), os.getpid()
-    while p and p not in out:
-        out.add(p)
-        p = table.get(p, (0,))[0]
-    return out
+    return {os.getpid(), *procs.ancestors()}
 
 
 TRACK_EVERY_S = 3                 # 跑无头 agent 时每隔几秒记一次它的子孙（它自己一结束，子孙就挂到 1 号进程下，找不回来了）
 
 
 class _Tracker:
-    """后台定时记下一个进程的子孙（pid → (pgid, 命令行)），结束后用来收拾它留下的进程。"""
+    """后台定时记下一个进程的子孙（pid → (进程组, 命令行)，见 procs.descendants），结束后用来收拾它留下的进程。"""
 
     def __init__(self, pid: int, every_s: float | None = None):
         self.pid, self.every_s, self.seen = pid, every_s or TRACK_EVERY_S, {}
@@ -82,7 +40,7 @@ class _Tracker:
 
     def sample(self) -> None:
         try:
-            self.seen.update(_descendants(self.pid))
+            self.seen.update(procs.descendants(self.pid))
         except Exception:                               # noqa: BLE001 - 记不到就算了
             pass
 
@@ -97,48 +55,30 @@ class _Tracker:
         return dict(self.seen)
 
 
-def _killpgs(groups, sig) -> None:
-    for g in groups:
-        try:
-            os.killpg(g, sig)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-
-
 def _run_group(cmd: list[str], *, env: dict, timeout_s: float | None, stdout=subprocess.PIPE,
-               cwd: Path | None = None, track: dict | None = None) -> tuple[int | None, str, bool]:
-    """跑一个子进程（自成进程组）；超时 → 先 TERM 再 KILL 整个进程组，连同子孙另起的进程组（最后一律再 KILL 一次子孙的组，
-    主进程收到 TERM 就走了也一样）。track 给一个 dict：跑的过程中定时把子孙进程（pid → (pgid, 命令行)）记进去。
+               cwd: Path | None = None, track: dict | None = None, input: str | None = None
+               ) -> tuple[int | None, str, bool]:
+    """跑一个子进程（自成进程组，见 procs.spawn）；超时 → 结束整棵进程树，连同子孙另起的进程组（procs.kill_tree：
+    先 TERM 等 15 秒，再 KILL 等 5 秒，子孙的组最后一律再 KILL）。track 给一个 dict：跑的过程中定时把子孙进程
+    （pid → (进程组, 命令行)）记进去。input：写进子进程 stdin 的文字（不给就接空）。
     → (退出码或 None, stdout 文本, 是否超时)。"""
-    p = subprocess.Popen(cmd, cwd=str(cwd or paths.ROOT), env=env, stdout=stdout, stderr=None,
-                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                         start_new_session=True)
+    p = procs.spawn(cmd, cwd=str(cwd or paths.ROOT), env=env, stdout=stdout, stderr=None,
+                    stdin=subprocess.DEVNULL if input is None else subprocess.PIPE)
     tracker = _Tracker(p.pid) if track is not None else None
     try:
         try:
-            out, _ = p.communicate(timeout=timeout_s)
+            out, _ = p.communicate(input, timeout=timeout_s)
             return p.returncode, out or "", False
         except subprocess.TimeoutExpired:
             pass
         if tracker:
             tracker.sample()
-        seen = {**(tracker.seen if tracker else {}), **_descendants(p.pid)}   # 主进程一死，子孙就找不回来了：先记下
-        groups = {g for g, _ in seen.values()} - {p.pid, os.getpgrp()}
-        result: tuple[int | None, str, bool] = (None, "", True)
-        for sig, wait in ((signal.SIGTERM, 15), (signal.SIGKILL, 5)):
-            _killpgs(groups, sig)
-            try:
-                os.killpg(p.pid, sig)
-            except (ProcessLookupError, PermissionError):
-                pass
-            try:
-                out, _ = p.communicate(timeout=wait)
-                result = (p.returncode, out or "", True)
-                break
-            except subprocess.TimeoutExpired:
-                continue
-        _killpgs(groups, signal.SIGKILL)                # 主进程 TERM 后就走了，子孙的组可能还在：一律 KILL
-        return result
+        code = procs.kill_tree(p, 15, kill_wait_s=5, also=tracker.seen if tracker else None)
+        try:
+            out, _ = p.communicate(timeout=5)
+        except (subprocess.TimeoutExpired, ValueError):
+            out = ""
+        return (code if code is not None else p.returncode), out or "", True
     finally:
         if tracker:
             seen = tracker.stop()
@@ -243,7 +183,8 @@ def _after_agent(r: _Run, env: dict, lk) -> None:
     _stop_leftover_procs(r, seen, "agent 结束后")
 
 
-_LEFTOVER_CMD = re.compile(r"(?:^|[\s/])maapilot(?:\s|$)|-m\s+maapilot\.cli\b|maapilot\.crew\.maacore_runner\b")
+_LEFTOVER_CMD = re.compile(r"(?:^|[\s/\\])maapilot(?:\.exe)?(?:\s|$)|-m\s+maapilot\.cli\b|maapilot\.crew\.maacore_runner\b",
+                           re.IGNORECASE if os.name == "nt" else 0)
 
 
 def _leftover_procs(seen: dict) -> list[int]:
@@ -251,10 +192,9 @@ def _leftover_procs(seen: dict) -> list[int]:
     不是日常自己或它的祖先。"""
     if not seen:
         return []
-    table = _ps()
-    mine = _self_and_ancestors(table)
+    mine = _self_and_ancestors()
     return sorted(pid for pid, (_, cmd) in seen.items()
-                  if pid in table and table[pid][2] == cmd and pid not in mine and _LEFTOVER_CMD.search(cmd or ""))
+                  if pid not in mine and _LEFTOVER_CMD.search(cmd or "") and procs.cmdline(pid) == cmd)
 
 
 def _stop_leftover_procs(r: _Run, seen: dict, when: str) -> list[int]:
@@ -266,17 +206,7 @@ def _stop_leftover_procs(r: _Run, seen: dict, when: str) -> list[int]:
         return []
     if not pids:
         return []
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        for pid in pids:
-            try:
-                os.kill(pid, sig)
-            except (ProcessLookupError, PermissionError):
-                pass
-        end = time.monotonic() + LEFTOVER_KILL_GRACE_S
-        while time.monotonic() < end and set(_leftover_procs(seen)) & set(pids):
-            time.sleep(0.5)
-        if not set(_leftover_procs(seen)) & set(pids):
-            break
+    procs.kill_pids(pids, LEFTOVER_KILL_GRACE_S)
     r.data["alerts"].append(f"{when}还有 agent 起的 maapilot 进程在跑（pid {', '.join(map(str, pids))}），已结束掉")
     r.event("leftover_procs", pids=pids, when=when)
     return pids
@@ -295,17 +225,7 @@ def _stop_leftover_maa(r: _Run, wait_s: float, when: str) -> list[int]:
         pids = daily._leftover_maa()
     if not pids:
         return []
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        for pid in pids:
-            try:
-                os.kill(pid, sig)
-            except (ProcessLookupError, PermissionError):
-                pass
-        end = time.monotonic() + LEFTOVER_KILL_GRACE_S
-        while time.monotonic() < end and set(daily._leftover_maa()) & set(pids):
-            time.sleep(0.5)
-        if not set(daily._leftover_maa()) & set(pids):
-            break
+    procs.kill_pids(pids, LEFTOVER_KILL_GRACE_S)
     r.data["alerts"].append(f"{when}还有 maa 进程在跑（pid {', '.join(map(str, pids))}），已结束掉")
     r.event("leftover_maa", pids=pids, when=when)
     return pids

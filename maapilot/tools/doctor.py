@@ -4,7 +4,7 @@
 version / dir 和 `crontab -l`；不点击、不拿锁、不 import MaaFramework。所有外部访问都经 `Probe`，测试换成假的。
 每项 `{name, ok, detail, fix}`；`required: false` 的项（游戏在不在前台、定时任务、setup）不影响 ok_all。
 
-`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和 crontab。
+`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和定时（crontab）。
 """
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ from pathlib import Path
 
 from maapilot import cliutil, paths
 from maapilot.cliutil import ENVIRONMENT, CliError
+from maapilot.oscompat import fs, hints
 from maapilot.tools import common
 
 OCR_FILES = ("det.onnx", "rec.onnx", "keys.txt")
-# 地址没填时顺手探测的常见模拟器端口（只 adb connect 本机，不点任何东西）
-COMMON_PORTS = (5555, 5557, 7555, 16384, 16416, 62001, 21503)
+# 地址没填时顺手探测的常见模拟器端口（各系统不同，见 oscompat.hints；只 adb connect 本机，不点任何东西）
+COMMON_PORTS = hints.common_ports()
 MIN_W, MIN_H = 1280, 720
-OLD_CRON = ("maapilot job tick", "bin/daily.sh")
 DATA_STALE_DAYS = 30
 
 
@@ -102,7 +102,7 @@ def check_adb(ctx: Ctx) -> dict:
     path = ctx.probe.which(adb)
     if path is None:
         return _item("adb", False, f"找不到 adb（{adb}）",
-                     "brew install --cask android-platform-tools，或在 emulator.adb 写 adb 的绝对路径")
+                     f"{hints.install_hint('adb')}，或在 emulator.adb 写 adb 的绝对路径")
     r = ctx.probe.run([path, "version"])
     if r.returncode != 0:
         return _item("adb", False, f"adb 跑不起来（退出码 {r.returncode}）", "重新安装 Android platform-tools")
@@ -259,7 +259,7 @@ def check_maa_cli(ctx: Ctx) -> dict:
     maa = config.tool("maa", ctx.cfg)
     path = ctx.probe.which(maa)
     if path is None:
-        return _item("maa_cli", False, f"找不到 maa-cli（{maa}）", "brew install MaaAssistantArknights/tap/maa-cli")
+        return _item("maa_cli", False, f"找不到 maa-cli（{maa}）", hints.install_hint("maa"))
     cli, core = maa_version(ctx)
     if not cli:
         return _item("maa_cli", False, "maa-cli 跑不起来", "重新安装 maa-cli")
@@ -320,8 +320,9 @@ def claude_trusted(root: Path) -> bool | None:
     except (OSError, ValueError, AttributeError):
         return None
     p = Path(root).resolve()
-    for d in (p, *p.parents):
-        if (projects.get(str(d)) or {}).get("hasTrustDialogAccepted"):
+    trusted = [k for k, v in projects.items() if isinstance(v, dict) and v.get("hasTrustDialogAccepted")]
+    for d in (p, *p.parents):              # 键的写法（大小写、分隔符）各系统不同，按路径比较
+        if any(fs.same_path(k, d) for k in trusted):
             return True
     return False
 
@@ -371,36 +372,58 @@ def check_game_data(ctx: Ctx) -> dict:
     return _item("game_data", True, "齐全")
 
 
-def crontab_lines(probe: Probe) -> list[str] | None:
-    r = probe.run(["crontab", "-l"], timeout=5)
-    if r.returncode != 0:
-        return [] if "no crontab" in r.err.lower() else None
-    return [l for l in r.text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+def schedule_info(probe: Probe | None = None) -> dict:
+    """本项目的定时（flows/daily/cron.py 的 schedule_info，经 Probe 跑 crontab）：{installed, times, old_entries}，
+    可能带 error（读不了）、unavailable（这台电脑上还设不了定时）。"""
+    from maapilot.flows.daily import cron
+    probe = probe or PROBE
 
-
-def schedule_info(probe: Probe) -> dict:
-    lines = crontab_lines(probe)
-    if lines is None:
-        return {"installed": False, "times": [], "old_entries": [], "readable": False}
-    root = str(paths.ROOT)
-    ours = [l for l in lines if root in l and "daily run" in l]
-    times = []
-    for l in ours:
-        f = l.split()
-        if len(f) >= 2 and f[0].isdigit():
-            times += [f"{int(h):02d}:{int(f[0]):02d}" for h in f[1].split(",") if h.isdigit()]
-    old = [l for l in lines if any(k in l for k in OLD_CRON) and l not in ours]
-    return {"installed": bool(ours), "times": sorted(times), "old_entries": old, "readable": True}
+    def run(argv, input, timeout):
+        r = probe.run(list(argv), timeout=min(timeout, 5))
+        return r.returncode, r.text, r.err
+    return cron.schedule_info(run)
 
 
 def check_schedule(ctx: Ctx) -> dict:
     info = schedule_info(ctx.probe)
     extra = {"old_entries": info["old_entries"]} if info["old_entries"] else {}
+    if info.get("unavailable"):
+        return _item("schedule", False, f"定时日常：{info['unavailable']}", "先在对话里手动跑日常", required=False,
+                     unavailable=True)
+    if info["installed"] is None:
+        return _item("schedule", False, info.get("error") or "读不了定时任务", "看看 crontab 能不能用（crontab -l）",
+                     required=False)
     if not info["installed"]:
         detail = "还没设定时日常" + ("；有旧版 MaaPilot 的定时任务" if info["old_entries"] else "")
         return _item("schedule", False, detail, "maapilot daily schedule", required=False, **extra)
     return _item("schedule", True, f"定时日常：{'、'.join(info['times'])}" +
                  ("；还有旧版 MaaPilot 的定时任务" if info["old_entries"] else ""), required=False, **extra)
+
+
+def skills_link(root: Path | None = None) -> str:
+    """.claude/skills（Claude Code 找 skill 的地方）指向 .agents/skills 没有："ok" / "file"（Windows 上 git 没开符号链接，
+    检出成一个写着路径的文本文件）/ "missing" / "broken"（链接指向的地方不在）。"""
+    link = Path(root or paths.ROOT) / ".claude" / "skills"
+    if link.is_dir():
+        return "ok"
+    if link.is_symlink():
+        return "broken"
+    return "file" if link.is_file() else "missing"
+
+
+def fix_skills_link(root: Path | None = None) -> str:
+    """把 .claude/skills 换成指向 .agents/skills 的目录链接（Windows 上是目录联接，不要管理员权限）。→ 做法。"""
+    root = Path(root or paths.ROOT)
+    return fs.make_dir_link(root / ".claude" / "skills", root / ".agents" / "skills")
+
+
+def check_skills_link(ctx: Ctx) -> dict:
+    state = skills_link()
+    if state == "ok":
+        return _item("skills_link", True, ".claude/skills → .agents/skills", required=False)
+    what = {"file": "是个普通文件（git 检出时没建符号链接）", "missing": "不存在", "broken": "指向的目录不在"}[state]
+    return _item("skills_link", False, f".claude/skills {what}，Claude Code 找不到 MaaPilot 的 skill", "maapilot doctor --fix",
+                 required=False, state=state)
 
 
 def check_setup(ctx: Ctx) -> dict:
@@ -413,7 +436,7 @@ DEVICE_CHECKS = ("emulator", "screen", "input", "game")
 CHECKS = [("config", check_config), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
           ("input", check_input), ("maa_cli", check_maa_cli), ("agent", check_agent), ("maa_config", check_maa_config),
           ("maa_core", check_maa_core), ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
-          ("schedule", check_schedule), ("setup", check_setup)]
+          ("schedule", check_schedule), ("skills_link", check_skills_link), ("setup", check_setup)]
 
 
 def run_checks(offline: bool = False, probe: Probe | None = None) -> list[dict]:
@@ -432,11 +455,17 @@ def run_checks(offline: bool = False, probe: Probe | None = None) -> list[dict]:
 # --- --fix ---------------------------------------------------------------------------------
 
 def fix(probe: Probe | None = None) -> list[dict]:
-    """不需要问用户的本地修复：maa-cli 配置、单独的 MaaCore、OCR 模型、数据表。"""
+    """不需要问用户的本地修复：.claude/skills 链接、maa-cli 配置、单独的 MaaCore、OCR 模型、数据表。"""
     from maapilot import config
     from maapilot.crew import maa
     probe = probe or PROBE
     done = []
+    if skills_link() != "ok" and (paths.ROOT / ".agents" / "skills").is_dir():
+        try:
+            how = fix_skills_link()
+            done.append({"name": "skills_link", "done": [how], "detail": ".claude/skills → .agents/skills"})
+        except OSError as e:
+            done.append({"name": "skills_link", "done": [], "detail": f"建不了链接：{type(e).__name__}: {e}"})
     copied = maa.install_config()
     done.append({"name": "maa_config", "done": copied, "detail": f"复制了 {'、'.join(copied)}" if copied else "已经有了"})
     missing = [f for f in OCR_FILES if not (paths.OCR_MODEL / f).exists()]
@@ -491,7 +520,7 @@ def goals_active() -> int | None:
     except Exception:
         pass
     try:
-        text = paths.GOALS.read_text(encoding="utf-8")
+        text = fs.read_text_utf8(paths.GOALS)
     except OSError:
         return 0
     return len(re.findall(r"^[ \t]*[-*][ \t]*状态[ \t]*[：:][ \t]*进行中[ \t]*$", text, re.M))
@@ -520,6 +549,8 @@ def brief(probe: Probe | None = None) -> dict:
     data = {"setup_done": setup_done, "goals_active": goals_active(), "guard_stop": stop,
             "last_daily": last_daily(), "schedule": {"installed": sched["installed"], "times": sched["times"]},
             "next": "setup" if not setup_done else ("guard" if stop else None)}
+    if sched.get("unavailable"):                        # 这台电脑上还设不了定时（Windows 暂时）
+        data["schedule"]["unavailable"] = sched["unavailable"]
     try:
         from maapilot.flows import report
         data["unseen_problems"] = [{k: p.get(k) for k in ("run_id", "started_at", "status", "lines", "report")}
@@ -619,7 +650,10 @@ def brief_lines(d: dict) -> list[str]:
     else:
         lines.append("还没跑过日常。")
     s = d["schedule"]
-    lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
+    if s.get("unavailable"):
+        lines.append(f"定时日常这台电脑上还设不了：{s['unavailable']}；日常要在对话里手动跑。")
+    else:
+        lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
     n = d.get("news") or {}
     for l in n.get("lines") or []:
         lines.append(f"官方日程：{l}")

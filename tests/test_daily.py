@@ -556,7 +556,7 @@ def test_leftover_maa_after_agent_is_stopped(capsys, env, monkeypatch):
     monkeypatch.setattr(daily, "LEFTOVER_WAIT_S", 0)
     killed = []
     monkeypatch.setattr(daily, "_leftover_maa", lambda: [99999991] if not killed else [])
-    monkeypatch.setattr(daily.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(daily.procs, "kill_pids", lambda pids, grace_s: killed.extend(pids))
     env["behavior"]["fail"] = {"recruit"}
     code, out = run(capsys, "daily", "run", "--trigger", "schedule")
     assert killed == [99999991] and any("maa 进程" in a for a in out["data"]["alerts"])

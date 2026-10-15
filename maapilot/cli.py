@@ -58,9 +58,21 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _divert_stdout() -> int | None:
+def _utf8_stdio() -> None:
+    """一律 UTF-8：子进程继承 PYTHONUTF8；本进程的 stdout / stderr 不按系统代码页（Windows 上是 GBK 等）编码。"""
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):   # 测试里被换成 StringIO 等
+            pass
+
+
+def _divert_stdout() -> tuple[int, object] | None:
     """MaaFramework、MaaCore 的原生日志直接写文件描述符 1，会弄脏 stdout 的 JSON。
-    把描述符 1 指到 stderr，返回原来的 stdout（信封写到那里）。stdout 不是真的描述符 1（测试里被捕获）时不动。"""
+    把描述符 1 指到 stderr，返回 (原来的 stdout, Windows 上原来的 STD_OUTPUT_HANDLE)，信封写到原来的 stdout。
+    Windows 上原生代码可能直接用 GetStdHandle 拿 Win32 句柄、不经过 C 运行库的描述符 1，所以句柄也一起换。
+    stdout 不是真的描述符 1（测试里被捕获）时不动。"""
     try:
         if sys.stdout.fileno() != 1:
             return None
@@ -69,16 +81,42 @@ def _divert_stdout() -> int | None:
     sys.stdout.flush()
     saved = os.dup(1)
     os.dup2(2, 1)
-    return saved
+    return saved, _swap_std_handle()
+
+
+def _swap_std_handle(handle=None):
+    """Windows：把 Win32 的 STD_OUTPUT_HANDLE 换成 stderr 的（handle=None）或换回 handle，返回换之前的句柄。
+    别的系统什么都不做，返回 None。"""
+    from maapilot.oscompat import WINDOWS
+    if not WINDOWS:
+        return None
+    try:
+        import ctypes
+        import msvcrt
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetStdHandle.restype = ctypes.c_void_p
+        k32.GetStdHandle.argtypes = [ctypes.c_ulong]
+        k32.SetStdHandle.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
+        STD_OUTPUT_HANDLE = ctypes.c_ulong(-11 & 0xFFFFFFFF)
+        old = k32.GetStdHandle(STD_OUTPUT_HANDLE)
+        new = msvcrt.get_osfhandle(2) if handle is None else handle
+        k32.SetStdHandle(STD_OUTPUT_HANDLE, new)
+        return old
+    except (ImportError, OSError, AttributeError):
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    out_fd = _divert_stdout()
+    _utf8_stdio()
+    diverted = _divert_stdout()
+    out_fd = diverted[0] if diverted else None
     try:
         return _main(argv, out_fd)
     finally:
-        if out_fd is not None:
+        if diverted:
+            if diverted[1] is not None:
+                _swap_std_handle(diverted[1])
             os.close(out_fd)
 
 

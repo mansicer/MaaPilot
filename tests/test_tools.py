@@ -591,7 +591,7 @@ def test_doctor_candidates_when_no_address(_tmp_private):
 
 def test_doctor_brief(capsys, monkeypatch):
     from maapilot.tools import doctor
-    monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, f"40 4,16 * * * {paths.ROOT}/maapilot daily run --trigger schedule\n*/15 * * * * /x/maapilot job tick\n".encode(), b"")}))
+    monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, f"40 4,16 * * * {paths.ROOT}/.venv/bin/maapilot daily run --trigger schedule # maapilot-v2 {paths.ROOT}\n*/15 * * * * /x/maapilot job tick\n".encode(), b"")}))
     code, env = run(capsys, "doctor", "--brief")
     assert code == 0 and env["data"]["next"] == "setup" and env["data"]["setup_done"] is False
     paths.SETUP.parent.mkdir(parents=True, exist_ok=True)
@@ -615,6 +615,8 @@ def test_doctor_fix_copies_ocr_and_config(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "OCR_MODEL", ocr)
     from maapilot.knowledge import datasync
     monkeypatch.setattr(datasync, "missing_tables", lambda: [])
+    from maapilot.crew import maacore
+    monkeypatch.setattr(maacore, "find", lambda: ("v99.0.0", tmp_path))          # 不真去下载 MaaCore
     probe = FakeProbe({"dir resource": (0, f"{res}\n".encode(), b"")})
     done = {d["name"]: d for d in doctor.fix(probe)}
     assert sorted(done["ocr_model"]["done"]) == ["det.onnx", "keys.txt", "rec.onnx"]

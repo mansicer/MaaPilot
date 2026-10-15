@@ -11,6 +11,7 @@ maapilot.knowledge.maa_protocol 的白名单校验（写错退出码 2）。两�
 from __future__ import annotations
 
 import json
+import re
 
 from maapilot import config
 from maapilot.cliutil import BAD_REQUEST, FAILED, CliError
@@ -289,13 +290,27 @@ def record_annihilation_failure() -> dict:
     return d
 
 
+def _local_path(uri: str):
+    """本地作业：普通路径，或 file:// URI（file:///C:/x.json、file:///Users/x.json；按 Path.as_uri() 的格式解析）。"""
+    from pathlib import Path
+    from urllib.parse import unquote, urlparse
+    if not uri.lower().startswith("file:"):
+        return Path(uri).expanduser()
+    u = urlparse(uri)
+    path = unquote(u.path)
+    if re.match(r"^/[A-Za-z]:", path):                  # Windows 盘符：/C:/x → C:/x
+        path = path[1:]
+    if u.netloc and u.netloc != "localhost":            # UNC：file://server/share/x
+        path = f"//{u.netloc}{path}"
+    return Path(path).expanduser()
+
+
 def _copilot_argv(opts: dict) -> tuple[list[str], dict]:
     uri = (opts.get("uri") or "").strip()
     if not uri:
         raise CliError("bad_arguments", "要给作业：maa://<编号> 或本地 JSON 文件", exit=BAD_REQUEST)
     if not uri.startswith("maa://"):
-        from pathlib import Path
-        p = Path(uri.removeprefix("file://")).expanduser()
+        p = _local_path(uri)
         if not p.exists():
             raise CliError("not_found", f"作业文件不存在：{p}", exit=BAD_REQUEST)
         uri = str(p.resolve())
@@ -388,8 +403,7 @@ def run(task: str, **opts) -> dict:
     else:
         ttype, params, info = build_params(task, opts, cfg)
     common.ensure_device()
-    if maa.config_missing():
-        maa.install_config()
+    maa.install_config()                               # 缺的配置补上，profile 的 adb_path 对上 emulator.adb
     timeout = opts.get("timeout_s") or TASKS[task][1]
     started = common.now()
     if task == "copilot":

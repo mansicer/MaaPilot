@@ -31,6 +31,13 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 4. 装好后 `maapilot doctor --offline`（Claude Code 的启动钩子已经把 `.venv/bin` 加进了 PATH，同一个会话就能用；提示找不到命令（例如在 Codex 里）就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
    在 Codex 里装东西要联网，沙箱里没有网络：命令会请用户批准在沙箱外跑，告诉用户这是装运行环境、点同意。
 
+**Windows**（上面是 macOS / Linux 的写法；Windows 上程序在 `.venv\Scripts\` 下，不是 `.venv/bin/`）：
+- 没有 uv：征得同意后 `winget install astral-sh.uv`；没有 winget 就在 PowerShell 里 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`。装完要重开终端（或 agent）才找得到 `uv`。
+- `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv -e .`；不用 uv 时是 `<python.exe 路径> -m venv .venv`、`.venv\Scripts\python.exe -m pip install -e .`。
+- 之后命令写成 `.venv\Scripts\maapilot.exe <命令> …`（`maapilot` 提示找不到时；见 AGENTS.md「命令约定」）。
+- 仓库最好用 `git clone -c core.symlinks=true …` 拿（`.claude/skills` 是指向 `.agents/skills` 的链接）；已经普通 clone 了，`maapilot doctor --fix` 会把这个链接补上。
+- 定时日常在 Windows 上**暂时还不能设**（任务计划程序的支持还在做）：见第 5 步。
+
 ## 1. 模拟器
 
 **没装**：按 MAA 的文档引导，给链接 + 要点，等用户装好再继续：
@@ -56,10 +63,10 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 | 项 | 常见处理 |
 |---|---|
-| `adb` | 没有 adb：先征得用户同意，`brew install --cask android-platform-tools`（没有 Homebrew 就请用户按 https://brew.sh 装） |
+| `adb` | 没有 adb：先征得用户同意，`brew install --cask android-platform-tools`（没有 Homebrew 就请用户按 https://brew.sh 装）。Windows：优先用模拟器自带的 adb（MuMu 12 在安装目录的 `shell\adb.exe`，雷电在安装目录的 `adb.exe`，问用户装在哪），绝对路径写进 `emulator.adb`（单引号，见模板）；没有再 `winget install Google.PlatformTools`。maa-cli 会跟着用这个 adb，别让 PATH 上另一个版本的 adb 同时连 |
 | `emulator` | 见上一步；模拟器没开、ADB 没打开、地址填错 |
 | `screen` | 分辨率不对：请用户在模拟器设置里改成 1280×720（16:9），改完多半要重启模拟器 |
-| `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。你的 agent 可能要用户批准这两条命令 |
+| `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。你的 agent 可能要用户批准这两条命令。Windows：从 https://github.com/MaaAssistantArknights/maa-cli/releases 下最新的 `maa_cli-x86_64-pc-windows-msvc.zip`，解压到一个固定的文件夹（例如 `%LOCALAPPDATA%\maa-cli`），`maa.exe` 的绝对路径写进 `tools.maa`，再 `<那个路径> install`；MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `claude` / `codex` | 定时日常叫起的 agent（`config.yaml` 的 `agent`）。`trusted: false`：Claude Code——请用户在这个文件夹里正常启动一次 claude 并接受信任提示（这项只是提示）；Codex——征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。Codex 这项是必须的：不信任时项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住不该跑的，`daily schedule` 会拒绝 |
@@ -68,6 +75,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 定时日常叫哪个 agent：你现在跑在哪个里面（Claude Code 还是 Codex），`agent` 就写哪个（`claude` / `codex`），不用问用户；用户想换再改。
 然后把 `tools.maa`、`tools.<agent>` 改成绝对路径（定时任务的 PATH 很短）：`doctor` 的 `maa_cli`、`claude` / `codex` 两项的 `path` 就是，写进 `private/config.yaml`。那一项没通过时问用户它装在哪。
+Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的 `\` 会被当成转义；`private/` 下的文件存成 UTF-8。
 
 ## 3. 试启动、第一次读账号
 
@@ -109,6 +117,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 2. 设定时前问一句：这个账号是不是已经在别的电脑上设了定时日常？是的话这里就不设（两台会抢着登录，还会让对方的货币对账以为钱被偷偷花了），跳到第 3 步；用户想换到这台，请他先在那台停掉。
    `agent` 是 `codex` 时，先确认 `doctor` 的 `codex` 项通过（`maapilot host install codex` 做过），不然 `daily schedule` 会拒绝（`codex_untrusted`）。
    `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`），把设好的时间和输出里 `exec` 的几个程序（定时日常会在用户不在时运行它们）告诉用户；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
+   Windows：定时日常暂时还不能设（任务计划程序的支持还在做），这一步跳过（用户选的时间照样写进 `schedule`）；告诉用户现在要日常就打开助手说"跑一次日常"，定时的做好了再来设。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
    - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude（或 codex）问"今天做了什么"就行；
@@ -120,7 +129,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 ## 问用户的情形
 
 - 模拟器装没装、是哪个、ADB 地址找不到时；
-- 装软件（Python、Homebrew、adb、maa-cli）前；
+- 装软件（Python、uv、Homebrew、adb、maa-cli、VC++ 运行库）前；
 - 服务器认不出时；
 - 日常几次几点、做哪些、没目标刷哪关；
 - 游戏更新后的用户协议要不要直接同意；

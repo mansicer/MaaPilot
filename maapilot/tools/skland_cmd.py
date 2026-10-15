@@ -22,6 +22,7 @@ TOKEN_HINT = "请用户在终端里跑 maapilot skland token（按提示粘贴�
 def token_guide() -> str:
     """`skland token` 的完整步骤：--help 和终端提示里都显示这一段。"""
     from maapilot.crew.skland import TOKEN_PAGE
+    from maapilot.oscompat.venv import maapilot_cmd
     return f"""怎么拿到鹰角账号 token（大约 1 分钟）：
 
   （能弹浏览器时，程序会替你打开第 1、2 步的网页；不想自动打开就加 --no-browser。）
@@ -42,7 +43,7 @@ def token_guide() -> str:
   - token 相当于你账号的登录凭证，只保存在本机 private/skland.json（只有你自己能读），
     不会出现在任何输出和日志里。不要把它发给别人，也不要粘贴到和 agent 的对话里。
   - 在官网退出登录、改密码后，token 可能失效；以后提示 token 过期时，照上面的步骤再做一遍。
-  - 这条命令只能你自己在终端里运行（在仓库目录下：.venv/bin/maapilot skland token）。"""
+  - 这条命令只能你自己在终端里运行（在仓库目录下：{maapilot_cmd()} skland token）。"""
 
 
 def store_path():
@@ -58,7 +59,7 @@ def save_store(d: dict) -> None:
     p = store_path()
     common.write_json(p, d)
     try:
-        os.chmod(p, 0o600)
+        os.chmod(p, 0o600)            # Windows 上只管只读位，等于不动（文件在用户自己的目录里）
     except OSError:
         pass
 

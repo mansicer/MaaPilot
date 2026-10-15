@@ -15,7 +15,6 @@ import json
 import os
 import secrets
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -24,6 +23,8 @@ from datetime import datetime, timedelta
 
 from maapilot import paths
 from maapilot.knowledge.calendar import GAME_TZ
+from maapilot.oscompat import fs, procs
+from maapilot.oscompat.procs import pid_alive  # noqa: F401 - 测试替换 lock.pid_alive（stale_reason 经本模块取）
 
 POLL_S = 5.0
 TOKEN_ENV = "MAAPILOT_LOCK_TOKEN"
@@ -42,46 +43,8 @@ def _host() -> str:
 
 
 def external_maa_pids() -> list[int]:
-    """`pgrep -x maa` 找到的进程（测试里 monkeypatch 掉）。pgrep 不可用时视为没有。"""
-    try:
-        out = subprocess.run(["pgrep", "-x", "maa"], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return [int(x) for x in out.split() if x.strip().isdigit()]
-
-
-def pid_alive(pid: int) -> bool:
-    """这台机器上 pid 还在不在。Windows 上 os.kill(pid, 0) 会直接结束那个进程，改用 OpenProcess + GetExitCodeProcess。"""
-    if sys.platform == "win32":
-        return _pid_alive_win32(pid)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except (OSError, ValueError, TypeError):
-        return False
-    return True
-
-
-def _pid_alive_win32(pid: int) -> bool:          # pragma: no cover - exercised on Windows only
-    import ctypes
-    PROCESS_QUERY_LIMITED_INFORMATION, STILL_ACTIVE, ERROR_ACCESS_DENIED = 0x1000, 259, 5
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.OpenProcess.restype = ctypes.c_void_p                  # HANDLE：默认的 int 会截断 64 位句柄
-    k32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
-    k32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
-    if not h:
-        return ctypes.get_last_error() == ERROR_ACCESS_DENIED   # 打不开但存在（别的用户的进程）
-    try:
-        code = ctypes.c_ulong()
-        if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
-            return True
-        return code.value == STILL_ACTIVE
-    finally:
-        k32.CloseHandle(h)
+    """在跑的 maa 进程（maa / maa.exe，测试里 monkeypatch 掉）。查不了进程表时视为没有。"""
+    return procs.find_by_name("maa")
 
 
 def _parse(s) -> datetime | None:
@@ -94,7 +57,7 @@ def _parse(s) -> datetime | None:
 def current() -> dict | None:
     """当前 lock.json 内容；没有或读不了返回 None。"""
     try:
-        return json.loads(paths.LOCK_FILE.read_text(encoding="utf-8"))
+        return json.loads(fs.read_text_utf8(paths.LOCK_FILE))
     except (OSError, ValueError):
         return None
 
@@ -142,9 +105,7 @@ def _write(data: dict, exclusive: bool) -> bool:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         return True
-    tmp = paths.LOCK_FILE.with_suffix(f".tmp{os.getpid()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, paths.LOCK_FILE)
+    fs.atomic_write_text(paths.LOCK_FILE, text)
     return True
 
 
@@ -177,10 +138,7 @@ class Lock:
             return
         self.released = True
         if self._mine(current()):
-            try:
-                paths.LOCK_FILE.unlink()
-            except FileNotFoundError:
-                pass
+            fs.safe_unlink(paths.LOCK_FILE)
 
     def rotate_token(self) -> str:
         """换一个新 token 写进 lock.json，返回它（给以后的子进程用）。拿着旧 token 的子进程再拿锁就是"被占用"，

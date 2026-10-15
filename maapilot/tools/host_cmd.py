@@ -16,6 +16,7 @@ from pathlib import Path
 
 from maapilot import config, hosts, paths
 from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
+from maapilot.oscompat import fs, procs
 
 RULES = Path(".codex") / "rules" / "maapilot.rules"
 # 规则文件该给的结论（install 时用 codex execpolicy check 核对）
@@ -32,18 +33,31 @@ def _codex_config() -> Path:
     return codex_home() / "config.toml"
 
 
+def _projects(text: str) -> dict:
+    p = tomllib.loads(text).get("projects") or {}
+    return p if isinstance(p, dict) else {}
+
+
+def _project_entry(projects: dict, d) -> tuple[str, dict] | None:
+    """projects 里指 d 这个文件夹的那一段（Windows 上键的大小写、分隔符可能和我们写的不一样）：(键, 内容)；没有 → None。"""
+    if str(d) in projects:
+        return str(d), projects[str(d)]
+    return next(((k, v) for k, v in projects.items() if fs.same_path(k, d)), None)
+
+
 def codex_trusted(root: Path) -> bool | None:
     """[projects."<root 或上级>"] trust_level = "trusted"。没有配置文件 → False；读不了 / 写错 → None。"""
     f = _codex_config()
     if not f.exists():
         return False
     try:
-        projects = tomllib.loads(f.read_text(encoding="utf-8")).get("projects") or {}
-    except (OSError, tomllib.TOMLDecodeError):
+        projects = _projects(fs.read_text_utf8(f))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return None
     p = Path(root).resolve()
     for d in (p, *p.parents):
-        if (projects.get(str(d)) or {}).get("trust_level") == "trusted":
+        e = _project_entry(projects, d)
+        if e and isinstance(e[1], dict) and e[1].get("trust_level") == "trusted":
             return True
     return False
 
@@ -56,8 +70,7 @@ def _rules_check(binary: str) -> dict:
     out = {}
     for want, cmd in EXPECT.items():
         try:
-            p = subprocess.run([binary, "execpolicy", "check", "-r", str(rules), *cmd], capture_output=True,
-                               text=True, timeout=30, stdin=subprocess.DEVNULL)
+            p = procs.run_text([binary, "execpolicy", "check", "-r", str(rules), *cmd], timeout=30)
             got = json.loads(p.stdout or "{}").get("decision")
         except (OSError, subprocess.TimeoutExpired, ValueError) as e:
             return {"ok": False, "error": f"codex execpolicy check 没跑成：{e}"}
@@ -98,10 +111,10 @@ def install(host: str, dry_run: bool) -> dict:
         raise CliError("codex_config_unreadable", f"读不了 {_codex_config()}（TOML 写错了？）", exit=ENVIRONMENT,
                        hint="请用户自己看一下这个文件")
     if not trusted:
-        text = _codex_config().read_text(encoding="utf-8") if _codex_config().exists() else ""
-        projects = tomllib.loads(text).get("projects") or {}
-        if str(paths.ROOT) in projects:                 # 已经有这一段但不是 trusted（用户选过不信任）：不替用户改
-            raise CliError("codex_untrusted", f"Codex 设置里这个文件夹是 {projects[str(paths.ROOT)]}，不是 trusted",
+        text = fs.read_text_utf8(_codex_config()) if _codex_config().exists() else ""
+        have = _project_entry(_projects(text), paths.ROOT)
+        if have:                                        # 已经有这一段但不是 trusted（用户选过不信任）：不替用户改
+            raise CliError("codex_untrusted", f"Codex 设置里这个文件夹是 {have[1]}，不是 trusted",
                            exit=BAD_REQUEST, hint=f"请用户自己在 {_codex_config()} 里改成 trust_level = \"trusted\"")
         block = f'\n[projects.{json.dumps(str(paths.ROOT))}]\ntrust_level = "trusted"\n'
         out["append"] = block.strip()

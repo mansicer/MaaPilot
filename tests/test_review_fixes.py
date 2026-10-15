@@ -205,6 +205,29 @@ def test_session_start_without_venv(tmp_path):
     assert f'{root.resolve()}/.venv/bin' in envfile.read_text() or f'{root}/.venv/bin' in envfile.read_text()
 
 
+
+def test_session_start_windows_venv_layout(tmp_path):
+    """Windows 的 .venv（Scripts/maapilot.exe，Claude Code 经 Git Bash 跑钩子）：PATH 写 Scripts，并执行它做启动检查。"""
+    root = tmp_path / "repo"
+    (root / "bin").mkdir(parents=True)
+    shutil.copy(paths.ROOT / "bin" / "session-start", root / "bin" / "session-start")
+    exe = root / ".venv" / "Scripts" / "maapilot.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text('#!/bin/sh\necho "{\\"ran\\": \\"$*\\"}"\n', encoding="utf-8")
+    exe.chmod(0o755)
+    envfile = tmp_path / "env.sh"
+    p = subprocess.run(["/bin/sh", str(root / "bin" / "session-start")], capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "CLAUDE_ENV_FILE": str(envfile)})
+    assert p.returncode == 0 and json.loads(p.stdout) == {"ran": "doctor --hook"}, p.stderr
+    assert "/.venv/Scripts:$PATH" in envfile.read_text() and "/.venv/bin" not in envfile.read_text()
+
+
+def test_gitattributes_keeps_hook_lf():
+    p = subprocess.run(["git", "check-attr", "eol", "text", "bin/session-start"], cwd=paths.ROOT, capture_output=True,
+                       text=True)
+    assert "eol: lf" in p.stdout
+    assert b"\r\n" not in (paths.ROOT / "bin" / "session-start").read_bytes()
+
 # --- calc / data -----------------------------------------------------------------------------------
 
 @needs_data

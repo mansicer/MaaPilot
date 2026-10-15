@@ -11,6 +11,7 @@ from maapilot.cliutil import BUSY, CliError
 from maapilot.crew import lock as lockmod
 from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
+from maapilot.oscompat import fs
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
 
 DAILY_ENV = "MAAPILOT_DAILY_RUN"          # 无头 agent 的环境里带着它：agent 里不能再起一次 daily run
@@ -37,7 +38,7 @@ def _marker() -> Path:
 
 def _read_marker() -> dict | None:
     try:
-        return json.loads(_marker().read_text(encoding="utf-8"))
+        return json.loads(fs.read_text_utf8(_marker()))
     except (OSError, ValueError):
         return None
 
@@ -65,7 +66,7 @@ def _take_marker(run_id: str, trigger: str) -> None:
     except FileExistsError:
         if daily.running():                                # 刚被别人抢到
             raise CliError("daily_running", "另一个日常刚开始", exit=BUSY) from None
-        _marker().unlink(missing_ok=True)            # 残留的标记
+        fs.safe_unlink(_marker())                    # 残留的标记
         fd = os.open(_marker(), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(body, f, ensure_ascii=False)
@@ -75,15 +76,13 @@ def _set_step(step: str | None) -> None:
     d = _read_marker()
     if d and d.get("pid") == os.getpid():
         d["step"] = step
-        tmp = _marker().with_suffix(f".tmp{os.getpid()}")
-        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, _marker())
+        fs.atomic_write_text(_marker(), json.dumps(d, ensure_ascii=False))
 
 
 def _drop_marker() -> None:
     d = _read_marker()
     if d and d.get("pid") == os.getpid():
-        _marker().unlink(missing_ok=True)
+        fs.safe_unlink(_marker())
 
 
 # --- 一次运行的记录 --------------------------------------------------------------------------------------------------

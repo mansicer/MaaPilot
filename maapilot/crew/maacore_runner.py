@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import signal
 import sys
 import time
+
+from maapilot.oscompat.procs import STOP_SIGNALS
 
 CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_char_p, ctypes.c_void_p)
 
@@ -29,6 +32,8 @@ def emit(obj: dict) -> None:
 
 
 def load(path: str):
+    if hasattr(os, "add_dll_directory"):                # Windows：MaaCore.dll 依赖的 DLL 在它旁边
+        os.add_dll_directory(os.path.dirname(os.path.abspath(path)))
     lib = ctypes.CDLL(path)
     lib.AsstGetVersion.restype = ctypes.c_char_p
     lib.AsstSetUserDir.argtypes = [ctypes.c_char_p]
@@ -47,6 +52,8 @@ def load(path: str):
 
 
 def main() -> int:
+    for f in (sys.stdin, sys.stdout):                   # 父进程按 UTF-8 读写；Windows 上默认是系统代码页
+        f.reconfigure(encoding="utf-8", errors="replace")
     spec = json.loads(sys.stdin.read())
     try:
         lib = load(spec["lib"])
@@ -81,9 +88,9 @@ def main() -> int:
         stopped.append(signum)
         lib.AsstStop(handle)
 
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        signal.signal(sig, on_signal)
     try:
+        for sig in STOP_SIGNALS:                        # 在 try 里：注册失败也照样 AsstDestroy
+            signal.signal(sig, on_signal)
         for key, value in (spec.get("instance_options") or {}).items():
             lib.AsstSetInstanceOption(handle, INSTANCE_OPTION_KEYS[key], str(value).encode())
         if not lib.AsstConnect(handle, spec["adb"].encode(), spec["address"].encode(), b"General"):

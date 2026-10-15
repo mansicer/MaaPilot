@@ -1,11 +1,10 @@
-"""定时（crontab）与 `daily status`。crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行。"""
+"""定时日常与 `daily status`。装、读、删定时条目经 oscompat.sched 的后端（macOS / Linux 是 crontab；Windows 的任务计划程序还没接上）；
+这里只管什么时间、执行什么。crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行。"""
 from __future__ import annotations
 
 import os
 import re
-import shlex
 import shutil
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 
@@ -14,49 +13,35 @@ from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
 from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
+from maapilot.oscompat import sched, venv
 
-# --- 定时（crontab） -------------------------------------------------------------------------------------------------
+# --- 定时 ------------------------------------------------------------------------------------------------------------
 
-TAG = "# maapilot-v2"
-_OLD_MARKS = ("maapilot job tick", "bin/daily.sh")       # 旧版 MaaPilot 的定时任务
+TAG = sched.TAG
+_OLD_MARKS = sched.OLD_MARKS
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-_CRON_HM = re.compile(r"^\s*(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s")
+_CRON_HM = sched._CRON_HM
 
 
 def _crontab() -> str:
-    """crontab 程序；测试用 MAAPILOT_CRONTAB 换成假的。"""
-    return os.environ.get("MAAPILOT_CRONTAB") or "crontab"
+    return sched.CronBackend.program()
 
 
 def read_crontab() -> str:
-    try:
-        p = subprocess.run([_crontab(), "-l"], capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise CliError("no_crontab", f"读不了 crontab：{e}", exit=ENVIRONMENT) from None
-    if p.returncode != 0:
-        if "no crontab" in (p.stderr or "").lower():
-            return ""
-        raise CliError("no_crontab", f"读不了 crontab：{(p.stderr or '').strip()}", exit=ENVIRONMENT)
-    return p.stdout
+    return sched.CronBackend().read_text()
 
 
 def write_crontab(text: str) -> None:
-    try:
-        p = subprocess.run([_crontab(), "-"], input=text, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise CliError("crontab_failed", f"写不了 crontab：{e}", exit=ENVIRONMENT) from None
-    if p.returncode != 0:
-        raise CliError("crontab_failed", f"写不了 crontab：{(p.stderr or '').strip()}",
-                       hint="macOS 弹窗问终端能不能改 crontab 时要点允许", exit=ENVIRONMENT)
+    sched.CronBackend().write_text(text)
 
 
-def _mine(line: str) -> bool:
-    return TAG in line and line.rstrip().endswith(f"{TAG} {paths.ROOT}")
+_mine = sched.CronBackend.mine
+_old = sched.CronBackend.old
+_times_of = sched.CronBackend.times_of
 
 
-def _old(line: str) -> bool:
-    s = line.strip()
-    return bool(s) and not s.startswith("#") and TAG not in s and any(m in s for m in _OLD_MARKS)
+def _entries(text: str) -> tuple[list[str], list[str]]:
+    return sched.CronBackend().split(text)
 
 
 def _parse_times(times: list[str]) -> list[tuple[int, int]]:
@@ -83,80 +68,48 @@ def _uses_codex(cfg: dict) -> bool:
 
 
 def _path_dirs(cfg: dict) -> str:
-    """定时任务的 PATH：项目的 .venv/bin（叫起来的 agent 直接用 maapilot）、maa、agent（claude / codex）、adb 所在目录
+    """定时任务的 PATH：项目 .venv 的程序目录（叫起来的 agent 直接用 maapilot）、maa、agent（claude / codex）、adb 所在目录
     （要用到 codex 时也带上它的目录）+ 系统目录。"""
     from maapilot import hosts
-    dirs = [str(paths.ROOT / ".venv" / "bin")]
+    dirs = [str(venv.venv_bin())]
     found_all = [shutil.which(str(prog)) for prog in _exec_paths(cfg).values()]
     if _uses_codex(cfg):
         found_all.append(hosts.codex_path(cfg))
-    for found in found_all:
-        if found:
-            d = str(Path(found).parent)
-            if d not in dirs:
-                dirs.append(d)
-    for d in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
-        if d not in dirs:
-            dirs.append(d)
-    return ":".join(dirs)
+    dirs += [str(Path(found).parent) for found in found_all if found]
+    return venv.join_path(dirs + venv.sys_path_dirs())
+
+
+def command(cfg: dict) -> sched.Command:
+    """定时要执行的命令：项目 .venv 里的 maapilot daily run --trigger schedule，输出追加到 private/log/cron.log。"""
+    env = {"PATH": _path_dirs(cfg), "PYTHONUTF8": "1"}
+    if os.environ.get("MAAPILOT_PRIVATE"):
+        env["MAAPILOT_PRIVATE"] = str(paths.PRIVATE)
+    if os.environ.get("CODEX_HOME"):                    # Codex 的设置（信任这个文件夹）放在别处时，定时日常也要找得到
+        env["CODEX_HOME"] = os.environ["CODEX_HOME"]
+    return sched.Command([str(venv.venv_exe("maapilot")), "daily", "run", "--trigger", "schedule"], env,
+                         paths.LOGS / "cron.log")
 
 
 def cron_lines(times: list[tuple[int, int]], cfg: dict) -> list[str]:
-    def q(s) -> str:
-        return shlex.quote(str(s)).replace("%", r"\%")    # crontab 里 % 是换行
-    envs = f"PATH={q(_path_dirs(cfg))} PYTHONUTF8=1"
-    if os.environ.get("MAAPILOT_PRIVATE"):
-        envs += f" MAAPILOT_PRIVATE={q(paths.PRIVATE)}"
-    if os.environ.get("CODEX_HOME"):                    # Codex 的设置（信任这个文件夹）放在别处时，定时日常也要找得到
-        envs += f" CODEX_HOME={q(os.environ['CODEX_HOME'])}"
-    cmd = (f"{envs} {q(paths.ROOT / '.venv' / 'bin' / 'maapilot')} daily run --trigger schedule"
-           f" >> {q(paths.LOGS / 'cron.log')} 2>&1")
-    return [f"{m} {h} * * * {cmd} {TAG} {paths.ROOT}" for h, m in times]
-
-
-def _entries(text: str) -> tuple[list[str], list[str]]:
-    lines = text.splitlines()
-    return [ln for ln in lines if _mine(ln)], [ln for ln in lines if _old(ln)]
-
-
-def _times_of(lines: list[str]) -> list[str]:
-    out = []
-    for ln in lines:
-        m = _CRON_HM.match(ln)
-        if m:
-            out.append(f"{int(m.group(2)):02d}:{int(m.group(1)):02d}")
-    return sorted(out)
+    return sched.CronBackend.render(times, command(cfg))
 
 
 def schedule(times: str | None, replace_old: bool, dry_run: bool) -> dict:
     cfg = config.load()
     hm = _parse_times(times.split(",") if times else list(cfg.get("schedule") or []))
-    cur = read_crontab()
-    mine, old = _entries(cur)
-    keep = [ln for ln in cur.splitlines() if not _mine(ln) and not (replace_old and _old(ln))]
-    new_lines = cron_lines(hm, cfg)
-    text = "\n".join(keep + new_lines) + "\n"
-    changed = text != (cur if cur.endswith("\n") or not cur else cur + "\n")
-    if not dry_run and changed:
-        paths.LOGS.mkdir(parents=True, exist_ok=True)
-        write_crontab(text)
-    out = {"times": [f"{h:02d}:{m:02d}" for h, m in hm], "installed": new_lines, "replaced": mine,
-           "old_entries": old, "removed_old": old if replace_old else [], "changed": changed, "dry_run": dry_run}
+    r = sched.backend().install(hm, command(cfg), replace_old=replace_old, dry_run=dry_run)
+    out = {"times": [f"{h:02d}:{m:02d}" for h, m in hm], "installed": r["installed"], "replaced": r["replaced"],
+           "old_entries": r["old_entries"], "removed_old": r["removed_old"], "changed": r["changed"], "dry_run": dry_run}
     if dry_run:
-        out["crontab"] = text
+        out["crontab"] = r["preview"]
     return out
 
 
 def unschedule(dry_run: bool) -> dict:
-    cur = read_crontab()
-    mine, old = _entries(cur)
-    keep = [ln for ln in cur.splitlines() if not _mine(ln)]
-    text = "\n".join(keep) + ("\n" if keep else "")
-    if mine and not dry_run:
-        write_crontab(text)
-    out = {"removed": mine, "old_entries": old, "dry_run": dry_run}
+    r = sched.backend().remove(dry_run=dry_run)
+    out = {"removed": r["removed"], "old_entries": r["old_entries"], "dry_run": dry_run}
     if dry_run:
-        out["crontab"] = text
+        out["crontab"] = r["preview"]
     return out
 
 
@@ -193,13 +146,21 @@ def unschedule_cmd(dry_run: bool) -> dict:
     return unschedule(dry_run)
 
 
-def schedule_info() -> dict:
-    """crontab 里本项目的定时（doctor 的 schedule 检查、--brief 用）：{installed, times, old_entries} 或带 error。"""
+def schedule_info(run: sched.Runner | None = None) -> dict:
+    """本项目的定时（doctor 的 schedule 检查、--brief、daily status 用）：{installed, times, old_entries}；
+    读不了时 installed 为 None 并带 error；这台电脑上没有可用的调度（Windows 暂时）时 installed 为 False 并带 unavailable。
+    run：换掉跑子进程的方式（doctor 用它的 Probe）。"""
+    b = sched.backend(run)
+    ok, hint = b.available()
+    if not ok:
+        return {"installed": False, "times": [], "old_entries": [], "unavailable": hint}
     try:
-        mine, old = _entries(read_crontab())
+        entries = b.read()
     except CliError as e:
         return {"installed": None, "times": [], "old_entries": [], "error": e.message}
-    return {"installed": bool(mine), "times": _times_of(mine), "old_entries": old}
+    mine = [e for e in entries if e.mine]
+    return {"installed": bool(mine), "times": sorted(t for e in mine for t in e.times),
+            "old_entries": [e.ident for e in entries if e.old]}
 
 
 def _next_at(times: list[str]) -> str | None:

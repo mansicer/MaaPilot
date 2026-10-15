@@ -7,13 +7,16 @@ MAA 只能导航有任务的关：一般就是 Stages 列出的那几关（例�
 - 其余活动关 → 不可导航，why_not() 给出原因（MAA 还没加这期活动 / 只支持哪几关 / 活动没开始或已结束）。
 
 时间：文件里的 "UtcStartTime" 其实是 TimeZone 时区（官服 8）的本地时间，MAA 自己也是减去 TimeZone 小时换成 UTC。
-文件位置：MAAPILOT_MAA_ACTIVITY_FILE（测试用）；否则 maa-cli 的缓存目录（macOS ~/Library/Caches/com.loong.maa，
-其他 $XDG_CACHE_HOME/maa）。导航任务表在同目录 resource/tasks/tasks.json（MAAPILOT_MAA_TASKS_FILE）。
+文件位置：MAAPILOT_MAA_ACTIVITY_FILE（测试用）；否则 maa-cli 的缓存目录：先问 `maa dir cache`，问不到按系统猜
+（macOS ~/Library/Caches/com.loong.maa，Windows %LOCALAPPDATA%\\loong\\maa\\cache，其他 $XDG_CACHE_HOME/maa）。
+导航任务表在同目录 resource/tasks/tasks.json（MAAPILOT_MAA_TASKS_FILE）。
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,10 +33,33 @@ SRC, TASKS_SRC = "maa_activity", "maa_tasks"
 SERVER_ALIAS = {"Bilibili": "Official"}      # B 服和官服用同一份活动列表（文件里没有 Bilibili 这一节）
 
 
-def _cache_dir() -> Path:
+def _guess_cache_dir() -> Path:
+    """maa-cli（Rust directories 库，ProjectDirs("com", "loong", "maa")）在各系统上的缓存目录。"""
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "com.loong.maa"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
+        return Path(base) / "loong" / "maa" / "cache"
     return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "maa"
+
+
+def _ask_cache_dir() -> Path | None:
+    """`maa dir cache` 的输出；maa-cli 没装、跑不起来就 None。"""
+    try:
+        from maapilot import config
+        exe = shutil.which(config.tool("maa"))
+        if not exe:
+            return None
+        r = subprocess.run([exe, "dir", "cache"], capture_output=True, encoding="utf-8", errors="replace", timeout=15)
+    except Exception:                                    # noqa: BLE001 - 问不到就按系统猜
+        return None
+    lines = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
+    return Path(lines[-1]) if r.returncode == 0 and lines else None
+
+
+@lru_cache(maxsize=1)
+def _cache_dir() -> Path:
+    return _ask_cache_dir() or _guess_cache_dir()
 
 
 def activity_file() -> Path:

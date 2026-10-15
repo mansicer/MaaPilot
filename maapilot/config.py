@@ -9,6 +9,7 @@ import yaml
 
 from maapilot import paths
 from maapilot.cliutil import ENVIRONMENT, BAD_REQUEST, CliError
+from maapilot.oscompat import fs
 
 DEFAULTS = {
     "emulator": {"address": None, "adb": "adb"},
@@ -33,7 +34,10 @@ def load(path: Path | None = None) -> dict:
     if not p.exists():
         raise CliError("no_config", "还没有配置文件 private/config.yaml", hint="先完成 setup", exit=ENVIRONMENT)
     try:
-        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(fs.read_text_utf8(p)) or {}
+    except fs.BadEncoding as e:                     # Windows 记事本"ANSI"存的（GBK 等）
+        raise CliError("invalid_config", str(e), hint="用编辑器另存为 UTF-8",
+                       exit=BAD_REQUEST) from None
     except yaml.YAMLError as e:
         raise CliError("invalid_config", f"config.yaml 写错了：{e}", exit=BAD_REQUEST) from None
     if not isinstance(raw, dict):

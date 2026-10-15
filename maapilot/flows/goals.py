@@ -11,7 +11,6 @@ agent 也会直接用文件工具改这个文件，所以解析要宽松：键�
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -20,6 +19,7 @@ from pathlib import Path
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, NEEDS_USER, CliError
 from maapilot.knowledge.calendar import DAY_START, GAME_TZ
+from maapilot.oscompat import fs
 
 # 固定字段：键 → 输出里的名字
 FIELDS = {"状态": "status", "对象": "object", "原话": "said", "同意": "approved", "花合成玉/源石": "premium"}
@@ -155,21 +155,18 @@ def parse(text: str, path: Path) -> GoalsFile:
 def load(path: Path | None = None) -> GoalsFile:
     p = path or paths.GOALS
     try:
-        text = p.read_text(encoding="utf-8")
+        text = fs.read_text_utf8(p)
     except FileNotFoundError:
         text = ""
     return parse(text, p)
 
 
 def save(gf: GoalsFile) -> None:
-    """临时文件 + 替换；没改的段落字节不变（原来文件末尾没有换行的，照旧不加）。"""
-    gf.path.parent.mkdir(parents=True, exist_ok=True)
+    """临时文件 + 替换；没改的段落字节不变（原来文件末尾没有换行的，照旧不加；原来是 CRLF 换行的照旧写 CRLF）。"""
     text = gf.text()
     if not gf.trailing_newline and text.endswith("\n"):
         text = text[:-1]
-    tmp = gf.path.with_name(f".{gf.path.name}.tmp{os.getpid()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, gf.path)
+    fs.atomic_write_text(gf.path, text, newline=fs.newline_of(gf.path))
 
 
 # --- 读 --------------------------------------------------------------------------------------------------------------

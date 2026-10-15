@@ -96,8 +96,8 @@ class StageReading:
 
 @lru_cache(maxsize=None)
 def _template(name: str) -> np.ndarray:
-    import cv2
-    img = cv2.imread(str(TEMPLATES / f"{name}.png"), cv2.IMREAD_COLOR)
+    from maapilot.oscompat import fs
+    img = fs.imread(TEMPLATES / f"{name}.png")          # 仓库在中文路径下时 cv2.imread 在 Windows 上读不了
     if img is None:
         raise FileNotFoundError(TEMPLATES / f"{name}.png")
     return img

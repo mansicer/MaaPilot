@@ -94,23 +94,24 @@
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
 检查项（`data.checks[].name`）；每项 `{name, ok, detail, fix}`，有的另带字段（`candidates`、`resolution`、`old_entries`…）。
-标 `required: false` 的（`claude` / `codex`——只有 `agent` 是 `codex` 而 Codex 没信任这个文件夹时是必需项、`game`、`schedule`、`setup`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
+标 `required: false` 的（`claude` / `codex`——只有 `agent` 是 `codex` 而 Codex 没信任这个文件夹时是必需项、`game`、`schedule`、`skills_link`、`setup`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
 
 | name | 查什么 | 修复建议 |
 |---|---|---|
 | `config` | `private/config.yaml` 在、能解析、`emulator.address` 已填 | 做 setup |
-| `adb` | adb 程序能跑（版本） | `brew install --cask android-platform-tools` |
+| `adb` | adb 程序能跑（版本） | 按系统给安装方法（macOS `brew install --cask android-platform-tools`；Windows `winget install Google.PlatformTools` 或模拟器自带的 adb.exe） |
 | `emulator` | `adb connect` + 设备 online；地址没填或连不上时列出在线的候选（`adb devices` 与常见端口的 `adb connect` 探测） | 开模拟器、打开 ADB 调试、填地址 |
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
-| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径 | `brew install MaaAssistantArknights/tap/maa-cli`、`maa install` |
+| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径 | 按系统给安装方法（macOS `brew install MaaAssistantArknights/tap/maa-cli`；Windows `winget` 或 GitHub 下载压缩包）、`maa install` |
 | `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。`agent` 写错时项名是 `agent` | 在 `tools.<agent>` 写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex` |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
-| `schedule` | crontab 里有没有本项目的定时日常；有没有旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`，列在 `old_entries`） | `daily schedule` |
+| `schedule` | crontab 里有没有本项目的定时日常；有没有旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`，列在 `old_entries`）。这台电脑上还设不了定时（Windows，任务计划程序还没接上）时 `unavailable: true` | `daily schedule` |
+| `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
 
 `--offline` 跳过 `emulator`、`screen`、`input`、`game`（其余几项只跑本机命令）。
@@ -828,7 +829,7 @@ PATH 写在每行里（不加单独的 `PATH=` 行，免得影响别人的行）
 发现旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`）时列在 `data.old_entries`，带 `--replace-old` 才删掉它们。
 `--dry-run` 只在 `data.crontab` 里给出改完的全文，不写。测试用环境变量 `MAAPILOT_CRONTAB` 换掉 crontab 程序。
 `{"times": ["04:40", "16:40"], "installed": [...], "replaced": [...], "old_entries": [...], "removed_old": [...], "changed": true, "dry_run": false}`。
-macOS 会弹窗问终端能否改 crontab，要用户点允许。
+macOS 会弹窗问终端能否改 crontab，要用户点允许。Windows 上还设不了定时（任务计划程序还没接上）：`schedule` / `unschedule` 退出码 5 `no_scheduler`。
 
 `daily unschedule [--dry-run]`：删掉本项目的定时行（用户在对话里同意后跑）。`{"removed": [...], "old_entries": [...]}`
 `daily status`：`{"running": {run_id, step, started_at, …} | null, "last": {run_id, at, ok, status, report} | null,
@@ -864,7 +865,9 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
 
 用户说要从头设置时用。**什么都不删**：
 1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令或接管的 agent 在操作，包括日常叫起来的 agent 继承着锁；退出码 4 `busy`，`data.holder`）→ 不做。
-2. crontab 里本项目的行（以 `# maapilot-v2 <本仓库路径>` 结尾，同 `daily unschedule`）删掉，别的行（包括别的目录的 MaaPilot）一个字节都不动。
+2. 本项目的定时任务删掉：crontab 里以 `# maapilot-v2 <本仓库路径>` 结尾的行（同 `daily unschedule`），别的行（包括别的目录的 MaaPilot）一个字节都不动。
+   这台电脑上还设不了定时（Windows，任务计划程序还没接上）就当没有，`data.schedule.unavailable` 写着原因，照常重置。
+   `private/` 里有文件正被别的程序打开、改不了名（Windows）→ 退出码 4 `in_use`，什么都没动。
 3. `private/` 整个改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、`setup.json`、目标、快照、日志、汇报、截图、对账都在里面）；
    再把备份里的 `maa-config/`（maa-cli 的配置与任务模板）复制回新的 `private/maa-config/`。之后 `doctor --brief` 的 `next` 是 `setup`。
    恢复：把新建的 `private/` 挪开，把备份改回 `private`（`data.private.restore` 写着）。
@@ -878,7 +881,7 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
 
 ```json
 {"dry_run": false,
- "crontab": {"remove": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "removed": ["…"], "other_lines_kept": true},
+ "schedule": {"remove": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "removed": ["…"], "other_lines_kept": true},
  "private": {"move": "/…/private", "to": "/…/private.bak-20261002-1700", "entries": ["config.yaml", "goals.md", "log", …],
              "restore": "mv … …", "keep_maa_config": "/…/private/maa-config"},
  "memory": {"move": null, "note": "没带 --memory：用户偏好（private/memory/）留着"},

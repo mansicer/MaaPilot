@@ -5,13 +5,13 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime
 
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, CliError
 from maapilot.flows._common import now, rel
+from maapilot.oscompat import fs
 
 LABELS = {"startup": "启动游戏", "recruit": "公开招募", "infrast": "基建", "mall": "信用商店与访问好友",
           "annihilation": "剿灭", "award": "领任务奖励与邮件", "farm": "刷理智", "box": "识别干员练度", "goals": "目标",
@@ -45,30 +45,23 @@ def md_path(run_id: str):
     return paths.REPORTS / f"{stem(run_id)}.md"
 
 
-def _atomic(p, text: str) -> None:
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(f".{p.name}.tmp{os.getpid()}")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, p)
-
-
 def save(data: dict) -> str:
     """写 .json 与 .md；保留磁盘上已有的 appendix（无头 agent 在运行中途追加的）。返回 .md 的路径（相对仓库）。"""
     rid = data["run_id"]
     try:
-        old = json.loads(json_path(rid).read_text(encoding="utf-8"))
+        old = json.loads(fs.read_text_utf8(json_path(rid)))
     except (OSError, ValueError):
         old = {}
     data["appendix"] = old.get("appendix") or data.get("appendix") or []
     data["report"] = rel(md_path(rid))
-    _atomic(json_path(rid), json.dumps(data, ensure_ascii=False, indent=1, default=str))
-    _atomic(md_path(rid), render(data))
+    fs.atomic_write_text(json_path(rid), json.dumps(data, ensure_ascii=False, indent=1, default=str))
+    fs.atomic_write_text(md_path(rid), render(data))
     return data["report"]
 
 
 def load(run_id: str) -> dict:
     try:
-        return json.loads(json_path(run_id).read_text(encoding="utf-8"))
+        return json.loads(fs.read_text_utf8(json_path(run_id)))
     except FileNotFoundError:
         raise CliError("unknown_run", f"没有运行 {run_id} 的汇报", hint="report list 看有哪些", exit=BAD_REQUEST) \
             from None
@@ -114,7 +107,7 @@ def seen_file():
 def seen_runs() -> dict:
     """{run_id: 什么时候告诉用户的}。"""
     try:
-        d = json.loads(seen_file().read_text(encoding="utf-8"))
+        d = json.loads(fs.read_text_utf8(seen_file()))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -131,7 +124,7 @@ def mark_seen(run_id: str | None) -> dict:
     load(rid)                                           # 不存在 → unknown_run
     d = seen_runs()
     d[rid] = now().isoformat(timespec="seconds")
-    _atomic(seen_file(), json.dumps(d, ensure_ascii=False, indent=1))
+    fs.atomic_write_text(seen_file(), json.dumps(d, ensure_ascii=False, indent=1))
     return {"run_id": rid, "seen_at": d[rid]}
 
 
@@ -500,7 +493,7 @@ def show(run_id: str | None) -> dict:
         raise CliError("no_report", "还没有日常汇报", hint="跑一次日常：daily run", exit=BAD_REQUEST)
     d = load(rid)
     try:
-        text = md_path(rid).read_text(encoding="utf-8")
+        text = fs.read_text_utf8(md_path(rid))
     except OSError:
         text = render(d)
     return {"run_id": rid, "markdown": text, "summary": d}
@@ -524,8 +517,8 @@ def write(run_id: str, text: str) -> dict:
         raise CliError("bad_arguments", "--append 不能是空的", exit=BAD_REQUEST)
     d = load(run_id)
     d.setdefault("appendix", []).append({"at": now().isoformat(timespec="seconds"), "text": text})
-    _atomic(json_path(run_id), json.dumps(d, ensure_ascii=False, indent=1, default=str))
-    _atomic(md_path(run_id), render(d))
+    fs.atomic_write_text(json_path(run_id), json.dumps(d, ensure_ascii=False, indent=1, default=str))
+    fs.atomic_write_text(md_path(run_id), render(d))
     return {"run_id": run_id, "report": rel(md_path(run_id)), "appendix": len(d["appendix"])}
 
 

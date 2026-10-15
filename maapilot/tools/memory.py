@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maapilot import paths
+from maapilot.oscompat import fs
 
 INDEX = "MEMORY.md"
 MARKER = ".imported-from-claude"          # 搬过一次的记号：来源目录、时间
@@ -24,8 +25,8 @@ def memory_dir() -> Path:
 def index_lines() -> list[str]:
     """MEMORY.md 里的条目行（"- …"）；没有 → []。"""
     try:
-        text = (memory_dir() / INDEX).read_text(encoding="utf-8")
-    except OSError:
+        text = fs.read_text_utf8(memory_dir() / INDEX)
+    except (OSError, ValueError):
         return []
     return [ln.strip() for ln in text.splitlines() if ln.strip().startswith("- ")][:MAX_LINES]
 

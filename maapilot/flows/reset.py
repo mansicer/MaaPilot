@@ -3,7 +3,8 @@
 什么都不删：private/ 改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、setup.json、目标、快照、日志、汇报、截图、对账都在里面），
 恢复就是把它改回来。之后 `doctor --brief` 的 `next` 是 `setup`，下次会话重新设置。
 留着：.venv、data/、resource/、maa-cli 本身，以及 maa-cli 配置目录里装好的配置与任务模板（从备份复制回新的 private/maa-config/）。
-crontab 只删以 `# maapilot-v2 <本仓库>` 结尾的行（复用 daily unschedule），别的行不动。
+定时任务只删本项目的（复用 daily unschedule：crontab 里以 `# maapilot-v2 <本仓库>` 结尾的行），别的不动；
+这台电脑上还设不了定时（Windows 暂时）就当没有，照常重置。
 `--memory`：用户偏好不留：private/memory/ 不复制回来，Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
 
 日常在跑、模拟器锁被占着（包括日常叫起来的 agent 继承着锁）→ 不做。契约见 docs/cli.md「reset」。
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from maapilot import paths
 from maapilot.cliutil import BUSY, CliError
+from maapilot.oscompat import sched
 from maapilot.tools import common
 
 PROJECTS_ENV = "MAAPILOT_CLAUDE_PROJECTS_DIR"     # 测试用：Claude Code 的 projects 目录
@@ -63,6 +65,15 @@ def _backup_path(p: Path, stamp: str) -> Path:
     return b
 
 
+def _move(src: Path, dst: Path) -> None:
+    """改名；Windows 上里面有文件正被打开（编辑器、终端停在里面、另一个 maapilot 在跑）时挪不动，说清楚。"""
+    try:
+        os.rename(src, dst)
+    except PermissionError as e:
+        raise CliError("in_use", f"{src} 里有文件正被别的程序打开，挪不走（{e}）", exit=BUSY,
+                       hint=f"关掉打开着 {src.name} 里文件的程序（编辑器、停在这个文件夹里的终端、daily watch 等）后再试") from None
+
+
 def reset(dry_run: bool, memory: bool) -> dict:
     from maapilot.flows import daily
     _refuse_if_busy()
@@ -70,9 +81,12 @@ def reset(dry_run: bool, memory: bool) -> dict:
     priv = paths.PRIVATE
     out: dict = {"dry_run": dry_run}
 
-    # 1. 定时任务：只算本项目的行（先做：写不了 crontab 就什么都没动）
-    cron = daily.unschedule(dry_run=True)
-    out["crontab"] = {"remove": cron["removed"], "other_lines_kept": True}
+    # 1. 定时任务：只算本项目的（先读：读不了 crontab 就什么都没动）
+    ok, hint = sched.backend().available()
+    cron = daily.unschedule(dry_run=True) if ok else {"removed": []}
+    out["schedule"] = {"remove": cron["removed"], "other_lines_kept": True}
+    if not ok:
+        out["schedule"]["unavailable"] = hint
 
     # 2. private/ → 备份
     if priv.exists():
@@ -104,17 +118,23 @@ def reset(dry_run: bool, memory: bool) -> dict:
     if dry_run:
         return out
 
-    if cron["removed"]:
-        out["crontab"]["removed"] = daily.unschedule(dry_run=False)["removed"]
     if bak is not None:
-        os.rename(priv, bak)
+        _move(priv, bak)
+    if cron["removed"]:
+        try:
+            out["schedule"]["removed"] = daily.unschedule(dry_run=False)["removed"]
+        except CliError:
+            if bak is not None:                              # 删不了定时：private/ 挪回去，什么都没动
+                os.rename(bak, priv)
+            raise
+    if bak is not None:
         src = bak / MAA_CONFIG
         if src.is_dir():
             shutil.copytree(src, priv / MAA_CONFIG)
         if not memory and (bak / MEMORY).is_dir():            # 用户偏好默认留着（--memory 才一起挪走）
             shutil.copytree(bak / MEMORY, priv / MEMORY)
     if memory and mbak is not None:
-        os.rename(mem, mbak)
+        _move(mem, mbak)
     out["next"] = "setup"
     return out
 

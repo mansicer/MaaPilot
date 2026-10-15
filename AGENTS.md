@@ -88,8 +88,8 @@
 ## 命令约定
 
 - 操作模拟器、调 MAA、读账号数据都用 `maapilot <命令> …`：在仓库根目录、一次一条，不接管道、`&&`、`;`，不写 `./` 或全路径（权限规则按这个形式放行）。
-  例外：你的环境没把 `.venv/bin` 放进 PATH（例如 Codex；Claude Code 由启动钩子放好了）、`maapilot` 提示找不到命令时，整个会话都写 `.venv/bin/maapilot <命令> …`（Codex 的规则按程序名认，照样放行）。
-- 改 `private/` 下的文本文件（配置、目标的进展笔记、`setup.json`）用编辑文件的工具或普通 shell 命令都可以，不用绕 `maapilot`。
+  例外：你的环境没把 `.venv/bin` 放进 PATH（例如 Codex；Claude Code 由启动钩子放好了）、`maapilot` 提示找不到命令时，整个会话都写 `.venv/bin/maapilot <命令> …`（Windows 上是 `.venv\Scripts\maapilot.exe <命令> …`；Codex 的规则按程序名认，照样放行）。
+- 改 `private/` 下的文本文件（配置、目标的进展笔记、`setup.json`）用编辑文件的工具或普通 shell 命令都可以，不用绕 `maapilot`；存成 UTF-8（Windows 上别用 PowerShell 的 `Set-Content` / `Out-File` / `>`，它们默认不是 UTF-8）。
 - 输出是一个 JSON 信封 `{ok, command, data, error}`。按退出码分支：0 成功；1 执行了但失败（看 `error.code`、`data`，多半截图看看）；2 请求写错了（改了再试，原样重试没用）；
   3 要用户处理（转述给用户）；4 模拟器被占用（稍后再试，`lock status` 看谁占着）；5 环境问题（`doctor`）。`error.hint` 一般是下一步该做的事。
 - 截图存在 `private/shots/`，用读图工具看。坐标都是 1280×720 参考坐标系。

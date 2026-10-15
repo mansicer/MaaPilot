@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maapilot import paths
+from maapilot.oscompat import procs
 
 TASK_PREFIX = "maapilot-"
 KILL_GRACE_S = 10
@@ -67,7 +68,7 @@ def config_missing() -> list[str]:
 
 def install_config(force: bool = False) -> list[str]:
     """把 templates/maa-config/ 的 cli.toml、profiles/default.toml 复制进配置目录；已有的不覆盖（setup 可能改过）。
-    返回复制了的文件。"""
+    再把 profile 的 adb_path 对上 config.yaml 的 emulator.adb。返回复制了的文件。"""
     src = paths.TEMPLATES / "maa-config"
     done = []
     for f in CONFIG_FILES:
@@ -78,7 +79,45 @@ def install_config(force: bool = False) -> list[str]:
         shutil.copyfile(src / f, dest)
         done.append(f)
     (config_dir() / "tasks").mkdir(parents=True, exist_ok=True)
+    sync_adb_path()
     return done
+
+
+def _resolved_adb() -> str | None:
+    """config.yaml 的 emulator.adb 解析成绝对路径（和 maapilot 自己用的同一个 adb）；找不到 → None（让 maa-cli 用它的默认）。"""
+    try:
+        from maapilot import config
+        adb = str((config.load_or_defaults().get("emulator") or {}).get("adb") or "adb")
+    except Exception:                                    # noqa: BLE001 - 配置读不了：不动 profile
+        return None
+    found = shutil.which(adb)
+    return str(Path(found).absolute()) if found else None
+
+
+def sync_adb_path() -> bool:
+    """把 profiles/default.toml 的 `[connection] adb_path` 写成 maapilot 用的 adb，免得 maa-cli 另起一个 adb server
+    跟 maapilot 的抢（Windows 上模拟器自带的 adb 和 PATH 上的版本不同时会互相杀掉）。改了返回 True。"""
+    prof = config_dir() / "profiles" / "default.toml"
+    adb = _resolved_adb()
+    if adb is None or not prof.exists():
+        return False
+    text = prof.read_text(encoding="utf-8")
+    line = f"adb_path = {_toml_value(adb)}"
+    lines = text.splitlines()
+    sec = next((i for i, l in enumerate(lines) if l.strip() == "[connection]"), None)
+    if sec is None:
+        lines += ["", "[connection]", line]
+    else:
+        end = next((i for i in range(sec + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+        old = next((i for i in range(sec + 1, end) if re.match(r"\s*adb_path\s*=", lines[i])), None)
+        if old is not None:
+            if lines[old].strip() == line:
+                return False
+            lines[old] = line
+        else:
+            lines.insert(sec + 1, line)
+    prof.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
 
 
 # --- 任务文件 -------------------------------------------------------------------------
@@ -148,31 +187,18 @@ def new_log(label: str) -> Path:
     return d / f"{datetime.now():%Y%m%d-%H%M%S}-{re.sub(r'[^A-Za-z0-9_.-]', '_', label)}.log"
 
 
-def _kill_group(proc: subprocess.Popen, grace_s: float = KILL_GRACE_S) -> None:
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            return
-        try:
-            proc.wait(timeout=grace_s)
-            return
-        except subprocess.TimeoutExpired:
-            continue
-
-
-STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+STOP_SIGNALS = procs.STOP_SIGNALS    # SIGTERM、SIGINT，再加 SIGHUP（macOS / Linux）或 SIGBREAK（Windows）
 STOP_GRACE_S = 5          # 被叫停时给 maa 多久自己退；日常杀 maapilot 时 TERM 之后 15 秒才 KILL，要赶在那之前
 
 
 @contextmanager
 def _stops_with_us(proc: subprocess.Popen):
-    """maa-cli 自成进程组（start_new_session，超时时能整组结束）。所以 maapilot 自己被叫停（SIGTERM / SIGINT / SIGHUP，
-    例如日常超时杀掉 `maapilot maa …` 的进程组）时，maa 不会跟着停：这里在被叫停时先结束 maa 的进程组再退出；
-    正常或异常退出时 maa 还在也结束掉（atexit 兜底）。"""
+    """maa-cli 自成进程组（procs.spawn，超时时能整组结束）。所以 maapilot 自己被叫停（STOP_SIGNALS，
+    例如日常超时杀掉 `maapilot maa …` 的进程组）时，maa 不会跟着停：这里在被叫停时先结束 maa 的进程树再退出；
+    正常或异常退出时 maa 还在也结束掉（atexit 兜底；Windows 上本进程被硬杀时 atexit 不跑，靠 Job Object 带走）。"""
     def stop(*_):
         if proc.poll() is None:
-            _kill_group(proc, STOP_GRACE_S)
+            procs.kill_tree(proc, STOP_GRACE_S)
 
     def on_signal(signum, _frame):
         stop()
@@ -209,8 +235,7 @@ def execute(argv_tail: list[str], *, label: str, timeout_s: float) -> MaaRun:
     argv = [maa_bin(), *argv_tail, "--batch", "-v", f"--log-file={log}", *_addr_args()]
     t0 = time.monotonic()
     try:
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-                                start_new_session=True, env=env())
+        proc = procs.spawn(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env())
     except OSError as e:
         return MaaRun(argv, None, "", log, 0.0, error=f"maa 启动失败：{e}")
     timed_out = False
@@ -219,7 +244,7 @@ def execute(argv_tail: list[str], *, label: str, timeout_s: float) -> MaaRun:
             stdout, _ = proc.communicate(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             timed_out = True
-            _kill_group(proc)
+            procs.kill_tree(proc, KILL_GRACE_S)
             try:
                 stdout, _ = proc.communicate(timeout=KILL_GRACE_S)
             except (subprocess.TimeoutExpired, ValueError):

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, CliError
+from maapilot.oscompat import procs
 
 HOSTS = ("claude", "codex")
 DEFAULT = "claude"
@@ -216,8 +217,7 @@ def push(text: str, cfg: dict | None = None) -> dict:
                 "reason": "找不到 codex（在 config.yaml 的 tools.codex 写它的绝对路径）"}
     argv = [prog, "queue", "--thread", cx["thread"], "--message", text]
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=QUEUE_TIMEOUT_S, cwd=str(paths.ROOT),
-                           stdin=subprocess.DEVNULL)
+        p = procs.run_text(argv, timeout=QUEUE_TIMEOUT_S, cwd=str(paths.ROOT))
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"pushed": False, "thread": cx["thread"], "reason": f"codex queue 没跑成：{e}"}
     if p.returncode != 0:

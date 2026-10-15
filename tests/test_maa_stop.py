@@ -13,6 +13,7 @@ import pytest
 
 from maapilot.crew import lock
 from maapilot.flows import daily
+from maapilot.oscompat import procs
 
 FAKE_MAA = """\
 #!{py}
@@ -47,7 +48,8 @@ def _gone(pid: int, within: float = 8) -> bool:
     return False
 
 
-@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 信号与进程组")
+@pytest.mark.parametrize("sig", [s for s in procs.STOP_SIGNALS if s != getattr(signal, "SIGBREAK", None)])
 def test_killing_maapilot_stops_maa_group(tmp_path, sig):
     priv = tmp_path / "private"
     priv.mkdir()
@@ -83,7 +85,7 @@ def test_daily_sweeps_leftover_maa_after_a_task_timeout(monkeypatch):
     killed = []
     monkeypatch.setattr(daily, "TIMEOUT_LEFTOVER_WAIT_S", 0)
     monkeypatch.setattr(daily, "_leftover_maa", lambda: [4242] if not killed else [])
-    monkeypatch.setattr(daily.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(daily.procs, "kill_pids", lambda pids, grace_s: killed.extend(pids))
     monkeypatch.setattr(daily, "maapilot_call", lambda args, env, timeout_s=None: (
         1, {"ok": False, "data": None, "error": {"code": "timeout", "message": "超过 90 分钟没结束，已停下"}}))
     monkeypatch.setattr(daily, "_set_step", lambda s: None)
@@ -94,5 +96,5 @@ def test_daily_sweeps_leftover_maa_after_a_task_timeout(monkeypatch):
     r = daily._Run("20261005-0440", "schedule")
     monkeypatch.setattr(r, "save", lambda: None)
     row = daily._maa_task(r, {}, "farm", ["fight", "1-7"], False, {}, Lk())
-    assert row["code"] == "timeout" and killed == [(4242, signal.SIGTERM)]
+    assert row["code"] == "timeout" and killed == [4242]
     assert any("maa 进程" in a for a in r.data["alerts"])

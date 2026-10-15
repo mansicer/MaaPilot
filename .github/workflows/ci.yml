@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Keep CRLF conversion on (like a default Windows git), to exercise .gitattributes
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python 3.12
+          uv pip install --python .venv -e ".[dev]"
+      - name: Import smoke
+        run: uv run --no-sync python -c "import maapilot.crew.maa, maapilot.crew.maacore, maapilot.crew.maacore_runner, maapilot.flows.daily, maapilot.cli"
+      - name: Startup check (no setup yet)
+        shell: bash
+        env:
+          MAAPILOT_PRIVATE: ${{ runner.temp }}/private
+        run: |
+          out=$(uv run --no-sync maapilot doctor --brief)
+          echo "$out"
+          echo "$out" | uv run --no-sync python -c "import json,sys; d=json.load(sys.stdin); assert d['data']['next']=='setup', d"
+      - name: Tests
+        run: uv run --no-sync python -m pytest -q

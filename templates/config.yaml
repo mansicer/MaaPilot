@@ -4,7 +4,8 @@
 # 模拟器连接。address 是 adb 地址（host:port，或 `adb devices` 列出的序列号），setup 时找出来填；不要照抄别人的。
 emulator:
   address: ""
-  adb: adb                # adb 程序；不在 PATH 上就写绝对路径
+  adb: adb                # adb 程序；不在 PATH 上就写绝对路径。maa-cli 也会用这个 adb（写进它的 profile），免得两个 adb 抢着连
+                          # Windows 路径用单引号（双引号里的 \ 会被当成转义）：adb: 'C:\Program Files\Netease\MuMuPlayer-12.0\shell\adb.exe'
 
 # 游戏客户端（MAA 的 client_type）：Official 官服 / Bilibili B 服 / YoStarEN 国际服 / YoStarJP 日服 / YoStarKR 韩服 / txwy 繁中服
 server: Official
@@ -13,8 +14,8 @@ server: Official
 # 改成 codex 前先 `maapilot host install codex`；改完要重新 `maapilot daily schedule`。
 agent: claude
 
-# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（`command -v maa` / `command -v claude` / `command -v codex`）。
-# 只用到 agent 选的那一个（claude 或 codex）。
+# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（macOS / Linux：`command -v maa`；
+# Windows：`where.exe maa`，写成单引号的 'C:\...\maa.exe'）。只用到 agent 选的那一个（claude 或 codex）。
 tools:
   maa: maa
   claude: claude

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from maapilot import paths
 from maapilot.cliutil import FAILED, CliError
+from maapilot.oscompat import fs
 
 RUN_ID_ENV = "MAAPILOT_RUN_ID"
 _SKIP_ARGS = {"func", "command", "accepts_extra", "group", "sub"}
@@ -45,18 +46,14 @@ def age_min(at: str | None) -> int | None:
 
 def read_json(path: Path, default=None):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        return json.loads(fs.read_text_utf8(path))
     except (OSError, ValueError):
         return default
 
 
 def write_json(path: Path, data) -> None:
     """临时文件 + 替换，不留半截文件。"""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    fs.atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=1) + "\n")
 
 
 def rel(path: Path | str) -> str:

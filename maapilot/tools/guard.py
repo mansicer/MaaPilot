@@ -27,6 +27,7 @@ import os
 
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, FAILED, NEEDS_USER, CliError
+from maapilot.oscompat import fs
 from maapilot.tools import common
 
 ITEMS = {"originite": "4002", "orundum": "4003"}
@@ -77,10 +78,7 @@ def dirty() -> dict | None:
 
 
 def _clear_dirty() -> None:
-    try:
-        dirty_file().unlink()
-    except FileNotFoundError:
-        pass
+    fs.safe_unlink(dirty_file())
 
 
 def stopped() -> dict | None:
@@ -130,7 +128,7 @@ def merge_topbar(depot: dict, top: dict | None) -> dict:
 def load_allowances() -> list[dict]:
     out = []
     try:
-        for ln in allow_file().read_text(encoding="utf-8").splitlines():
+        for ln in fs.read_text_utf8(allow_file()).splitlines():
             if ln.strip():
                 try:
                     out.append(json.loads(ln))
@@ -142,11 +140,7 @@ def load_allowances() -> list[dict]:
 
 
 def _save_allowances(rows: list[dict]) -> None:
-    p = allow_file()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + f".tmp{os.getpid()}")
-    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    os.replace(tmp, p)
+    fs.atomic_write_text(allow_file(), "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
 
 
 def open_allowances(since: str | None, rows: list[dict] | None = None) -> list[dict]:
@@ -256,10 +250,7 @@ def check(values: dict | None = None, *, run_id: str | None = None) -> dict:
     # 当作读数误差放过的项留住原来的数：起点不往下挪，几次小花费累计够了照样拦得住
     take_snapshot({**after, **{k: before[k] for k in tolerated}, "exact": exact and not tolerated})
     was_stopped = stopped() is not None
-    try:
-        stop_file().unlink()
-    except FileNotFoundError:
-        pass
+    fs.safe_unlink(stop_file())
     data["used"] = [{"item": open_rows[i]["item"], "amount": a, "reason": open_rows[i].get("reason")}
                     for i, a in used.items()]
     data["resumed"] = was_stopped

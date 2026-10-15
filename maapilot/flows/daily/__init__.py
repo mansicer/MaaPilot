@@ -23,12 +23,11 @@ daily run 只做编排，每一步都调别的命令（子进程 `python -m maap
   steps      daily run 的编排
   cron       定时（crontab）与 daily status
 测试替换的名字（maapilot_call、run_agent、refresh_news、maintenance_now、version_info、running、schedule_info、
-_set_step、push_session、_leftover_maa、LEFTOVER_WAIT_S、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，
+_set_step、push_session、_leftover_maa、procs.kill_pids、LEFTOVER_WAIT_S、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，
 替换才生效；子模块里新用到这些名字也要这样取。
 """
 from __future__ import annotations
 
-import os  # noqa: F401 - 测试替换 daily.os.kill
 
 from maapilot.flows._common import now  # noqa: F401 - 测试替换 daily.now（_box_fresh 经它取）
 from maapilot.flows.daily.base import (  # noqa: F401
@@ -52,6 +51,7 @@ from maapilot.flows.daily.preflight import (  # noqa: F401
     goals_snapshot, maintenance_now, refresh_news, version_info)
 from maapilot.flows.daily.steps import _finish, _steps, run, session_message  # noqa: F401
 from maapilot.hosts import push as push_session  # noqa: F401 - 测试替换 daily.push_session
+from maapilot.oscompat import procs  # noqa: F401 - 测试替换 daily.procs.kill_pids（就是 procs 模块本身）
 from maapilot.flows.daily.cron import (  # noqa: F401
     _CRON_HM, _OLD_MARKS, _TIME, TAG, _crontab, _entries, _mine, _next_at, _old, _parse_times, _path_dirs,
     _times_of, cron_lines, read_crontab, schedule, schedule_cmd, schedule_info, status,
