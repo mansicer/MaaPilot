@@ -21,7 +21,7 @@ from pathlib import Path
 
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, CliError
-from maapilot.oscompat import procs
+from maapilot.oscompat import exe, procs
 
 HOSTS = ("claude", "codex")
 DEFAULT = "claude"
@@ -37,30 +37,41 @@ def name(cfg: dict) -> str:
     return h
 
 
+# 定时任务里 PATH 很短（agent 是 claude 时可能没有 codex 所在的目录）：再到这些常见位置找。%VAR% 没有的位置跳过，
+# 所以 Windows 的写法放在这里也不影响 macOS / Linux。Windows 上 %LOCALAPPDATA%\Programs\… 是猜的安装位置（没核实）
+CODEX_FALLBACKS = ("~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
+                   r"%APPDATA%\npm\codex.cmd", r"%LOCALAPPDATA%\pnpm\codex.cmd", r"%USERPROFILE%\scoop\shims\codex.exe",
+                   r"%USERPROFILE%\.local\bin\codex.exe", r"%LOCALAPPDATA%\Programs\OpenAI\Codex\codex.exe")
+# Claude Code：原生安装器装在 ~/.local/bin（Windows 上是 %USERPROFILE%\.local\bin\claude.exe），npm 装的在 npm 的目录
+CLAUDE_FALLBACKS = ("~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+                    r"%USERPROFILE%\.local\bin\claude.exe", r"%APPDATA%\npm\claude.cmd", r"%LOCALAPPDATA%\pnpm\claude.cmd")
+
+
+def fallbacks(host: str) -> tuple[str, ...]:
+    return CODEX_FALLBACKS if host == "codex" else CLAUDE_FALLBACKS
+
+
+def resolve(cfg: dict, host: str, *, which=shutil.which, environ=None, fallback: bool = False) -> str | None:
+    """宿主程序的绝对路径；Windows 上找到 npm 的包装时优先原生的 .exe（见 oscompat.exe）。找不到 → None。
+    写了 tools.<宿主> 就只认它（写错了要报出来，不悄悄换成别的程序；fallback=True 时再往下找）；
+    没写：PATH → 常见安装位置。无头 agent、doctor、host status 用同一个规则，找到的是同一个程序。"""
+    configured = (cfg.get("tools") or {}).get(host)
+    cands = [str(configured)] if configured else []
+    if fallback or not configured:
+        cands += [host, *fallbacks(host)]
+    return exe.resolve(host, cands, which=which, environ=environ)
+
+
 def binary(cfg: dict, host: str | None = None) -> str:
-    """tools.<宿主> 的程序（找得到就给绝对路径）。"""
+    """要执行的宿主程序（找得到就给绝对路径，找不到给 tools.<宿主> 原样的写法）。"""
     host = host or name(cfg)
-    c = str((cfg.get("tools") or {}).get(host) or host)
-    return shutil.which(c) or c
-
-
-# 定时任务里 PATH 很短（agent 是 claude 时可能没有 codex 所在的目录）：推消息时再到这些常见位置找
-CODEX_FALLBACKS = ("~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex")
+    return resolve(cfg, host) or str((cfg.get("tools") or {}).get(host) or host)
 
 
 def codex_path(cfg: dict) -> str | None:
-    """codex 的绝对路径：tools.codex → PATH 里的 codex → 常见安装位置。找不到 → None。"""
-    cands = []
-    configured = (cfg.get("tools") or {}).get("codex")
-    if configured:
-        cands.append(str(configured))
-    cands.append("codex")
-    cands += CODEX_FALLBACKS
-    for c in cands:
-        found = shutil.which(os.path.expanduser(c))
-        if found:
-            return os.path.abspath(found)
-    return None
+    """推消息用的 codex 的绝对路径：tools.codex 找不到时也往下找（PATH、常见安装位置），推不到只是少一条通知。
+    tools.codex 在的话和无头 agent 用的是同一个。找不到 → None。"""
+    return resolve(cfg, "codex", fallback=True)
 
 
 # --- 无头 agent ------------------------------------------------------------------------------------------------------

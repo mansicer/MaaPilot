@@ -19,9 +19,18 @@ from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
 from maapilot.oscompat import fs, procs
 
 RULES = Path(".codex") / "rules" / "maapilot.rules"
-# 规则文件该给的结论（install 时用 codex execpolicy check 核对）
-EXPECT = {"allow": ["maapilot", "doctor", "--brief"], "prompt": ["maapilot", "guard", "allow", "源石", "1"],
-          "forbidden": ["adb", "shell", "input", "tap", "1", "1"]}
+# 规则文件该给的结论（install 时用 codex execpolicy check 核对）：(结论, 命令)。Windows 的写法（.venv\Scripts\maapilot.exe、
+# adb.exe、maa.exe）也核对：规则文件各系统同一份，规则按命令的第一个词认程序
+EXPECT = [("allow", ["maapilot", "doctor", "--brief"]),
+          ("allow", [".venv/bin/maapilot", "doctor", "--brief"]),
+          ("allow", [".venv\\Scripts\\maapilot.exe", "doctor", "--brief"]),
+          ("allow", ["maapilot.exe", "daily", "run"]),
+          ("prompt", ["maapilot", "guard", "allow", "源石", "1"]),
+          ("prompt", [".venv\\Scripts\\maapilot.exe", "guard", "allow", "源石", "1"]),
+          ("forbidden", ["adb", "shell", "input", "tap", "1", "1"]),
+          ("forbidden", ["adb.exe", "shell", "input", "tap", "1", "1"]),
+          ("forbidden", ["maa.exe", "fight", "1-7"]),
+          ("forbidden", [".venv/Scripts/maapilot.exe", "skland", "token"])]
 
 
 def codex_home() -> Path:
@@ -68,7 +77,7 @@ def _rules_check(binary: str) -> dict:
     if not rules.exists():
         return {"ok": False, "error": f"没有规则文件 {RULES}"}
     out = {}
-    for want, cmd in EXPECT.items():
+    for want, cmd in EXPECT:
         try:
             p = procs.run_text([binary, "execpolicy", "check", "-r", str(rules), *cmd], timeout=30)
             got = json.loads(p.stdout or "{}").get("decision")
@@ -87,8 +96,7 @@ def status() -> dict:
     except CliError as e:
         out["agent_error"] = e.message
     for h in hosts.HOSTS:
-        prog = config.tool(h, cfg)
-        path = doctor.PROBE.which(prog)
+        path = hosts.resolve(cfg, h, which=doctor.PROBE.which)      # 和定时日常、doctor 找的是同一个
         trusted = codex_trusted(paths.ROOT) if h == "codex" else doctor.claude_trusted(paths.ROOT)
         out["hosts"][h] = {"path": path, "trusted": trusted}
     return out
