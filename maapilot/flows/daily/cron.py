@@ -117,8 +117,8 @@ def cron_lines(times: list[tuple[int, int]], cfg: dict) -> list[str]:
 # 任务计划程序（在 Codex 外面运行）看不到。
 
 def isolated(path) -> bool:
-    p = str(path).replace("/", "\\").lower()
-    return "\\packages\\" in p and "\\localcache\\" in p
+    from maapilot.oscompat import exe
+    return exe.in_msix_cache(path)
 
 
 def _real(p: str) -> str:
@@ -133,7 +133,7 @@ def preflight(cfg: dict, cmd: sched.Command, which=None) -> list[dict]:
     [{what, path, problem: "missing" | "isolated"}]，没问题是空列表。which：找程序（doctor 换成它的 Probe）。"""
     from maapilot import hosts
     which = which or shutil.which
-    progs = {"python": cmd.argv[0], **_exec_paths(cfg)}
+    progs = {"python": cmd.argv[0], **_exec_paths(cfg, which)}
     if _uses_codex(cfg) and "codex" not in progs:
         progs["codex"] = hosts.codex_path(cfg) or "codex"
     out = []
@@ -207,12 +207,12 @@ def unschedule(dry_run: bool) -> dict:
 # 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa、tools.<agent>（claude / codex）、emulator.adb）。
 # `daily schedule` 的输出带上它们的完整路径（`exec`），agent 在对话里告诉用户。
 
-def _exec_paths(cfg: dict) -> dict:
-    """{maa, <agent 宿主名>, adb}。"""
+def _exec_paths(cfg: dict, which=shutil.which) -> dict:
+    """{maa, <agent 宿主名>, adb}。agent 按无头运行时的找法（hosts.resolve）。"""
     from maapilot import hosts
     tools = cfg.get("tools") or {}
     host = hosts.name(cfg)
-    return {"maa": str(tools.get("maa") or "maa"), host: str(tools.get(host) or host),
+    return {"maa": str(tools.get("maa") or "maa"), host: hosts.resolve(cfg, host, which=which) or str(tools.get(host) or host),
             "adb": str((cfg.get("emulator") or {}).get("adb") or "adb")}
 
 

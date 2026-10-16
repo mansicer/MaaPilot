@@ -78,6 +78,7 @@ def test_prompt_on_stdin_only_for_batch_files(tmp_path, monkeypatch):
     argv = hosts.command("claude", "/x/claude", "做事", t, stdin=True)
     assert argv[:3] == ["/x/claude", "-p", "--output-format"] and "做事" not in argv
     assert procs.batch_arg('a\r\nb "c" 100%') == "a  b 'c' 100％"
+    assert procs.batch_arg("a&b|c<d>e^f") == "a＆b｜c＜d＞e＾f"
     monkeypatch.setattr(procs, "WINDOWS", True)
     assert procs.is_batch(r"C:\npm\codex.CMD") and procs.is_batch("x.bat") and not procs.is_batch(r"C:\x\codex.exe")
     monkeypatch.setattr(procs, "WINDOWS", False)

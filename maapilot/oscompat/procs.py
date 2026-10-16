@@ -124,8 +124,9 @@ def is_batch(prog) -> bool:
 
 
 def batch_arg(s: str) -> str:
-    """要经 cmd.exe 转的一个参数：换行并成空格，双引号换成单引号，% 换成全角（不让 cmd 当变量展开）。"""
-    return " ".join(str(s).split("\n")).replace("\r", " ").replace('"', "'").replace("%", "％")
+    """要经 cmd.exe 转的一个参数：换行并成空格，双引号换成单引号，% & | < > ^ 换成全角（不让 cmd 当变量、命令符号）。"""
+    s = " ".join(str(s).split("\n")).replace("\r", " ").replace('"', "'")
+    return s.translate(str.maketrans("%&|<>^", "％＆｜＜＞＾"))
 
 
 def run_text(argv, timeout: float | None = None, *, input: str | None = None, **kw) -> subprocess.CompletedProcess:
