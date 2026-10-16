@@ -556,7 +556,7 @@ def test_doctor_checks_with_fake_probe(cfg, monkeypatch):
     assert checks["emulator"]["ok"] and checks["screen"]["ok"] and checks["input"]["ok"] and checks["game"]["ok"]
     assert checks["screen"]["resolution"] == [1920, 1080]
     assert checks["game"]["package"] == "com.hypergryph.arknights"
-    assert checks["claude"]["path"] == "/usr/bin/claude" and checks["maa_cli"]["ok"] is False  # 资源目录没造
+    assert checks["claude"]["path"] == os.path.abspath("/usr/bin/claude") and checks["maa_cli"]["ok"] is False  # 资源目录没造
     assert checks["claude"]["trusted"] is False and not checks["claude"]["ok"] and checks["claude"]["required"] is False
     probe.table["dumpsys window"] = (0, b"  mCurrentFocus=Window{1 u0 com.hypergryph.arknights.bilibili/x}\n", b"")
     game = {c["name"]: c for c in doctor.run_checks(probe=probe)}["game"]

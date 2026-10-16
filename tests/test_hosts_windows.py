@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import ntpath
+import os
 import re
 
 import pytest
@@ -32,9 +33,9 @@ def _touch(p):
 
 def test_expand_env_vars():
     e = {"APPDATA": "/u/AppData/Roaming"}
-    assert exe.expand("%APPDATA%/npm/codex.cmd", e) == "/u/AppData/Roaming/npm/codex.cmd"
+    assert exe.expand("%APPDATA%/npm/codex.cmd", e) == os.path.normpath("/u/AppData/Roaming/npm/codex.cmd")
     assert exe.expand("%LOCALAPPDATA%/pnpm/codex.cmd", e) is None             # 没这个变量：这个位置不找
-    assert exe.expand("/usr/local/bin/codex", e) == "/usr/local/bin/codex"
+    assert exe.expand("/usr/local/bin/codex", e) == os.path.normpath("/usr/local/bin/codex")
 
 
 def test_shim_and_msix_only_on_windows(win, monkeypatch):
@@ -93,8 +94,8 @@ def test_configured_tool_is_not_swapped_silently(monkeypatch):
     which = found.get
     cfg = {"tools": {"claude": "/gone/claude", "codex": "/gone/codex"}}
     assert hosts.resolve(cfg, "claude", which=which, environ={}) is None
-    assert hosts.resolve({}, "claude", which=which, environ={}) == "/usr/bin/claude"
-    assert hosts.resolve(cfg, "codex", which=which, environ={}, fallback=True) == "/usr/bin/codex"
+    assert hosts.resolve({}, "claude", which=which, environ={}) == os.path.abspath("/usr/bin/claude")
+    assert hosts.resolve(cfg, "codex", which=which, environ={}, fallback=True) == os.path.abspath("/usr/bin/codex")
 
 
 def test_windows_fallbacks_listed():

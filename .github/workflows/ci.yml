@@ -33,4 +33,4 @@ jobs:
           echo "$out"
           echo "$out" | uv run --no-sync python -c "import json,sys; d=json.load(sys.stdin); assert d['data']['next']=='setup', d"
       - name: Tests
-        run: uv run --no-sync python -m pytest -q
+        run: uv run --no-sync python -m pytest -q -rsx
