@@ -40,9 +40,12 @@ elif a[0] == "queue":
     sys.exit(int(os.environ.get("FAKE_CODEX_QUEUE_EXIT", "0")))
 elif a[0] == "execpolicy":
     cmd = a[a.index("-r") + 2:]
-    d = {"maapilot": "allow", "adb": "forbidden"}.get(cmd[0])
-    if cmd[:3] == ["maapilot", "guard", "allow"]:
+    prog = cmd[0].replace("\\\\", "/").rsplit("/", 1)[-1].removesuffix(".exe")   # .venv\\Scripts\\maapilot.exe → maapilot
+    d = {"maapilot": "allow", "adb": "forbidden", "maa": "forbidden"}.get(prog)
+    if [prog] + cmd[1:3] == ["maapilot", "guard", "allow"]:
         d = "prompt"
+    if [prog] + cmd[1:3] == ["maapilot", "skland", "token"]:
+        d = "forbidden"
     print(json.dumps({"decision": d} if d else {"matchedRules": []}))
 """
 

@@ -94,7 +94,7 @@
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
 检查项（`data.checks[].name`）；每项 `{name, ok, detail, fix}`，有的另带字段（`candidates`、`resolution`、`old_entries`…）。
-标 `required: false` 的（`claude` / `codex`——只有 `agent` 是 `codex` 而 Codex 没信任这个文件夹时是必需项、`game`、`schedule`、`skills_link`、`setup`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
+标 `required: false` 的（`claude` / `codex`——只有 `agent` 是 `codex` 而 Codex 没信任这个文件夹、或在 Windows 上没有沙箱时是必需项、`game`、`schedule`、`skills_link`、`setup`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
 
 | name | 查什么 | 修复建议 |
 |---|---|---|
@@ -104,7 +104,7 @@
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径 | 按系统给安装方法（macOS `brew install MaaAssistantArknights/tap/maa-cli`；Windows `winget` 或 GitHub 下载压缩包）、`maa install` |
-| `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。`agent` 写错时项名是 `agent` | 在 `tools.<agent>` 写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex` |
+| `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。找法同定时日常：写了 `tools.<agent>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`maapilot.hosts` 的 `CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`（Claude Code 原生安装的 `%USERPROFILE%\.local\bin\claude.exe`、Codex 的 npm 包里自带的 `codex.exe`）。`warnings`（Windows，不算没通过）：还是 `.cmd` / `.bat` / `.ps1` 包装（`.ps1` 起不了，算没通过）、在应用商店程序的隔离目录（`…\Packages\…\LocalCache\`）里（定时任务看不见）。`sandbox`（只在 Windows、`agent` 是 codex 时）：`{supported, detail, version}`，看 `codex exec --help` 认不认 `workspace-write`、`codex sandbox --help` 有没有 Windows（不真的起沙箱、不调模型）；`supported: false` 时 `required: true`（定时日常不会改用 `danger-full-access` 顶上），`null`（帮助跑不出来）只放进 `warnings`。`agent` 写错时项名是 `agent` | 在 `tools.<agent>` 写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex`；没有沙箱：升级 Codex，还不行问用户要不要在 WSL 里用或改用 claude |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
@@ -1094,7 +1094,9 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 `.codex/rules/maapilot.rules`（入库，Starlark 的 `prefix_rule`）和上面 Claude Code 的权限一一对应：放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），
 拒绝 → `forbidden`（`tests/test_hosts.py` 检查两边一致）：`prompt` 只有 `guard allow`；`forbidden` 是直接用 `maa` 跑任务、`adb shell` / `adb -s`、`maapilot skland token`。
-规则按程序名匹配，写成绝对路径也拦得住；没列的命令在沙箱里跑（只能写仓库、没有网络，连不上模拟器）。
+规则按命令的第一个词认程序：maapilot 的几种写法（`maapilot`、`.venv/bin/maapilot`、`maapilot.exe`、`.venv\Scripts\maapilot.exe`、`.venv/Scripts/maapilot.exe`）
+放行 / 询问 / 禁止都一样，`maa.exe`、`adb.exe` 和 `maa`、`adb` 一样禁止。macOS 上 Codex 还会把绝对路径的程序按程序名认（`execpolicy check --resolve-host-executables` 实测），
+Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的写法还没核实。没列的命令在沙箱里跑（只能写仓库、没有网络，连不上模拟器）。
 只有 Codex 信任这个文件夹时才加载（`host install codex`；`agent` 是 codex 时 `doctor` 的 `codex` 项是必需项，`daily schedule` 拒绝 `codex_untrusted`）。
 
 **在 Codex 里防得住什么**：防得住 agent 的无心之失（用错命令、绕过 maapilot 直接点、记错同意），防不住一个被注入了指令、存心绕过的 agent：
@@ -1176,6 +1178,20 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
       "Bash(maa closedown:*)",
       "Bash(adb shell:*)",
       "Bash(adb -s:*)",
+      "Bash(maa.exe run:*)",
+      "Bash(maa.exe fight:*)",
+      "Bash(maa.exe copilot:*)",
+      "Bash(maa.exe ssscopilot:*)",
+      "Bash(maa.exe roguelike:*)",
+      "Bash(maa.exe reclamation:*)",
+      "Bash(maa.exe startup:*)",
+      "Bash(maa.exe closedown:*)",
+      "Bash(adb.exe shell:*)",
+      "Bash(adb.exe -s:*)",
+      "Bash(.venv/bin/maapilot skland token:*)",
+      "Bash(maapilot.exe skland token:*)",
+      "Bash(.venv\\Scripts\\maapilot.exe skland token:*)",
+      "Bash(.venv/Scripts/maapilot.exe skland token:*)",
       "Edit(private/guard/**)",
       "Edit(private/lock.json)",
       "Bash(maapilot skland token:*)",
@@ -1206,6 +1222,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 - `daily schedule / unschedule`、`reset`、`host install`、`lock release`、改 `private/config.yaml` 都放行：agent 在对话里问过、用户同意了就做（AGENTS.md 硬规则），
   程序不另设关卡。`daily schedule` 的输出带上定时日常要执行的程序（`exec`），agent 转告用户；`reset` 日常在跑、锁被占着时自己不做；`lock release` 只删残留的锁。
 - 直接用 `maa` 跑任务（`run` / `fight` / `copilot` / `ssscopilot` / `roguelike` / `reclamation` / `startup` / `closedown`）、`adb shell`、`adb -s` 被拒：绕过了锁和对账，一律经 `maapilot`。
+  Windows 的写法（`maa.exe`、`adb.exe`，`.venv` 里 / 带 `.exe` 的 maapilot 跑 `skland token`）同样拒绝；放行只列 `maapilot` 本名（启动钩子把 `.venv` 的程序目录放进了 PATH），
+  别的写法按默认弹确认。
   setup 里装 maa-cli（`maa install`、`maa update`）、`adb connect` / `adb devices` 不在拒绝之列，按默认弹确认。
 - `private/guard/`、`lock.json` 只由程序写（拒绝编辑）。
 - 森空岛的 token：`skland token` 只能由用户自己在终端里跑（拒绝），`private/skland.json` agent 读不了、改不了（拒绝；Codex 拦不住读文件，见「Codex 命令规则」）。

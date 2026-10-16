@@ -276,29 +276,89 @@ def check_maa_cli(ctx: Ctx) -> dict:
 def check_agent(ctx: Ctx) -> dict:
     """定时日常要叫的无头 agent（config.yaml 的 agent：claude / codex，项名就是它）：找得到它、给出绝对路径
     （setup 写进 tools.<宿主>）、信任过这个文件夹（没信任时项目的放行 / 禁止规则不生效）。一般只是提示，不影响 ok_all；
-    agent 是 codex 而 Codex 没信任这个文件夹时是必须项：规则不加载，叫起的 codex 拦不住直接跑 adb / maa。"""
+    agent 是 codex 而 Codex 没信任这个文件夹、或者这个 Codex 在 Windows 上没有沙箱时是必须项：
+    规则不加载、或者 workspace-write 起不来，叫起的 codex 拦不住直接跑 adb / maa（也不会改用不设防的模式顶上）。
+    Windows 上找到的还是 npm 的 .cmd / .ps1 包装、或者在 MSIX 的隔离目录里时，在 warnings 里提醒（不算没通过）。"""
     from maapilot import config, hosts
+    from maapilot.oscompat import exe
     try:
         host = hosts.name(ctx.cfg or {})
     except CliError as e:
         return _item("agent", False, e.message, "把 config.yaml 的 agent 改成 claude 或 codex", required=False)
     prog = config.tool(host, ctx.cfg)
-    path = ctx.probe.which(prog)
+    path = hosts.resolve(ctx.cfg or {}, host, which=ctx.probe.which)
     if path is None:
         return _item(host, False, f"找不到 {host}（{prog}）", f"在 config.yaml 的 tools.{host} 写 {host} 的绝对路径",
                      required=False)
+    warnings = agent_path_warnings(host, path)
+    extra = {"path": path, **({"warnings": warnings} if warnings else {})}
+    detail = path + "".join(f"；{w}" for w in warnings)
+    if exe.is_shim(path) and path.lower().endswith(".ps1"):
+        return _item(host, False, f"{path} 是 PowerShell 脚本，定时日常起不了它", f"在 config.yaml 的 tools.{host} 写 "
+                     f"{host}.exe（或 {host}.cmd）的绝对路径", required=False, **extra)
     if host == "codex":
         trusted = codex_trusted(paths.ROOT)
         if trusted is False:
-            return _item(host, False, f"{path}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
-                         "maapilot host install codex", required=True, path=path, trusted=False)
-        return _item(host, True, path, required=False, path=path, trusted=trusted)
+            return _item(host, False, f"{detail}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
+                         "maapilot host install codex", required=True, trusted=False, **extra)
+        sandbox = codex_sandbox(ctx, path)
+        if sandbox and sandbox["supported"] is False:
+            return _item(host, False, f"{detail}；{sandbox['detail']}", CODEX_SANDBOX_FIX, required=True, trusted=trusted,
+                         sandbox=sandbox, **extra)
+        if sandbox and sandbox["supported"] is None:
+            extra["warnings"] = [*warnings, sandbox["detail"]]
+            detail += f"；{sandbox['detail']}"
+        return _item(host, True, detail, required=False, trusted=trusted, **extra,
+                     **({"sandbox": sandbox} if sandbox else {}))
     trusted = claude_trusted(paths.ROOT)
     if trusted is False:
-        return _item(host, False, f"{path}；这个文件夹还没被 Claude Code 信任，定时日常叫起的 agent 用不了放行的命令",
-                     "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示", required=False, path=path,
-                     trusted=False)
-    return _item(host, True, path, required=False, path=path, trusted=trusted)
+        return _item(host, False, f"{detail}；这个文件夹还没被 Claude Code 信任，定时日常叫起的 agent 用不了放行的命令",
+                     "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示", required=False,
+                     trusted=False, **extra)
+    return _item(host, True, detail, required=False, trusted=trusted, **extra)
+
+
+def agent_path_warnings(host: str, path: str) -> list[str]:
+    """宿主程序的路径要提醒的事（Windows）：是 npm 的包装、在 MSIX 的隔离目录里。"""
+    from maapilot.oscompat import exe
+    out = []
+    if exe.is_shim(path):
+        out.append(f"这是 npm 的包装（{Path(path).name}），不是 {host} 本体：能用，但最好在 config.yaml 的 tools.{host} "
+                   f"写 {host}.exe 的绝对路径")
+    if exe.in_msix_cache(path):
+        out.append("它在应用商店程序的隔离目录（…\\Packages\\…\\LocalCache\\）里，定时任务看不见它：换成正常安装的 "
+                   f"{host}，或者在 tools.{host} 写别处的路径")
+    return out
+
+
+CODEX_SANDBOX_FIX = ("升级 Codex（npm i -g @openai/codex@latest）后再 maapilot doctor；还不行就问用户要不要改在 WSL 里用 Codex，"
+                     "或者定时日常改用 claude。不要改成 danger-full-access")
+
+
+def codex_sandbox(ctx: Ctx, path: str) -> dict | None:
+    """Windows 上这个 codex 能不能用 `exec --sandbox workspace-write`（定时日常就这么叫它）。只看帮助文字，不真的起沙箱
+    （第一次起 Windows 沙箱可能要管理员权限、建系统账户），也不调模型：exec 的 --sandbox 认 workspace-write、
+    `codex sandbox` 认得 Windows（新版有 Windows 沙箱，旧版只有 macOS / Linux 的）。
+    → {supported: True / False / None（看不出来）, detail, version}；不是 Windows → None（macOS / Linux 一直有沙箱）。"""
+    from maapilot.oscompat import exe
+    if not exe.WINDOWS:
+        return None
+    version = ctx.probe.run([path, "--version"], timeout=20)
+    ver = version.text.strip().splitlines()[0] if version.returncode == 0 and version.text.strip() else None
+    eh = ctx.probe.run([path, "exec", "--help"], timeout=20)
+    sh = ctx.probe.run([path, "sandbox", "--help"], timeout=20)
+    supported = sandbox_supported(eh.text if eh.returncode == 0 else None, sh.text if sh.returncode == 0 else None)
+    detail = {True: "Codex 在 Windows 上有沙箱（只看了帮助，没实际起过）",
+              False: f"这个 Codex（{ver or '版本不明'}）在 Windows 上没有 workspace-write 沙箱，定时日常叫不起它",
+              None: f"看不出这个 Codex（{ver or '版本不明'}）在 Windows 上有没有沙箱（帮助跑不出来）"}[supported]
+    return {"supported": supported, "detail": detail, "version": ver}
+
+
+def sandbox_supported(exec_help: str | None, sandbox_help: str | None) -> bool | None:
+    """帮助文字 → 有没有 Windows 上的 workspace-write 沙箱。帮助跑不出来 → None。"""
+    if exec_help is None or sandbox_help is None:
+        return None
+    return "workspace-write" in exec_help and "windows" in sandbox_help.lower()
 
 
 def codex_trusted(root: Path) -> bool | None:
