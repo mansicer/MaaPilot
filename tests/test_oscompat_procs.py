@@ -91,26 +91,130 @@ def test_kill_tree_stops_whole_tree(tree):
     code = procs.kill_tree(p, 5)
     took = time.monotonic() - t0
     assert code is not None and _gone(me) and _gone(kid)
-    # 先礼：TERM 就走了，用不着等满 grace。Windows 的 Ctrl+Break 在 CI 上经 venv 启动器没让它在 grace 里走
-    # （最后靠结束 Job 收掉），那边只要求整棵树都结束；要在真的 Windows 上查
-    if sys.platform != "win32":
-        assert took < 5
+    # 先礼：TERM（Windows 上 Ctrl+Break，经 venv 启动器也一样）就走了，用不着等满 grace
+    assert took < 5
 
 
+# --- Windows 的 creationflags 与 Ctrl+Break（组合规则在哪个系统上都查）-------------------------------------------------
 
-@pytest.mark.skipif(sys.platform != "win32", reason="只查 Windows 的 Ctrl+Break")
-@pytest.mark.xfail(strict=False, reason="诊断：不经 venv 启动器的 python 收到 Ctrl+Break 能不能在 grace 里走"
-                                       "（XPASS = 能，问题在启动器；XFAIL = Ctrl+Break 本身没送到）")
+@pytest.mark.parametrize("group,console,extra,want", [
+    (True, True, 0, procs.CREATE_NEW_PROCESS_GROUP),
+    (True, False, 0, procs.CREATE_NEW_PROCESS_GROUP | procs.CREATE_NO_WINDOW),     # pythonw / 任务计划程序：不弹窗
+    (False, True, 0, 0),
+    (False, False, 0, procs.CREATE_NO_WINDOW),
+    (True, False, procs.DETACHED_PROCESS, procs.CREATE_NEW_PROCESS_GROUP | procs.DETACHED_PROCESS),
+    (False, False, procs.CREATE_NEW_CONSOLE, procs.CREATE_NEW_CONSOLE),             # 调用方要的就不改
+])
+def test_spawn_flags(group, console, extra, want):
+    assert procs.spawn_flags(group, console, extra) == want
+
+
+def test_break_route():
+    G, NW = procs.CREATE_NEW_PROCESS_GROUP, procs.CREATE_NO_WINDOW
+    assert procs.break_route(G, True) == "ours"
+    assert procs.break_route(procs.spawn_flags(True, False), False) == "own"     # 没控制台：挂到子进程的控制台上发
+    assert procs.break_route(G | NW, True) == "own"
+    assert procs.break_route(0, True) is None                                      # 没自成一组：只能结束 Job
+    assert procs.break_route(G | procs.DETACHED_PROCESS, False) is None
+    assert procs.break_route(G, False) is None
+
+
+def test_run_text_flags_follow_console(monkeypatch):
+    monkeypatch.setattr(procs, "has_console", lambda: False)
+    assert procs._creationflags(False) == procs.CREATE_NO_WINDOW
+    monkeypatch.setattr(procs, "has_console", lambda: True)
+    assert procs._creationflags(False) == 0
+
+
+@posix
+def test_posix_spawn_unchanged(tree):
+    p, me, kid = tree
+    assert p._maapilot_break is None and p._maapilot_job is None and procs.has_console()
+    called = []
+    with procs.on_console_stop(lambda: called.append(1)):          # macOS / Linux 上什么都不做
+        pass
+    assert called == []
+
+
+win = pytest.mark.skipif(sys.platform != "win32", reason="Windows 的控制台与 Ctrl+Break")
+BASE = getattr(sys, "_base_executable", sys.executable)          # 不经 venv 启动器的 python
+
+
+def _base_env() -> dict:
+    """直接用 BASE 跑时也能导入 maapilot 和 venv 里的包。"""
+    import site
+    return procs.child_env({"PYTHONPATH": os.pathsep.join([str(ROOT), *site.getsitepackages()])})
+
+
+# 收到 Ctrl+Break 就写一个文件、正常退出（sleep 要切短：Windows 上长 sleep 不被 Ctrl+Break 打断）
+POLITE = ("import os, signal, sys, time\n"
+          "def h(*a):\n    open(sys.argv[1], 'w').write('break')\n    sys.exit(0)\n"
+          "signal.signal(signal.SIGBREAK, h)\n"
+          "open(sys.argv[2], 'w').write(f'{os.getpid()} 0')\n"
+          "while True:\n    time.sleep(0.1)\n")
+
+
+@win
 def test_ctrl_break_stops_python_without_venv_launcher(tmp_path):
     f = tmp_path / "pids"
-    base = getattr(sys, "_base_executable", sys.executable)
-    p = procs.spawn([base, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').write(f'{os.getpid()} 0')\n"
+    p = procs.spawn([BASE, "-c", "import os, sys, time\nopen(sys.argv[1], 'w').write(f'{os.getpid()} 0')\n"
                                  "time.sleep(60)\n", str(f)])
     me, _ = _pids(f)
-    assert me == p.pid
+    assert me == p.pid and p._maapilot_break == "ours" and p._maapilot_job is not None
     t0 = time.monotonic()
     procs.kill_tree(p, 5)
     assert time.monotonic() - t0 < 5 and p.returncode != 1             # 1 是结束 Job 时给的退出码
+
+
+@win
+def test_stops_with_us_reaches_grandchild_while_main_thread_waits(tmp_path):
+    """maapilot 子进程的主线程卡在等 maa 上（Windows 上等进程不被信号打断）：Ctrl+Break 一到，控制台事件的线程先把
+    maa 体面地停掉，主线程醒来照常走信号处理退出（128 + SIGBREAK）。"""
+    flag, pidf = tmp_path / "break", tmp_path / "pids"
+    child = ("import subprocess, sys\nfrom maapilot.crew import maa\nfrom maapilot.oscompat import procs\n"
+             f"g = procs.spawn([sys.executable, '-c', {POLITE!r}, sys.argv[1], sys.argv[2]], stdout=subprocess.PIPE)\n"
+             "with maa._stops_with_us(g):\n    g.communicate()\n")
+    p = procs.spawn([BASE, "-c", child, str(flag), str(pidf)], env=_base_env(), cwd=str(ROOT))
+    grandchild, _ = _pids(pidf)
+    t0 = time.monotonic()
+    code = procs.kill_tree(p, 10)
+    assert time.monotonic() - t0 < 10, "Ctrl+Break 没让它在 grace 里走"
+    assert code == 128 + signal.SIGBREAK and flag.read_text() == "break" and _gone(grandchild)
+
+
+NO_CONSOLE = f"""\
+import json, os, subprocess, sys, time
+from maapilot.oscompat import procs
+out = sys.argv[1]
+flag, pidf = out + ".break", out + ".pids"
+res = {{"console": procs.has_console()}}
+p = procs.spawn([sys.executable, "-c", {POLITE!r}, flag, pidf], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+res["route"], res["job"] = p._maapilot_break, p._maapilot_job is not None
+end = time.monotonic() + 20
+while not (os.path.exists(pidf) and open(pidf).read().strip()) and time.monotonic() < end:
+    time.sleep(0.05)
+t0 = time.monotonic()
+res["code"] = procs.kill_tree(p, 10)
+res["took"] = time.monotonic() - t0
+res["break"] = os.path.exists(flag)
+q = procs.spawn([sys.executable, "-c", "print('ok')"], stdout=subprocess.PIPE)   # stdin、stderr 继承：标准句柄放回去了
+res["after"] = q.communicate(timeout=30)[0].strip()
+open(out, "w").write(json.dumps(res))
+"""
+
+
+@win
+def test_no_console_parent_breaks_via_attach(tmp_path):
+    """本进程没有控制台（pythonw、任务计划程序）：子进程加 CREATE_NO_WINDOW、照样放进 Job，Ctrl+Break 挂到它的控制台上送到。"""
+    out = tmp_path / "res.json"
+    r = subprocess.Popen([BASE, "-c", NO_CONSOLE, str(out)], env=_base_env(), cwd=str(ROOT),
+                         creationflags=procs.DETACHED_PROCESS | procs.CREATE_NEW_PROCESS_GROUP,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    assert r.wait(timeout=90) == 0
+    import json
+    res = json.loads(out.read_text(encoding="utf-8"))
+    assert res["console"] is False and res["route"] == "own" and res["job"] is True, res
+    assert res["break"] and res["code"] == 0 and res["took"] < 10 and res["after"] == "ok", res
 
 
 @posix

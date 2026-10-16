@@ -3,6 +3,9 @@
 macOS / Linux：子进程自成进程组（start_new_session），结束时整组先 TERM 再 KILL。
 Windows：没有进程组和 SIGTERM。子进程用 CREATE_NEW_PROCESS_GROUP 起（能单独收到 Ctrl+Break），再放进一个
 Job Object（KILL_ON_JOB_CLOSE：我们自己死了它也跟着走）；结束时先发 Ctrl+Break、等一会儿，再整个 Job 结束掉。
+Ctrl+Break 只能发给同一个控制台上的进程：本进程连着控制台（看得见的、藏起来的都算）时子进程就用它，直接发；
+本进程没有控制台（pythonw、任务计划程序）时子进程加 CREATE_NO_WINDOW（不弹黑窗口），各自有一个看不见的控制台，
+发的时候先挂到子进程的控制台上（AttachConsole）再发。收不到 Ctrl+Break 的（GUI 程序、不理它的）等满 grace 后整个 Job 结束。
 进程表一律用 psutil（三个系统一套代码，create_time 防 pid 被复用）。
 """
 from __future__ import annotations
@@ -11,7 +14,10 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Iterable
+import threading
+from contextlib import contextmanager
+from functools import cache
+from typing import Callable, Iterable
 
 from maapilot.oscompat import WINDOWS
 
@@ -20,6 +26,8 @@ STOP_SIGNALS: tuple[signal.Signals, ...] = tuple(
     s for s in (signal.SIGTERM, signal.SIGINT, getattr(signal, "SIGHUP", None),
                 getattr(signal, "SIGBREAK", None) if sys.platform == "win32" else None) if s is not None)
 
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_CONSOLE = 0x00000010
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW = 0x08000000
 
@@ -34,19 +42,37 @@ def child_env(extra: dict | None = None) -> dict:
     return {**os.environ, "PYTHONUTF8": "1", **(extra or {})}
 
 
+@cache
 def has_console() -> bool:
-    """本进程有没有控制台窗口（Windows 上 pythonw / 任务计划程序起的没有）。macOS / Linux 一律 True。"""
+    """本进程连着控制台没有（窗口藏起来的也算，如 GitHub Actions、CREATE_NO_WINDOW 起的）。pythonw、任务计划程序
+    起的没有：它的子进程要加 CREATE_NO_WINDOW，不然每个控制台程序都弹一个黑窗口。macOS / Linux 一律 True。
+    不看 GetConsoleWindow：藏起来的控制台它也给 NULL，子进程就会被错放到自己的控制台上，收不到我们的 Ctrl+Break。"""
     if not WINDOWS:
         return True
-    import ctypes                                               # pragma: no cover - Windows only
-    return bool(ctypes.windll.kernel32.GetConsoleWindow())      # pragma: no cover
+    return _attached_to_console()                               # pragma: no cover - Windows only
+
+
+def spawn_flags(group: bool, console: bool, extra: int = 0) -> int:
+    """Windows 上起子进程的 creationflags：extra（调用方给的）+ 自成一组 + 本进程没控制台时 CREATE_NO_WINDOW
+    （调用方已经指定了 DETACHED_PROCESS / CREATE_NEW_CONSOLE 就不加）。"""
+    flags = extra | (CREATE_NEW_PROCESS_GROUP if group else 0)
+    if not console and not flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE):
+        flags |= CREATE_NO_WINDOW
+    return flags
+
+
+def break_route(flags: int, console: bool) -> str | None:
+    """按 creationflags 看 Ctrl+Break 怎么送到子进程："ours" 它和本进程在同一个控制台上，直接发；
+    "own" 它有自己的控制台，要先挂过去再发（只有本进程没控制台时挂得上）；None 送不到（没自成一组、没控制台）。"""
+    if not flags & CREATE_NEW_PROCESS_GROUP or flags & DETACHED_PROCESS:
+        return None
+    if flags & (CREATE_NO_WINDOW | CREATE_NEW_CONSOLE):
+        return "own"
+    return "ours" if console else None
 
 
 def _creationflags(group: bool) -> int:
-    flags = CREATE_NEW_PROCESS_GROUP if group else 0
-    if not has_console():
-        flags |= CREATE_NO_WINDOW                    # 不然每个控制台程序都弹一个黑窗口
-    return flags
+    return spawn_flags(group, has_console())
 
 
 def _text_kw(kw: dict, text: bool) -> dict:
@@ -64,13 +90,31 @@ def spawn(argv, *, group: bool = True, text: bool = True, **kw) -> subprocess.Po
     env 不给就用 child_env()。Windows 上还放进一个 Job Object（proc._maapilot_job）。"""
     kw = _text_kw(kw, text)
     if WINDOWS:                                                       # pragma: no cover - Windows only
-        kw["creationflags"] = kw.get("creationflags", 0) | _creationflags(group)
+        kw["creationflags"] = spawn_flags(group, has_console(), kw.get("creationflags", 0))
     else:
         kw.setdefault("start_new_session", group)
     proc = subprocess.Popen(argv, **kw)
     proc._maapilot_group = group
+    proc._maapilot_break = break_route(kw["creationflags"], has_console()) if WINDOWS else None
     proc._maapilot_job = _job_for(proc) if WINDOWS else None
     return proc
+
+
+@contextmanager
+def on_console_stop(fn: Callable[[], None]):
+    """Windows：在这段时间里本进程收到 Ctrl+Break / Ctrl+C / 关窗时，马上在系统另起的线程里跑 fn（例如先结束自己的
+    子进程树）。主线程这时多半卡在等子进程上（Windows 上等进程、等锁都不会被信号打断，Python 的信号处理要等它返回才跑），
+    所以 fn 不能指望主线程。跑 fn 之前先给主线程补上同一个信号（_thread.interrupt_main），等它醒来照常走信号处理
+    （收尾、退出）。Python 没接这个信号就不拦，按系统默认走。macOS / Linux：什么都不做（信号会打断等待）。"""
+    if not WINDOWS or not has_console():
+        yield
+        return
+    handler = _add_ctrl_handler(fn)                                  # pragma: no cover - Windows only
+    try:                                                             # pragma: no cover
+        yield
+    finally:                                                         # pragma: no cover
+        _k32().SetConsoleCtrlHandler(handler, False)
+        _CTRL_HANDLERS.remove(handler)
 
 
 def is_batch(prog) -> bool:
@@ -102,7 +146,8 @@ def run_text(argv, timeout: float | None = None, *, input: str | None = None, **
 def kill_tree(proc: subprocess.Popen, grace_s: float, *, kill_wait_s: float | None = None,
               also: dict | None = None) -> int | None:
     """结束 proc 和它的子孙：先礼后兵。macOS / Linux：TERM 整组（连同子孙另起的组）→ 等 grace_s → KILL → 等 kill_wait_s，
-    最后子孙的组一律再 KILL 一次（主进程收到 TERM 就走了也一样）。Windows：Ctrl+Break → 等 grace_s → 结束整个 Job → 等。
+    最后子孙的组一律再 KILL 一次（主进程收到 TERM 就走了也一样）。Windows：Ctrl+Break → 等 grace_s（送不到就不等）→ 结束整个 Job
+    （没放进 Job 就按 pid 结束它和子孙）→ 等。
     also：之前用 descendants() 记下的子孙（主进程一死就找不回来了），一起结束。→ proc 的退出码（没等到 → None）。"""
     kill_wait_s = grace_s if kill_wait_s is None else kill_wait_s
     seen = {**(also or {}), **_safe_descendants(proc.pid)}
@@ -145,38 +190,60 @@ def _safe_descendants(pid: int) -> dict:
 
 def _kill_tree_win32(proc, grace_s, kill_wait_s, seen) -> int | None:   # pragma: no cover - Windows only
     psutil = _psutil()
-    left = []
+    left = _process_objs(seen)
+    with proc.__dict__.setdefault("_maapilot_kill_lock", threading.Lock()):   # 关窗处理线程和主线程可能同时来结束
+        job = getattr(proc, "_maapilot_job", None)
+        if proc.poll() is None and _send_break(proc):
+            try:
+                proc.wait(timeout=grace_s)
+            except subprocess.TimeoutExpired:
+                pass
+        if job is None:                               # 没放进 Job（如本进程所在的 Job 不许嵌套）：子孙只能按 pid 一个个结束
+            left += _process_objs(_safe_descendants(proc.pid))
+            if proc.poll() is None:
+                proc.kill()
+        else:
+            _job_terminate(job)
+        try:
+            proc.wait(timeout=kill_wait_s)
+        except subprocess.TimeoutExpired:
+            pass
+        for p in left:
+            try:
+                p.kill()
+            except (psutil.Error, OSError):
+                pass
+        if job is not None:
+            _job_close(job)
+            proc._maapilot_job = None
+        return proc.returncode
+
+
+def _process_objs(seen: dict) -> list:                # pragma: no cover - Windows only
+    psutil = _psutil()
+    out = []
     for pid, (_, cmd) in seen.items():                # 先拿住 Process 对象：之后 kill 时 psutil 会核对 pid 没被复用
         try:
             p = psutil.Process(pid)
             if _cmdline(p) == cmd:
-                left.append(p)
+                out.append(p)
         except (psutil.Error, OSError):
             pass
-    job = getattr(proc, "_maapilot_job", None)
-    if proc.poll() is None and getattr(proc, "_maapilot_group", True):
+    return out
+
+
+def _send_break(proc) -> bool:                         # pragma: no cover - Windows only
+    """给 proc 的进程组发 Ctrl+Break（怎么送见 break_route）。→ 发出去了没有（没发出去就不用等 grace）。"""
+    route = getattr(proc, "_maapilot_break", None)
+    if route == "ours":
         try:
             os.kill(proc.pid, signal.CTRL_BREAK_EVENT)
-            proc.wait(timeout=grace_s)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    if job is not None:
-        _job_terminate(job)
-    elif proc.poll() is None:
-        proc.kill()
-    try:
-        proc.wait(timeout=kill_wait_s)
-    except subprocess.TimeoutExpired:
-        pass
-    for p in left:
-        try:
-            p.kill()
-        except (psutil.Error, OSError):
-            pass
-    if job is not None:
-        _job_close(job)
-        proc._maapilot_job = None
-    return proc.returncode
+            return True
+        except OSError:
+            return False
+    if route == "own":
+        return _break_via_attach(proc.pid)
+    return False
 
 
 def kill_pids(pids: Iterable[int], grace_s: float) -> None:
@@ -367,6 +434,14 @@ def _k32():                                            # pragma: no cover - Wind
     k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
     k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.GetConsoleProcessList.argtypes = (ctypes.POINTER(wintypes.DWORD), wintypes.DWORD)
+    k32.GetConsoleProcessList.restype = wintypes.DWORD
+    k32.AttachConsole.argtypes = (wintypes.DWORD,)
+    k32.GenerateConsoleCtrlEvent.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    k32.SetConsoleCtrlHandler.argtypes = (_handler_type(), wintypes.BOOL)
+    k32.GetStdHandle.argtypes = (wintypes.DWORD,)
+    k32.GetStdHandle.restype = wintypes.HANDLE
+    k32.SetStdHandle.argtypes = (wintypes.DWORD, wintypes.HANDLE)
     return k32
 
 
@@ -376,3 +451,67 @@ def _job_terminate(job) -> None:                       # pragma: no cover - Wind
 
 def _job_close(job) -> None:                           # pragma: no cover - Windows only
     _k32().CloseHandle(job)
+
+
+# --- Windows 控制台：连着没有、挂到子进程的控制台上发 Ctrl+Break、收到 Ctrl+Break 时先跑一段 ---------------------------
+
+CTRL_C, CTRL_BREAK, CTRL_CLOSE = 0, 1, 2
+_STD_HANDLES = (-10, -11, -12)                         # STD_INPUT_HANDLE、STD_OUTPUT_HANDLE、STD_ERROR_HANDLE（DWORD 补码）
+_ATTACH_LOCK = threading.Lock()
+_CTRL_HANDLERS: list = []                              # ctypes 回调要一直引用着，否则会被回收
+
+
+def _attached_to_console() -> bool:                    # pragma: no cover - Windows only
+    from ctypes import wintypes
+    buf = (wintypes.DWORD * 1)()
+    return _k32().GetConsoleProcessList(buf, 1) != 0   # 没连着控制台时返回 0
+
+
+def _handler_type():                                   # pragma: no cover - Windows only
+    import ctypes
+    from ctypes import wintypes
+    return ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+
+def _break_via_attach(pid: int) -> bool:               # pragma: no cover - Windows only
+    """本进程没有控制台、子进程有自己的（CREATE_NO_WINDOW）：先挂到子进程的控制台上，给它那一组发 Ctrl+Break，再离开。
+    挂着的这一小会儿本进程不理控制台事件（万一也收到了）；标准句柄先记下、离开后放回（挂控制台会改掉它们，
+    之后起的子进程要继承）。本进程自己有控制台时挂不上（一个进程只能连一个），→ False。"""
+    k32 = _k32()
+    swallow = _handler_type()(lambda _event: True)
+    with _ATTACH_LOCK:
+        if _attached_to_console():
+            return False
+        std = [k32.GetStdHandle(h & 0xFFFFFFFF) for h in _STD_HANDLES]
+        if not k32.AttachConsole(pid):
+            return False
+        k32.SetConsoleCtrlHandler(swallow, True)
+        try:
+            return bool(k32.GenerateConsoleCtrlEvent(CTRL_BREAK, pid))
+        finally:
+            k32.FreeConsole()
+            k32.SetConsoleCtrlHandler(swallow, False)
+            for h, v in zip(_STD_HANDLES, std):
+                k32.SetStdHandle(h & 0xFFFFFFFF, v)
+
+
+def _add_ctrl_handler(fn):                             # pragma: no cover - Windows only
+    import _thread
+
+    def handler(event):
+        signum = {CTRL_C: signal.SIGINT, CTRL_BREAK: signal.SIGBREAK, CTRL_CLOSE: signal.SIGBREAK}.get(event)
+        if signum is None:
+            return False
+        handled = callable(signal.getsignal(signum))
+        if handled:
+            _thread.interrupt_main(signum)             # 主线程一醒就走它的信号处理（收尾、退出）
+        try:
+            fn()
+        except Exception:                              # noqa: BLE001 - 这是系统起的线程，异常抛不出去
+            pass
+        return handled                                 # Python 没接这个信号：交给下一个处理（系统默认是结束本进程）
+
+    h = _handler_type()(handler)
+    _CTRL_HANDLERS.append(h)
+    _k32().SetConsoleCtrlHandler(h, True)
+    return h
