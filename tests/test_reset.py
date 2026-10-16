@@ -140,13 +140,13 @@ def test_reset_memory_drops_preferences(capsys, world):
 
 
 def test_reset_without_scheduler(capsys, world, monkeypatch):
-    """这台电脑上还设不了定时（Windows，任务计划程序接上之前）：当没有定时，照常重置。"""
+    """这台电脑上设不了定时（Windows 上找不到 schtasks.exe）：当没有定时，照常重置。"""
     from maapilot.oscompat import sched
     monkeypatch.setattr(sched, "WINDOWS", True)
     code, env = run(capsys, "reset")
     assert code == 0, env
     s = env["data"]["schedule"]
-    assert s["remove"] == [] and "removed" not in s and s["unavailable"] == sched.WINDOWS_TODO
+    assert s["remove"] == [] and "removed" not in s and "任务计划程序" in s["unavailable"]
     assert MINE in world["crontab"].read_text(encoding="utf-8")         # 没碰 crontab
     assert Path(env["data"]["private"]["to"], "config.yaml").exists()
 

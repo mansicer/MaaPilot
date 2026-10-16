@@ -33,6 +33,12 @@ schedule:
   - "04:40"
   - "16:40"
 
+# 定时日常的两个开关（只在 Windows 上起作用，设定时时问用户；改完要重新 `maapilot daily schedule`）。
+# macOS / Linux 用 cron：到点时电脑睡着或关着就跳过这一次，不补跑，也不会叫醒电脑。
+schedule_options:
+  run_if_missed: true     # 到点时电脑关着或睡着：开机 / 醒来后补跑这一次
+  wake_computer: false    # 到点时把睡着的电脑叫醒来跑（电源设置里要允许唤醒定时器）
+
 daily:
   # 按顺序跑的 MAA 日常项（去掉不想做的即可）：
   #   startup 启动游戏回首页 | recruit 公开招募 | infrast 基建换班收菜 | mall 信用商店与访问好友

@@ -3,8 +3,8 @@
 什么都不删：private/ 改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、setup.json、目标、快照、日志、汇报、截图、对账都在里面），
 恢复就是把它改回来。之后 `doctor --brief` 的 `next` 是 `setup`，下次会话重新设置。
 留着：.venv、data/、resource/、maa-cli 本身，以及 maa-cli 配置目录里装好的配置与任务模板（从备份复制回新的 private/maa-config/）。
-定时任务只删本项目的（复用 daily unschedule：crontab 里以 `# maapilot-v2 <本仓库>` 结尾的行），别的不动；
-这台电脑上还设不了定时（Windows 暂时）就当没有，照常重置。
+定时任务只删本项目的（复用 daily unschedule：crontab 里以 `# maapilot-v2 <本仓库>` 结尾的行，或任务计划程序里本仓库的任务），别的不动；
+这台电脑上设不了定时（Windows 上找不到任务计划程序）就当没有，照常重置。
 `--memory`：用户偏好不留：private/memory/ 不复制回来，Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
 
 日常在跑、模拟器锁被占着（包括日常叫起来的 agent 继承着锁）→ 不做。契约见 docs/cli.md「reset」。
@@ -81,7 +81,7 @@ def reset(dry_run: bool, memory: bool) -> dict:
     priv = paths.PRIVATE
     out: dict = {"dry_run": dry_run}
 
-    # 1. 定时任务：只算本项目的（先读：读不了 crontab 就什么都没动）
+    # 1. 定时任务：只算本项目的（先读：读不了定时就什么都没动）
     ok, hint = sched.backend().available()
     cron = daily.unschedule(dry_run=True) if ok else {"removed": []}
     out["schedule"] = {"remove": cron["removed"], "other_lines_kept": True}

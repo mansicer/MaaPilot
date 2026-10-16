@@ -11,7 +11,7 @@ daily run 只做编排，每一步都调别的命令（子进程 `python -m maap
 手动运行（默认，agent 在会话里）不起无头 agent，失败记下交回在场的 agent；有进行中的目标时刷理智和 award
 都交给在场的 agent（goals_pending），它做完自己领奖励、对账、补汇报。
 
-定时：crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行，别的行一个字节都不动。
+定时：crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行，别的行一个字节都不动；Windows 上是任务计划程序里的一个任务。
 
 按阶段分成几个模块，这里是门面：别的模块和测试都 `from maapilot.flows import daily` 再用 `daily.X`。
   base       常量、运行标记、一次运行的记录（_Run / _Stop）
@@ -21,7 +21,7 @@ daily run 只做编排，每一步都调别的命令（子进程 `python -m maap
   tasks      对账、仓库差、识别干员练度、跑一个 MAA 项、剿灭
   farm       刷理智：读理智、算时限
   steps      daily run 的编排
-  cron       定时（crontab）与 daily status
+  cron       定时（crontab / 任务计划程序）与 daily status
 测试替换的名字（maapilot_call、run_agent、refresh_news、maintenance_now、version_info、running、schedule_info、
 _set_step、push_session、_leftover_maa、procs.kill_pids、LEFTOVER_WAIT_S、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，
 替换才生效；子模块里新用到这些名字也要这样取。
@@ -90,10 +90,10 @@ def register(sub) -> None:
         return watch.watch(a.timeout_min)
     p.set_defaults(func=_watch, command="daily watch")
 
-    p = gs.add_parser("schedule", help="设定时任务（改 crontab，只动本项目的行）")
+    p = gs.add_parser("schedule", help="设定时任务（crontab 或 Windows 任务计划程序，只动本项目的）")
     p.add_argument("--times", help="HH:MM[,HH:MM]；默认 config.yaml 的 schedule")
     p.add_argument("--replace-old", action="store_true", help="同时删掉旧版 MaaPilot 的定时任务")
-    p.add_argument("--dry-run", action="store_true", help="只给出改完的 crontab，不写")
+    p.add_argument("--dry-run", action="store_true", help="只给出改完的样子（crontab 全文或任务定义），不写")
     p.set_defaults(func=lambda a: schedule_cmd(a.times, a.replace_old, a.dry_run), command="daily schedule")
 
     p = gs.add_parser("unschedule", help="取消本项目的定时任务")

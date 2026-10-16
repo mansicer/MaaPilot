@@ -36,7 +36,9 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv -e .`；不用 uv 时是 `<python.exe 路径> -m venv .venv`、`.venv\Scripts\python.exe -m pip install -e .`。
 - 之后命令写成 `.venv\Scripts\maapilot.exe <命令> …`（`maapilot` 提示找不到时；见 AGENTS.md「命令约定」）。
 - 仓库最好用 `git clone -c core.symlinks=true …` 拿（`.claude/skills` 是指向 `.agents/skills` 的链接）；已经普通 clone 了，`maapilot doctor --fix` 会把这个链接补上。
-- 定时日常在 Windows 上**暂时还不能设**（任务计划程序的支持还在做）：见第 5 步。
+- 定时日常在 Windows 上用"任务计划程序"（第 5 步设）。**项目文件夹、Python、maa、adb、claude / codex 都要装在普通目录**：
+  在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录（`…\AppData\Local\Packages\…\LocalCache\…`），任务计划程序看不到，`daily schedule` 会拒绝（`isolated_install`）。
+  遇到时请用户在普通的 PowerShell 里重新装到普通目录。
 
 ## 1. 模拟器
 
@@ -87,15 +89,22 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ## 4. 问日常（一次一个问题）
 
-1. **每天几次、几点**：默认每天两次 04:40 和 16:40。说明：游戏 04:00 换日，别放在 04:00 前后；到点时电脑要开着、不能睡眠，模拟器也要开着。
+1. **每天几次、几点**：默认每天两次 04:40 和 16:40。说明：游戏 04:00 换日，别放在 04:00 前后；到点时电脑要开着、不能睡眠，模拟器也要开着
+   （Windows 上还要保持登录，锁屏可以；睡眠、关机的情形见下面第 5、6 问）。
 2. **做哪些日常项**，默认全做，逐项用玩家的话说：启动游戏、公开招募、基建换班收菜、信用商店与访问好友、剿灭（本周合成玉拿满就不打）、领任务奖励和邮件。用户说"都做"就不再细问。
 3. **没有目标时刷哪关**：默认 1-7（产固源岩，理智划算）。有目标时会优先刷目标缺的材料。
 4. **游戏更新后的用户协议**：游戏大版本更新后，有时会弹出《用户协议》《隐私政策》更新，要点"同意"才能进游戏。问："以后遇到这种更新，要我直接替你点同意，还是每次先问你？"
    说清：选"直接同意"，半夜的定时日常也能自己把游戏更新好接着跑；选"每次问"，遇到时日常会停在那里等你回来。写进 `game.accept_terms`（`true` / `false`）。
+5. **（只在 Windows）到点时电脑关着或睡着，开机 / 醒来后要不要补跑这一次**：默认要。说清：补跑时可能是你正在用电脑的时候，模拟器会被打开、占一阵。
+   写进 `schedule_options.run_if_missed`（`true` / `false`）。
+6. **（只在 Windows）到点时电脑睡着了，要不要把它叫醒来跑**：默认不要。说清：选"要"，半夜电脑会自己醒来（笔记本合着盖也可能醒），跑完不会自动再睡；
+   还要电源设置里允许"唤醒定时器"。写进 `schedule_options.wake_computer`（`true` / `false`）。
+   macOS / Linux 不问这两个：cron 到点时电脑睡着就跳过这一次，不补跑也不唤醒（告诉用户一句）。
 
 **旧版 MaaPilot 的定时任务**：`doctor` 的 `schedule` 项会报出旧版的定时行（命令里有 job tick 或 bin/daily.sh）。有的话：
 - 把那一行**原样**给用户看，说明两边同时跑会抢模拟器、重复做日常；
 - 问用户要不要停掉旧的：**只有用户能决定**，不要自己删。用户同意后在第 5 步用 `daily schedule --replace-old` 删掉；用户想自己处理，就告诉他在终端 `crontab -e` 里删掉或注释掉这一行。
+Windows 上 `schedule` 项的 `old_entries` 是任务计划程序 `MaaPilot` 文件夹里别的目录的 MaaPilot 装的任务（同一个账号别装两份）：一样给用户看、由用户决定，`--replace-old` 删掉，或者请用户在"任务计划程序"里自己删。
 
 ## 4b. 要不要接森空岛（可选）
 
@@ -113,11 +122,15 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ## 5. 写配置、设定时、收尾
 
-1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`agent`、`tools`。改完 `maapilot doctor` 再确认一次。
+1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行）：`schedule`、`schedule_options`（Windows）、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`agent`、`tools`。改完 `maapilot doctor` 再确认一次。
 2. 设定时前问一句：这个账号是不是已经在别的电脑上设了定时日常？是的话这里就不设（两台会抢着登录，还会让对方的货币对账以为钱被偷偷花了），跳到第 3 步；用户想换到这台，请他先在那台停掉。
    `agent` 是 `codex` 时，先确认 `doctor` 的 `codex` 项通过（`maapilot host install codex` 做过），不然 `daily schedule` 会拒绝（`codex_untrusted`）。
    `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`），把设好的时间和输出里 `exec` 的几个程序（定时日常会在用户不在时运行它们）告诉用户；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
-   Windows：定时日常暂时还不能设（任务计划程序的支持还在做），这一步跳过（用户选的时间照样写进 `schedule`）；告诉用户现在要日常就打开助手说"跑一次日常"，定时的做好了再来设。
+   Windows 上它在"任务计划程序"里建一个 `MaaPilot` 文件夹下的任务（不要管理员、不存密码）。拒绝时：`program_missing` 是有程序找不到（在 `tools` / `emulator.adb` 写绝对路径），
+   `isolated_install` 是装在了 Codex 的隔离目录里（见上面「Windows」：请用户在普通 PowerShell 里重装到普通目录），处理完再设。
+   设完**以系统里读回来的为准**：再跑一次 `maapilot daily status`（或 `doctor` 的 `schedule` 项），看 `schedule.installed` 是 `true`、`times` 是用户选的、没有 `enabled: false`，
+   告诉用户下一次是什么时候（`next_at`）；对不上就说没设成，别只看 `config.yaml`。
+   Windows 上再跟用户说清：到点时**电脑要开着并保持登录**（锁屏可以，注销或关机就不跑；睡着了按第 4 步第 5、6 问的回答补跑 / 叫醒），模拟器要能连上（最好开着，或确认 `maa` 能自己把它启动）。
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
    - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude（或 codex）问"今天做了什么"就行；
@@ -131,7 +144,7 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 - 模拟器装没装、是哪个、ADB 地址找不到时；
 - 装软件（Python、uv、Homebrew、adb、maa-cli、VC++ 运行库）前；
 - 服务器认不出时；
-- 日常几次几点、做哪些、没目标刷哪关；
+- 日常几次几点、做哪些、没目标刷哪关；Windows 上错过了要不要补跑、要不要叫醒电脑；
 - 游戏更新后的用户协议要不要直接同意；
 - 旧版定时任务要不要停；
 - 这个账号是不是已经在别的电脑上定时跑着。

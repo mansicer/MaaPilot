@@ -17,6 +17,7 @@ DEFAULTS = {
     "agent": "claude",
     "tools": {"maa": "maa", "claude": "claude", "codex": "codex"},
     "schedule": ["04:40", "16:40"],
+    "schedule_options": {"run_if_missed": True, "wake_computer": False},
     "daily": {"tasks": ["startup", "recruit", "infrast", "mall", "annihilation", "award"],
               "default_stage": "1-7", "params": {}, "agent_timeout_min": 90, "recovery_timeout_min": 30,
               "task_timeout_min": 90},
@@ -102,6 +103,24 @@ def tool(name: str, cfg: dict | None = None) -> str:
     """tools.<name>（maa / claude / codex）：定时任务里 PATH 很短，setup 写绝对路径。"""
     cfg = cfg if cfg is not None else load_or_defaults()
     return str((cfg.get("tools") or {}).get(name) or name)
+
+
+def schedule_options(cfg: dict | None = None) -> dict:
+    """schedule_options：到点时电脑关着或睡着，开机 / 醒来后补跑（run_if_missed，默认是）；把睡着的电脑叫醒来跑
+    （wake_computer，默认否）。只有 Windows 的任务计划程序用得上，cron 不补跑也不唤醒。不是 true / false → invalid_config。"""
+    cfg = cfg if cfg is not None else load_or_defaults()
+    raw = cfg.get("schedule_options")
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for k, default in DEFAULTS["schedule_options"].items():
+        v = raw.get(k, default)
+        if v is None:
+            v = default
+        if not isinstance(v, bool):
+            raise CliError("invalid_config", f"config.yaml 的 schedule_options.{k} 要写 true 或 false，现在是 {v!r}",
+                           exit=BAD_REQUEST)
+        out[k] = v
+    return out
 
 
 def accept_terms(cfg: dict | None = None) -> bool | None:

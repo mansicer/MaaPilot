@@ -1,5 +1,6 @@
-"""定时日常与 `daily status`。装、读、删定时条目经 oscompat.sched 的后端（macOS / Linux 是 crontab；Windows 的任务计划程序还没接上）；
-这里只管什么时间、执行什么。crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行。"""
+"""定时日常与 `daily status`。装、读、删定时条目经 oscompat.sched 的后端（macOS / Linux 是 crontab，Windows 是任务计划程序）；
+这里只管什么时间、执行什么（启动器 `python -m maapilot.oscompat.launch …`，环境变量和日志都在它的参数里）、装之前查要执行的程序。
+crontab 里本项目自己的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行；任务计划程序里是 `\\MaaPilot\\daily-<哈希>` 一个任务。"""
 from __future__ import annotations
 
 import os
@@ -21,6 +22,9 @@ TAG = sched.TAG
 _OLD_MARKS = sched.OLD_MARKS
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _CRON_HM = sched._CRON_HM
+LOG_NAME = "schedule.log"
+LAUNCH = ("-m", "maapilot.oscompat.launch")
+RUN = ("daily", "run", "--trigger", "schedule")
 
 
 def _crontab() -> str:
@@ -68,8 +72,8 @@ def _uses_codex(cfg: dict) -> bool:
 
 
 def _path_dirs(cfg: dict) -> str:
-    """定时任务的 PATH：项目 .venv 的程序目录（叫起来的 agent 直接用 maapilot）、maa、agent（claude / codex）、adb 所在目录
-    （要用到 codex 时也带上它的目录）+ 系统目录。"""
+    """定时任务要放到 PATH 前面的目录：项目 .venv 的程序目录（叫起来的 agent 直接用 maapilot）、maa、agent（claude / codex）、
+    adb 所在目录（要用到 codex 时也带上它的目录）+ 系统目录。"""
     from maapilot import hosts
     dirs = [str(venv.venv_bin())]
     found_all = [shutil.which(str(prog)) for prog in _exec_paths(cfg).values()]
@@ -79,37 +83,123 @@ def _path_dirs(cfg: dict) -> str:
     return venv.join_path(dirs + venv.sys_path_dirs())
 
 
-def command(cfg: dict) -> sched.Command:
-    """定时要执行的命令：项目 .venv 里的 maapilot daily run --trigger schedule，输出追加到 private/log/cron.log。"""
-    env = {"PATH": _path_dirs(cfg), "PYTHONUTF8": "1"}
+def launch_env(cfg: dict) -> list[str]:
+    """启动器的 --env：PATH+=<目录>、设定时时环境里有的 MAAPILOT_PRIVATE / CODEX_HOME（Codex 的设置放在别处时，
+    定时日常也要找得到对这个文件夹的信任）、PYTHONUTF8=1。"""
+    env = [f"PATH+={_path_dirs(cfg)}"]
     if os.environ.get("MAAPILOT_PRIVATE"):
-        env["MAAPILOT_PRIVATE"] = str(paths.PRIVATE)
-    if os.environ.get("CODEX_HOME"):                    # Codex 的设置（信任这个文件夹）放在别处时，定时日常也要找得到
-        env["CODEX_HOME"] = os.environ["CODEX_HOME"]
-    return sched.Command([str(venv.venv_exe("maapilot")), "daily", "run", "--trigger", "schedule"], env,
-                         paths.LOGS / "cron.log")
+        env.append(f"MAAPILOT_PRIVATE={paths.PRIVATE}")
+    if os.environ.get("CODEX_HOME"):
+        env.append(f"CODEX_HOME={os.environ['CODEX_HOME']}")
+    env.append("PYTHONUTF8=1")
+    return env
+
+
+def command(cfg: dict) -> sched.Command:
+    """定时要执行的命令：项目 .venv 的 python -X utf8 -m maapilot.oscompat.launch --env … --log private/log/schedule.log
+    -- daily run --trigger schedule。schedule_options 交给后端（只有任务计划程序用）。"""
+    opts = config.schedule_options(cfg)
+    log = paths.LOGS / LOG_NAME
+    argv = [str(venv.venv_exe("python")), "-X", "utf8", *LAUNCH]
+    for e in launch_env(cfg):
+        argv += ["--env", e]
+    argv += ["--log", str(log), "--", *RUN]
+    return sched.Command(argv, log, run_if_missed=opts["run_if_missed"], wake=opts["wake_computer"])
 
 
 def cron_lines(times: list[tuple[int, int]], cfg: dict) -> list[str]:
     return sched.CronBackend.render(times, command(cfg))
 
 
+# --- 装之前查一遍 ----------------------------------------------------------------------------------------------------
+# 定时任务在用户不在时执行这些程序：找不到的、装在 Codex（Windows 应用）隔离目录里的，到点一定跑不成，当场拒绝。
+# Codex 的 Windows 应用把用户目录重定向到 `…\AppData\Local\Packages\<包名>\LocalCache\…`，在里面装的程序和仓库，
+# 任务计划程序（在 Codex 外面运行）看不到。
+
+def isolated(path) -> bool:
+    p = str(path).replace("/", "\\").lower()
+    return "\\packages\\" in p and "\\localcache\\" in p
+
+
+def _real(p: str) -> str:
+    try:
+        return os.path.realpath(p)
+    except (OSError, ValueError):
+        return p
+
+
+def preflight(cfg: dict, cmd: sched.Command, which=None) -> list[dict]:
+    """定时任务要执行的程序（.venv 的 python、maa、agent、adb，要用 codex 时还有 codex）和仓库目录：
+    [{what, path, problem: "missing" | "isolated"}]，没问题是空列表。which：找程序（doctor 换成它的 Probe）。"""
+    from maapilot import hosts
+    which = which or shutil.which
+    progs = {"python": cmd.argv[0], **_exec_paths(cfg)}
+    if _uses_codex(cfg) and "codex" not in progs:
+        progs["codex"] = hosts.codex_path(cfg) or "codex"
+    out = []
+    for what, prog in progs.items():
+        found = which(str(prog))
+        if not found:
+            out.append({"what": what, "path": str(prog), "problem": "missing"})
+        elif isolated(found) or isolated(_real(found)):
+            out.append({"what": what, "path": found if isolated(found) else _real(found), "problem": "isolated"})
+    root = str(paths.ROOT)
+    if isolated(root) or isolated(_real(root)):
+        out.append({"what": "项目文件夹", "path": root if isolated(root) else _real(root), "problem": "isolated"})
+    return out
+
+
+def preflight_error(problems: list[dict]) -> CliError:
+    iso = [p for p in problems if p["problem"] == "isolated"]
+    missing = [p for p in problems if p["problem"] == "missing"]
+    if iso:
+        return CliError("isolated_install", "这些装在 Codex 应用的隔离目录里（…\\Packages\\…\\LocalCache\\…），"
+                        "Windows 任务计划程序看不到，定时日常跑不起来：" + "；".join(f"{p['what']} {p['path']}" for p in iso),
+                        exit=ENVIRONMENT, data={"problems": problems},
+                        hint="在普通的 PowerShell（不是 Codex 里）把它们和项目文件夹装到普通目录（例如 C:\\Users\\<你>\\ 下），"
+                             "改好 config.yaml 的 tools / emulator.adb 再设定时")
+    return CliError("program_missing", "定时日常要执行的程序找不到：" + "；".join(f"{p['what']}（{p['path']}）" for p in missing),
+                    exit=ENVIRONMENT, data={"problems": problems},
+                    hint="maapilot doctor；config.yaml 的 tools / emulator.adb 写成绝对路径，.venv 没装就先装运行环境")
+
+
 def schedule(times: str | None, replace_old: bool, dry_run: bool) -> dict:
     cfg = config.load()
     hm = _parse_times(times.split(",") if times else list(cfg.get("schedule") or []))
-    r = sched.backend().install(hm, command(cfg), replace_old=replace_old, dry_run=dry_run)
-    out = {"times": [f"{h:02d}:{m:02d}" for h, m in hm], "installed": r["installed"], "replaced": r["replaced"],
-           "old_entries": r["old_entries"], "removed_old": r["removed_old"], "changed": r["changed"], "dry_run": dry_run}
+    cmd = command(cfg)
+    b = sched.backend()
+    problems = preflight(cfg, cmd) if b.available()[0] else []
+    if problems and not dry_run:
+        raise preflight_error(problems)
+    r = b.install(hm, cmd, replace_old=replace_old, dry_run=dry_run)
+    want = [f"{h:02d}:{m:02d}" for h, m in hm]
+    out = {"backend": b.name, "times": want, "installed": r["installed"], "replaced": r["replaced"],
+           "old_entries": r["old_entries"], "removed_old": r["removed_old"], "changed": r["changed"], "dry_run": dry_run,
+           "options": {"run_if_missed": cmd.run_if_missed, "wake_computer": cmd.wake}}
     if dry_run:
-        out["crontab"] = r["preview"]
+        out["preview"] = r["preview"]
+        if problems:
+            out["problems"] = problems
+        return out
+    # 读回来核对：系统里真的是这几个时间、任务启用着
+    info = daily.schedule_info()
+    out["schedule"] = info
+    out["next_at"] = _next_at(info["times"]) if info.get("installed") else None
+    if info.get("installed") is not True or info["times"] != want or info.get("enabled") is False:
+        raise CliError("schedule_not_applied", f"定时设了，但读回来不对：要的是 {'、'.join(want)}，"
+                       f"系统里是 {'、'.join(info['times']) or '没有'}"
+                       + ("（任务被停用了）" if info.get("enabled") is False else "")
+                       + (f"；{info['error']}" if info.get("error") else ""),
+                       exit=ENVIRONMENT, data=out, hint="maapilot daily status；再跑一次 maapilot daily schedule")
     return out
 
 
 def unschedule(dry_run: bool) -> dict:
-    r = sched.backend().remove(dry_run=dry_run)
-    out = {"removed": r["removed"], "old_entries": r["old_entries"], "dry_run": dry_run}
+    b = sched.backend()
+    r = b.remove(dry_run=dry_run)
+    out = {"backend": b.name, "removed": r["removed"], "old_entries": r["old_entries"], "dry_run": dry_run}
     if dry_run:
-        out["crontab"] = r["preview"]
+        out["preview"] = r["preview"]
     return out
 
 
@@ -147,20 +237,27 @@ def unschedule_cmd(dry_run: bool) -> dict:
 
 
 def schedule_info(run: sched.Runner | None = None) -> dict:
-    """本项目的定时（doctor 的 schedule 检查、--brief、daily status 用）：{installed, times, old_entries}；
-    读不了时 installed 为 None 并带 error；这台电脑上没有可用的调度（Windows 暂时）时 installed 为 False 并带 unavailable。
-    run：换掉跑子进程的方式（doctor 用它的 Probe）。"""
+    """本项目的定时（doctor 的 schedule 检查、--brief、daily status、daily schedule 读回来核对用）：
+    {installed, times, old_entries, backend}；任务计划程序还带 task（任务名）、settings（{run_if_missed, wake}）；
+    任务被停用了带 enabled: false。读不了时 installed 为 None 并带 error；这台电脑上没有可用的调度时 installed 为 False
+    并带 unavailable。run：换掉跑子进程的方式（doctor 用它的 Probe）。"""
     b = sched.backend(run)
     ok, hint = b.available()
     if not ok:
-        return {"installed": False, "times": [], "old_entries": [], "unavailable": hint}
+        return {"installed": False, "times": [], "old_entries": [], "backend": b.name, "unavailable": hint}
     try:
         entries = b.read()
     except CliError as e:
-        return {"installed": None, "times": [], "old_entries": [], "error": e.message}
+        return {"installed": None, "times": [], "old_entries": [], "backend": b.name, "error": e.message}
     mine = [e for e in entries if e.mine]
-    return {"installed": bool(mine), "times": sorted(t for e in mine for t in e.times),
-            "old_entries": [e.ident for e in entries if e.old]}
+    out = {"installed": bool(mine), "times": sorted(t for e in mine for t in e.times),
+           "old_entries": [e.ident for e in entries if e.old], "backend": b.name}
+    if any(e.enabled is False for e in mine):
+        out["enabled"] = False
+    if b.name == "schtasks" and mine:
+        out["task"] = mine[0].ident
+        out["settings"] = mine[0].settings
+    return out
 
 
 def _next_at(times: list[str]) -> str | None:
@@ -175,5 +272,6 @@ def _next_at(times: list[str]) -> str | None:
 
 def status() -> dict:
     sched = daily.schedule_info()
+    on = sched.get("installed") and sched.get("enabled") is not False
     return {"running": daily.running(), "last": reportmod.latest(), "schedule": sched,
-            "next_at": _next_at(sched["times"]) if sched.get("installed") else None}
+            "next_at": _next_at(sched["times"]) if on else None}

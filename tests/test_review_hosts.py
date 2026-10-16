@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 
 import pytest
 import yaml
@@ -14,7 +13,7 @@ from maapilot.cliutil import ENVIRONMENT, CliError
 from maapilot.flows.daily import cron
 from maapilot.tools import common, doctor, host_cmd
 from tests.test_daily import _no_real_crontab, env, fake_crontab, run, script  # noqa: F401 - fixture
-from tests.portable import needs_cron
+from tests.portable import needs_cron, sched_ready  # noqa: F401 - fixture
 from tests.test_hosts import codex, _use_codex  # noqa: F401 - fixture
 
 
@@ -104,27 +103,28 @@ def test_push_finds_codex_outside_path(env, codex, monkeypatch, tmp_path):
 
 # --- 定时任务 --------------------------------------------------------------------------------------------------------
 
-def _cron_env(line: str) -> dict:
-    parts = shlex.split(line.split(" * * * ", 1)[1].replace(r"\%", "%"))
-    return dict(p.split("=", 1) for p in parts if "=" in p and not p.startswith("/") and p.split("=")[0].isupper())
+def _launch_env(cfg: dict) -> dict:
+    """定时命令里交给启动器的环境变量（--env K=V；PATH+= 的键是 "PATH+"）。"""
+    argv = cron.command(cfg).argv
+    return dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "--env")
 
 
-@needs_cron
-def test_cron_line_has_codex_home_and_dir(env, codex, monkeypatch, tmp_path):
+def test_launch_env_has_codex_home_and_dir(env, codex, monkeypatch, tmp_path):
     prog, _ = codex
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ch"))
     cfg = {"tools": {"codex": str(prog)}}
-    e = _cron_env(cron.cron_lines([(4, 40)], cfg)[0])
-    assert e["CODEX_HOME"] == str(tmp_path / "ch")
-    assert str(prog.parent) not in e["PATH"].split(":")                 # agent 是 claude、没记过 Codex 会话
+    e = _launch_env(cfg)
+    assert e["CODEX_HOME"] == str(tmp_path / "ch") and e["PYTHONUTF8"] == "1"
+    assert e["MAAPILOT_PRIVATE"] == str(paths.PRIVATE)
+    assert str(prog.parent) not in e["PATH+"].split(os.pathsep)          # agent 是 claude、没记过 Codex 会话
     hosts.record_session({"CODEX_THREAD_ID": "th-1"})
-    assert str(prog.parent) in _cron_env(cron.cron_lines([(4, 40)], cfg)[0])["PATH"].split(":")
+    assert str(prog.parent) in _launch_env(cfg)["PATH+"].split(os.pathsep)
     monkeypatch.delenv("CODEX_HOME")
-    assert "CODEX_HOME" not in cron.cron_lines([(4, 40)], cfg)[0]
+    assert "CODEX_HOME" not in _launch_env(cfg)
 
 
 @needs_cron
-def test_schedule_refuses_untrusted_codex(capsys, env, codex, tmp_path, monkeypatch):
+def test_schedule_refuses_untrusted_codex(capsys, env, codex, tmp_path, monkeypatch, sched_ready):
     prog, _ = codex
     monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, "")))
     _use_codex(prog)

@@ -16,6 +16,8 @@ def _tmp_private(tmp_path, monkeypatch):
     monkeypatch.setenv("MAAPILOT_CLAUDE_PROJECTS_DIR", str(tmp_path / "no-claude-projects"))
     # Codex 的用户配置不读写真的 ~/.codex；启动检查不把跑测试的会话当成用户的会话
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    # 不碰真的 Windows 任务计划程序：schtasks 指到不存在的程序（Windows 上当作设不了定时；要测的测试自己换掉）
+    monkeypatch.setenv("MAAPILOT_SCHTASKS", str(tmp_path / "no-schtasks.exe"))
     for k in ("CODEX_THREAD_ID", "CLAUDECODE", "PYTHONUTF8"):      # PYTHONUTF8：cli.main 会设，别带到后面的测试
         monkeypatch.delenv(k, raising=False)
     # 活动关卡不读本机 maa-cli 缓存里真的活动列表（要测的测试自己指定）

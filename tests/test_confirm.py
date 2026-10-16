@@ -11,7 +11,7 @@ import pytest
 from maapilot import cli, paths
 from maapilot.flows import daily
 from maapilot.tools import common, guard
-from tests.portable import needs_cron
+from tests.portable import needs_cron, sched_ready  # noqa: F401 - fixture
 from tests.test_daily import OTHER, fake_crontab
 
 
@@ -62,7 +62,7 @@ def test_ancestors_of_this_process():
 
 
 @pytest.fixture
-def cron(tmp_path, monkeypatch, attended):
+def cron(tmp_path, monkeypatch, attended, sched_ready):
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text("emulator: {address: 'emu:1', adb: adb}\ntools: {maa: maa, claude: claude}\n"
                             "schedule: ['04:40', '16:40']\n", encoding="utf-8")

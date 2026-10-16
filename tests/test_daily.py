@@ -11,7 +11,7 @@ from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.flows import daily
 from maapilot.flows._common import now
-from tests.portable import fake_program, needs_cron
+from tests.portable import fake_program, needs_cron, sched_ready  # noqa: F401 - fixture
 
 
 def run(capsys, *argv):
@@ -402,7 +402,7 @@ def fake_crontab(tmp_path, monkeypatch, initial: str | None):
 
 
 @pytest.fixture
-def cron(tmp_path, monkeypatch):
+def cron(tmp_path, monkeypatch, sched_ready):
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text("emulator: {address: 'emu:1'}\nschedule: ['04:40', '16:40']\n", encoding="utf-8")
     monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, OTHER)))
@@ -416,9 +416,11 @@ def test_schedule_keeps_other_lines(capsys, cron):
     text = cron.read_text(encoding="utf-8")
     assert text.startswith(OTHER)                                        # 别的行一个字节都不动
     mine = text[len(OTHER):].splitlines()
-    assert len(mine) == 2 and mine[0].startswith("40 4 * * * PATH=") and mine[1].startswith("40 16 * * * ")
+    assert len(mine) == 2 and mine[0].startswith("40 4 * * * ") and mine[1].startswith("40 16 * * * ")
     assert all(ln.endswith(f"# maapilot-v2 {paths.ROOT}") and "daily run --trigger schedule" in ln for ln in mine)
-    assert "PYTHONUTF8=1" in mine[0] and str(paths.ROOT / ".venv" / "bin" / "maapilot") in mine[0]
+    assert " -X utf8 -m maapilot.oscompat.launch " in mine[0] and "--env PYTHONUTF8=1" in mine[0]
+    assert f"--log {paths.LOGS / 'schedule.log'} -- daily run --trigger schedule" in mine[0]
+    assert out["data"]["schedule"]["times"] == ["04:40", "16:40"] and out["data"]["next_at"]   # 读回来核对过
     assert out["data"]["old_entries"] == [OTHER.splitlines()[1]] and out["data"]["removed_old"] == []
     # 重复执行结果相同
     code, out = run(capsys, "daily", "schedule")
@@ -428,7 +430,8 @@ def test_schedule_keeps_other_lines(capsys, cron):
     text2 = cron.read_text(encoding="utf-8")
     assert text2.startswith(OTHER) and text2[len(OTHER):].startswith("10 5 * * * ") and text2.count("maapilot-v2") == 1
     code, out = run(capsys, "daily", "status")
-    assert out["data"]["schedule"] == {"installed": True, "times": ["05:10"], "old_entries": [OTHER.splitlines()[1]]}
+    assert out["data"]["schedule"] == {"installed": True, "times": ["05:10"], "old_entries": [OTHER.splitlines()[1]],
+                                       "backend": "cron"}
     assert out["data"]["next_at"]
 
 
@@ -436,7 +439,7 @@ def test_schedule_keeps_other_lines(capsys, cron):
 def test_schedule_dry_run_and_replace_old(capsys, cron):
     code, out = run(capsys, "daily", "schedule", "--dry-run", "--replace-old")
     assert code == 0 and cron.read_text(encoding="utf-8") == OTHER      # 没写
-    assert "job tick" not in out["data"]["crontab"] and "backup.sh" in out["data"]["crontab"]
+    assert "job tick" not in out["data"]["preview"] and "backup.sh" in out["data"]["preview"]
     code, out = run(capsys, "daily", "schedule", "--replace-old")
     text = cron.read_text(encoding="utf-8")
     assert "job tick" not in text and "SHELL=/bin/sh\n0 3 * * * /usr/local/bin/backup.sh  # 别人的\n" in text
@@ -449,7 +452,7 @@ def test_unschedule_only_removes_ours(capsys, cron):
     cron.write_text(OTHER + other_root, encoding="utf-8")
     run(capsys, "daily", "schedule")
     code, out = run(capsys, "daily", "unschedule", "--dry-run")
-    assert code == 0 and len(out["data"]["removed"]) == 2 and "maapilot-v2 /elsewhere" in out["data"]["crontab"]
+    assert code == 0 and len(out["data"]["removed"]) == 2 and "maapilot-v2 /elsewhere" in out["data"]["preview"]
     code, out = run(capsys, "daily", "unschedule")
     assert cron.read_text(encoding="utf-8") == OTHER + other_root
 
@@ -460,7 +463,7 @@ def test_schedule_bad_time(capsys, cron):
 
 
 @needs_cron
-def test_empty_crontab(capsys, tmp_path, monkeypatch):
+def test_empty_crontab(capsys, tmp_path, monkeypatch, sched_ready):
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text("emulator: {address: 'emu:1'}\n", encoding="utf-8")
     monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, None)))

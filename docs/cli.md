@@ -64,7 +64,7 @@
 | `goals list / add / update / remove / move / expire` | 否 | 放行 | B |
 | `op upgrade / mastery / progress`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
-| `daily schedule / unschedule` | 否（改 crontab） | 放行 | B |
+| `daily schedule / unschedule` | 否（改 crontab / Windows 任务计划程序） | 放行 | B |
 | `host status` / `host install <claude\|codex>` | 否（`install codex` 改 Codex 的用户设置） | 放行 | A |
 | `report show / latest / list / write` | 否 | 放行 | B |
 
@@ -110,7 +110,7 @@
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
-| `schedule` | crontab 里有没有本项目的定时日常；有没有旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`，列在 `old_entries`）。这台电脑上还设不了定时（Windows，任务计划程序还没接上）时 `unavailable: true` | `daily schedule` |
+| `schedule` | 系统里（crontab / Windows 任务计划程序）有没有本项目的定时日常，读回来的时间；有没有旧版 MaaPilot 的定时任务（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务；列在 `old_entries`）。任务被停用了（`enabled: false`）、定时要执行的程序找不到或装在 Codex 应用的隔离目录里（`problems`，同 `daily schedule` 装之前查的）时不通过。Windows 上通过时提醒电脑要保持登录（锁屏可以）。找不到 schtasks.exe 时 `unavailable: true` | `daily schedule` |
 | `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
 
@@ -145,7 +145,8 @@
 ```
 
 `next`：`"setup"`（没有 `setup.json`，用户一开口 agent 就进入 `maapilot-setup`）、`"guard"`（对账停机中，先告诉用户）或 `null`。
-`lines` 是给会话开头看的几行中文摘要。`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（`seen.json` 不算；读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
+`lines` 是给会话开头看的几行中文摘要。`schedule` 是从系统里读回来的（同 `daily status`）：设不了定时时另有 `unavailable`（原因），
+Windows 上任务被停用了另有 `enabled: false`（`lines` 里写一行"到点不会跑"）。`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（`seen.json` 不算；读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说）；`daily watch` 交出去过的（`handed`）照样列，直到 `news told`。
@@ -807,33 +808,69 @@ agent 结束（或超时被杀）后日常换一次锁的 token：它留下还�
 - 推给谁：`private/state/agent-session.json` 里记过 Codex 会话，并且它比记下的 Claude Code 会话新、或者 `config.yaml` 的 `agent` 是 `codex`；
   否则不推（用户最近在 Claude Code 里，它挂着 `daily watch`）。用 `<codex> queue --thread <会话> --message <消息>`（30 秒超时）：会话闲着马上当成新的一轮处理，
   正忙就排在这轮后面，关着就等它恢复。`<codex>` 是绝对路径：`tools.codex` → PATH 里的 `codex` → `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`。
-- 推没推成写进 cron.log，不影响日常本身；记过 Codex 会话却没推成时，汇报的 `alerts` 加一行"没能把结果推进你的 Codex 会话：…"。
+- 推没推成写进 schedule.log，不影响日常本身；记过 Codex 会话却没推成时，汇报的 `alerts` 加一行"没能把结果推进你的 Codex 会话：…"。
 做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。刷理智（`farm`）的时限按理智算：先读理智（`private/state/sanity.json` 1 小时内的直接用，
 没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity`（森空岛，没接才回首页读）；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
 时限 = 次数 × `daily.farm_min_per_fight`（默认 3）+ `daily.farm_timeout_margin_min`（默认 15）分钟；理智超上限（如 358/205）照算。完全读不到理智才用 `task_timeout_min`。
 算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（说法按宿主，见上）、刷图分批。
 
-`daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`：按 `--times` 或 `config.yaml` 的 `schedule` 写 crontab，每个时间点一行。
+`daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`：按 `--times` 或 `config.yaml` 的 `schedule` 设定时日常。
+macOS / Linux 写 crontab，每个时间点一行；Windows 在任务计划程序里建一个任务（每个时间点一个每天的触发器）。
 输出带 `exec`：定时日常要执行的程序（`{maa, <agent>（claude 或 codex）, adb}`，`tools.maa`、`tools.<agent>`、`emulator.adb` 解析成的完整路径），agent 在对话里告诉用户
 （定时日常会在用户不在时运行它们）。用户在对话里同意改定时就跑，程序不另外确认、不记录。
 `agent` 是 `codex` 而 Codex 没信任这个文件夹（不带 `--dry-run` 时）→ 退出码 5 `codex_untrusted`（项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa），
-先 `maapilot host install codex`。每行：
+先 `maapilot host install codex`。
+
+装之前查一遍定时要执行的程序（`.venv` 的 python、maa、agent、adb，要用到 codex 时还有 codex）和项目文件夹：
+- 找不到 → 退出码 5 `program_missing`（`data.problems`），按提示在 `config.yaml` 写绝对路径或先装好；
+- 路径里有 `\Packages\…\LocalCache\`（不分大小写）→ 退出码 5 `isolated_install`：Codex 的 Windows 应用把用户目录重定向到
+  `…\AppData\Local\Packages\<包名>\LocalCache\…`，在里面装的程序和仓库任务计划程序看不到。要在普通的 PowerShell 里重新装到普通目录。
+`--dry-run` 不拒绝，只在 `data.problems` 里列出来。
+
+定时执行的一律是启动器（环境变量和日志都在它的参数里，cron 和任务计划程序一样）：
 
 ```
-40 4 * * * PATH=<.venv/bin、maa、agent、adb（和 codex）所在目录>:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin PYTHONUTF8=1 [CODEX_HOME=…] <仓库>/.venv/bin/maapilot daily run --trigger schedule >> <仓库>/private/log/cron.log 2>&1 # maapilot-v2 <仓库>
+<.venv 的 python> -X utf8 -m maapilot.oscompat.launch --env PATH+=<.venv 的程序目录、maa、agent、adb（和 codex）所在目录、系统目录>
+    [--env MAAPILOT_PRIVATE=…] [--env CODEX_HOME=…] --env PYTHONUTF8=1 --log <private>/log/schedule.log -- daily run --trigger schedule
 ```
 
-PATH 写在每行里（不加单独的 `PATH=` 行，免得影响别人的行）；要用到 codex（`agent` 是 codex，或记过用户的 Codex 会话、跑完要推送）时也带上 codex 所在目录。
-设定时的环境里有 `CODEX_HOME`（Codex 的设置放在别处）就照写进去，定时日常才找得到对这个文件夹的信任。只动以 `# maapilot-v2 <本仓库路径>` 结尾的行，别的行一个字节都不动，重复执行结果相同。
-发现旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`）时列在 `data.old_entries`，带 `--replace-old` 才删掉它们。
-`--dry-run` 只在 `data.crontab` 里给出改完的全文，不写。测试用环境变量 `MAAPILOT_CRONTAB` 换掉 crontab 程序。
-`{"times": ["04:40", "16:40"], "installed": [...], "replaced": [...], "old_entries": [...], "removed_old": [...], "changed": true, "dry_run": false}`。
-macOS 会弹窗问终端能否改 crontab，要用户点允许。Windows 上还设不了定时（任务计划程序还没接上）：`schedule` / `unschedule` 退出码 5 `no_scheduler`。
+启动器（`maapilot/oscompat/launch.py`）先设环境变量（`PATH+=` 把这些目录放到 PATH 最前面，`K=V` 照设，`PYTHONUTF8=1` 一定设），
+再把输出（描述符 1、2，Windows 上连同标准句柄；maapilot、MaaCore、子进程写的都算）追加进日志，先写一行 `=== <时间> 定时启动…`，
+然后交给 `maapilot daily run --trigger schedule`，结束写一行退出码。要用到 codex（`agent` 是 codex，或记过用户的 Codex 会话、跑完要推送）时 PATH 也带上 codex 所在目录；
+设定时的环境里有 `MAAPILOT_PRIVATE`、`CODEX_HOME`（Codex 的设置放在别处）就照传，定时日常才找得到对这个文件夹的信任。
 
-`daily unschedule [--dry-run]`：删掉本项目的定时行（用户在对话里同意后跑）。`{"removed": [...], "old_entries": [...]}`
+- **cron**：`40 4 * * * <启动器命令> # maapilot-v2 <仓库>`。只动以 `# maapilot-v2 <本仓库路径>` 结尾的行（旧写法——环境变量写在行里、`.venv/bin/maapilot … >> cron.log`——也认，重设时换成新写法），
+  别的行一个字节都不动，重复执行结果相同。发现旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`）时列在 `data.old_entries`，带 `--replace-old` 才删掉它们。
+  cron 不补跑：到点时电脑睡着或关着就跳过这一次（`schedule_options` 对 cron 不起作用）。macOS 会弹窗问终端能否改 crontab，要用户点允许。
+  测试用环境变量 `MAAPILOT_CRONTAB` 换掉 crontab 程序。
+- **Windows 任务计划程序**（`schtasks.exe`）：任务 `\MaaPilot\daily-<仓库路径的 sha1 前 8 位>`，描述 `maapilot-daily <仓库路径>`（"本项目的"标记）。
+  用 `schtasks /Create /TN <任务> /XML <临时文件> /F` 建（任务定义写成 UTF-16 的临时文件，用完删掉），重设是覆盖同一个任务，内容没变就不动。
+  执行 `.venv\Scripts\pythonw.exe`（没有就 `python.exe`），参数是启动器的，工作目录是仓库。只在用户登录时运行（不存密码、不要管理员；锁屏照常跑，注销或关机就不跑），
+  同时只跑一个（`IgnoreNew`），最长 6 小时，用电池也跑。`schedule_options.run_if_missed`（默认 true）→ "错过了就补跑"（开机 / 醒来后跑这一次），
+  `schedule_options.wake_computer`（默认 false）→ "唤醒计算机运行此任务"。每个触发器的起点是这个时间点下一次到点的时刻（不放在过去，免得一装好就当成错过了马上跑）。
+  `\MaaPilot\` 下别的任务（别的目录的 MaaPilot）列在 `data.old_entries`，不动；带 `--replace-old` 才删。读的时候只认 `schtasks /Query /FO CSV /NH` 的任务名和
+  `/Query /TN <任务> /XML` 的内容（UTF-16 / UTF-8 / 系统代码页都认），不解析本地化的表格文字。测试用环境变量 `MAAPILOT_SCHTASKS` 换掉 schtasks 程序。
+  找不到 schtasks.exe → 退出码 5 `no_scheduler`；schtasks 出错 → 退出码 5 `schtasks_failed`。
+
+装完马上读回来核对：系统里本项目的时间和要的不一样、没装上或任务被停用了 → 退出码 5 `schedule_not_applied`（`data` 照给）。
+
+```json
+{"backend": "cron", "times": ["04:40", "16:40"], "installed": [...], "replaced": [...], "old_entries": [...], "removed_old": [...],
+ "changed": true, "dry_run": false, "options": {"run_if_missed": true, "wake_computer": false},
+ "schedule": {"installed": true, "times": ["04:40", "16:40"], "old_entries": [], "backend": "cron"}, "next_at": "…",
+ "exec": {"maa": "/…/maa", "claude": "/…/claude", "adb": "/…/adb"}}
+```
+
+`backend`：`cron` / `schtasks` / `fake`（测试，`MAAPILOT_SCHEDULER=fake:<json>`）。`schedule` 是读回来的（同 `daily status`），`next_at` 是下一次到点。
+`--dry-run` 不写，在 `data.preview` 里给出改完的样子（cron 是 crontab 全文，Windows 是任务定义 XML），没有 `schedule` / `next_at`。
+
+`daily unschedule [--dry-run]`：删掉本项目的定时（crontab 里本项目的行 / 任务计划程序里本项目的任务；用户在对话里同意后跑）。
+`{"backend": "…", "removed": [...], "old_entries": [...], "dry_run": false}`（`--dry-run` 另有 `preview`：删完剩下的）。
 `daily status`：`{"running": {run_id, step, started_at, …} | null, "last": {run_id, at, ok, status, report} | null,
-"schedule": {"installed": true, "times": [...], "old_entries": [...]}, "next_at": "…"}`。
+"schedule": {"installed": true, "times": [...], "old_entries": [...], "backend": "cron"}, "next_at": "…"}`。
+`schedule` 是从系统里读回来的：Windows 上另有 `task`（任务名）、`settings`（`{run_if_missed, wake}`，任务里实际的设置）；任务被停用了有 `enabled: false`（这时 `next_at` 为 null）；
+读不了时 `installed: null` 带 `error`；这台电脑上设不了定时（Windows 上找不到 schtasks.exe）时 `installed: false` 带 `unavailable`。
 
 `daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果；
 或者等到官方日程有消息（新公告、维护结束、活动开始，还没 `news told` 的）。
@@ -865,8 +902,9 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
 
 用户说要从头设置时用。**什么都不删**：
 1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令或接管的 agent 在操作，包括日常叫起来的 agent 继承着锁；退出码 4 `busy`，`data.holder`）→ 不做。
-2. 本项目的定时任务删掉：crontab 里以 `# maapilot-v2 <本仓库路径>` 结尾的行（同 `daily unschedule`），别的行（包括别的目录的 MaaPilot）一个字节都不动。
-   这台电脑上还设不了定时（Windows，任务计划程序还没接上）就当没有，`data.schedule.unavailable` 写着原因，照常重置。
+2. 本项目的定时任务删掉（同 `daily unschedule`）：crontab 里以 `# maapilot-v2 <本仓库路径>` 结尾的行，别的行（包括别的目录的 MaaPilot）一个字节都不动；
+   Windows 上是任务计划程序里本仓库的任务（`\MaaPilot\` 下别的目录的任务不动）。`data.schedule.remove` 是要删的（cron 的整行 / 任务名），`removed` 是删掉的。
+   这台电脑上设不了定时（Windows 上找不到 schtasks.exe）就当没有，`data.schedule.unavailable` 写着原因，照常重置。
    `private/` 里有文件正被别的程序打开、改不了名（Windows）→ 退出码 4 `in_use`，什么都没动。
 3. `private/` 整个改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、`setup.json`、目标、快照、日志、汇报、截图、对账都在里面）；
    再把备份里的 `maa-config/`（maa-cli 的配置与任务模板）复制回新的 `private/maa-config/`。之后 `doctor --brief` 的 `next` 是 `setup`。
@@ -966,7 +1004,7 @@ private/
                      agent-session.json（记下的用户会话，每个宿主一个；见「doctor」的 session）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   cache/copilot/     copilot strip 存的去掉练度要求的作业
-  log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  cron.log
+  log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  schedule.log（定时日常的输出，启动器写；旧版是 cron.log）
                      daily-<run_id>.jsonl（一次日常的每一步）  agent-<run_id>-<序号>-<项>.jsonl（无头 agent 的输出；codex 另有 .last.txt：最后一句话）
   reports/           <YYYY-MM-DD-HHMM>.md / .json（每次日常的汇报）
   shots/             截图
@@ -990,6 +1028,8 @@ private/
 | `agent` | 定时日常叫起的 agent：`claude` 或 `codex`（`maapilot/hosts.py`）；别的值 → `invalid_config` | `claude` |
 | `tools.maa` / `tools.claude` / `tools.codex` | 定时任务里用的 maa、agent 程序（setup 写绝对路径；agent 只用 `agent` 选的那个） | `maa` / `claude` / `codex` |
 | `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表） | `["04:40", "16:40"]` |
+| `schedule_options.run_if_missed` | 到点时电脑关着或睡着，开机 / 醒来后补跑这一次（只有 Windows 任务计划程序做得到；cron 不补跑）；不是 true / false → `invalid_config` | `true` |
+| `schedule_options.wake_computer` | 到点时把睡着的电脑叫醒来跑（只有 Windows；电源设置里要允许唤醒定时器）；不是 true / false → `invalid_config` | `false` |
 | `daily.tasks` | 按顺序跑的 MAA 日常项：`startup` `recruit` `infrast` `mall` `annihilation` `award` | 全部 |
 | `daily.default_stage` | 没有进行中的目标时刷哪关 | `"1-7"` |
 | `daily.params.<任务>` | 覆盖该项的 MAA 参数 | `{}` |

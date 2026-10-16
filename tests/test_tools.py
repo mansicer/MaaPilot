@@ -595,7 +595,7 @@ def test_doctor_brief(capsys, monkeypatch):
     code, env = run(capsys, "doctor", "--brief")
     d = env["data"]
     assert d["next"] is None and d["goals_active"] == 1
-    if WINDOWS:                                                            # 任务计划程序还没接上：当作没设定时
+    if WINDOWS:                                                            # 测试里 schtasks 指到不存在的程序：当作设不了定时
         assert d["schedule"]["installed"] is False and d["schedule"]["unavailable"]
     else:
         assert d["schedule"] == {"installed": True, "times": ["04:40", "16:40"]}

@@ -121,7 +121,9 @@ MaaPilot/
 - "做某某的模组任务 / 打一次剿灭" → `maapilot-battle`（加 `maapilot-training`）。
 出错时 agent 本来就在场，当场处理（`maapilot-recovery`）。
 
-**定时日常**：系统定时任务调 `maapilot daily run`：
+**定时日常**：系统定时任务（macOS / Linux 的 cron，Windows 的任务计划程序；`maapilot/oscompat/sched.py`）经启动器
+（`maapilot/oscompat/launch.py`：设好 PATH 等环境变量、输出进 `private/log/schedule.log`）调 `maapilot daily run`。
+Windows 的任务只在用户登录时运行（模拟器要开在用户桌面里；锁屏照跑），错过了补不补跑、要不要唤醒电脑在 setup 时问用户；cron 不补跑。
 0. 开始前：到期的目标挪走；官方公告旧了重拉，正在停机维护就什么都不跑（叫一个不碰模拟器的 agent 看看对目标的影响）；游戏版本旧了先叫 agent 更新（没更新成就停下）；
 1. 按配置依次跑 MAA 日常项；
 2. 某项失败 → 当场启动一个无头 agent（`config.yaml` 的 `agent`：`claude -p` 或 `codex exec`，加载 `maapilot-recovery`）接管这一项，它结束后接着跑下一项；

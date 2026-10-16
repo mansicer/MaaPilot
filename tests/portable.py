@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 WINDOWS = sys.platform == "win32"
-# cron 后端只在 macOS / Linux；Windows 的任务计划程序后端还没做（定时相关命令在 Windows 上报 no_scheduler）
-needs_cron = pytest.mark.skipif(WINDOWS, reason="cron 只在 macOS / Linux；Windows 任务计划程序后端还没做")
+# cron 后端只在 macOS / Linux（Windows 用任务计划程序，见 test_oscompat_sched）
+needs_cron = pytest.mark.skipif(WINDOWS, reason="cron 只在 macOS / Linux；Windows 用任务计划程序")
 
 
 def fake_program(path: Path, body: str) -> Path:
@@ -27,3 +27,18 @@ def fake_program(path: Path, body: str) -> Path:
     cmd = path.with_name(path.name + ".cmd")
     cmd.write_text(f'@"{sys.executable}" "%~dp0{py.name}" %*\r\n', encoding="utf-8")
     return cmd
+
+
+@pytest.fixture
+def sched_ready(tmp_path, monkeypatch):
+    """定时日常要执行的程序都找得到（daily schedule 装之前要查）：假的 maa / claude / codex / adb 放进 PATH，
+    .venv 的 python 指到跑测试的这个解释器（worktree 里可能没有自己的 .venv）。返回假程序的目录。"""
+    import os
+    from maapilot.oscompat import venv
+    d = tmp_path / "sched-bin"
+    d.mkdir(exist_ok=True)
+    for n in ("maa", "claude", "codex", "adb"):
+        fake_program(d / n, "pass\n")
+    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setattr(venv, "venv_bin", lambda: Path(sys.executable).parent)
+    return d

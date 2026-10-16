@@ -1,10 +1,10 @@
 """`maapilot doctor [--brief] [--offline] [--fix]`：逐项检查环境，给修复建议。契约见 docs/cli.md「doctor」。
 
 只读：只调 adb 的查询命令（version / devices / connect / get-state / exec-out screencap / shell）、maa-cli 的
-version / dir 和 `crontab -l`；不点击、不拿锁、不 import MaaFramework。所有外部访问都经 `Probe`，测试换成假的。
+version / dir 和 `crontab -l`（Windows：`schtasks /Query`）；不点击、不拿锁、不 import MaaFramework。所有外部访问都经 `Probe`，测试换成假的。
 每项 `{name, ok, detail, fix}`；`required: false` 的项（游戏在不在前台、定时任务、setup）不影响 ok_all。
 
-`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和定时（crontab）。
+`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和定时（crontab / 任务计划程序）。
 """
 from __future__ import annotations
 
@@ -373,31 +373,55 @@ def check_game_data(ctx: Ctx) -> dict:
 
 
 def schedule_info(probe: Probe | None = None) -> dict:
-    """本项目的定时（flows/daily/cron.py 的 schedule_info，经 Probe 跑 crontab）：{installed, times, old_entries}，
-    可能带 error（读不了）、unavailable（这台电脑上还设不了定时）。"""
+    """本项目的定时（flows/daily/cron.py 的 schedule_info，经 Probe 跑 crontab / schtasks）：{installed, times, old_entries, backend}，
+    可能带 error（读不了）、unavailable（这台电脑上设不了定时）、enabled: false（任务被停用了）。"""
     from maapilot.flows.daily import cron
     probe = probe or PROBE
 
     def run(argv, input, timeout):
-        r = probe.run(list(argv), timeout=min(timeout, 5))
-        return r.returncode, r.text, r.err
+        r = probe.run(list(argv), timeout=min(timeout, 10))
+        return r.returncode, r.stdout, r.stderr
     return cron.schedule_info(run)
 
 
 def check_schedule(ctx: Ctx) -> dict:
     info = schedule_info(ctx.probe)
+    win = info.get("backend") == "schtasks"
+    others = "别的文件夹的 MaaPilot 的定时任务" if win else "旧版 MaaPilot 的定时任务"
     extra = {"old_entries": info["old_entries"]} if info["old_entries"] else {}
     if info.get("unavailable"):
         return _item("schedule", False, f"定时日常：{info['unavailable']}", "先在对话里手动跑日常", required=False,
                      unavailable=True)
     if info["installed"] is None:
-        return _item("schedule", False, info.get("error") or "读不了定时任务", "看看 crontab 能不能用（crontab -l）",
+        return _item("schedule", False, info.get("error") or "读不了定时任务",
+                     "打开「任务计划程序」看看 MaaPilot 文件夹" if win else "看看 crontab 能不能用（crontab -l）",
                      required=False)
     if not info["installed"]:
-        detail = "还没设定时日常" + ("；有旧版 MaaPilot 的定时任务" if info["old_entries"] else "")
+        detail = "还没设定时日常" + (f"；有{others}" if info["old_entries"] else "")
         return _item("schedule", False, detail, "maapilot daily schedule", required=False, **extra)
-    return _item("schedule", True, f"定时日常：{'、'.join(info['times'])}" +
-                 ("；还有旧版 MaaPilot 的定时任务" if info["old_entries"] else ""), required=False, **extra)
+    if info.get("enabled") is False:
+        return _item("schedule", False, f"定时日常（{'、'.join(info['times'])}）的任务被停用了", "maapilot daily schedule",
+                     required=False, enabled=False, **extra)
+    problems = _schedule_problems(ctx)
+    if problems:
+        from maapilot.flows.daily import cron
+        e = cron.preflight_error(problems)
+        return _item("schedule", False, f"定时日常（{'、'.join(info['times'])}）到点会跑不成：{e.message}", e.hint,
+                     required=False, problems=problems, **extra)
+    note = "；电脑要保持登录（锁屏可以），不然不会跑" if win else ""
+    return _item("schedule", True, f"定时日常：{'、'.join(info['times'])}{note}" +
+                 (f"；还有{others}" if info["old_entries"] else ""), required=False, **extra)
+
+
+def _schedule_problems(ctx: Ctx) -> list[dict]:
+    """定时日常要执行的程序找不到、装在 Codex 的隔离目录里（同 daily schedule 装之前查的）。配置读不了就不查。"""
+    from maapilot.flows.daily import cron
+    if not ctx.cfg:
+        return []
+    try:
+        return cron.preflight(ctx.cfg, cron.command(ctx.cfg), which=ctx.probe.which)
+    except CliError:
+        return []
 
 
 def skills_link(root: Path | None = None) -> str:
@@ -549,8 +573,10 @@ def brief(probe: Probe | None = None) -> dict:
     data = {"setup_done": setup_done, "goals_active": goals_active(), "guard_stop": stop,
             "last_daily": last_daily(), "schedule": {"installed": sched["installed"], "times": sched["times"]},
             "next": "setup" if not setup_done else ("guard" if stop else None)}
-    if sched.get("unavailable"):                        # 这台电脑上还设不了定时（Windows 暂时）
+    if sched.get("unavailable"):                        # 这台电脑上设不了定时（Windows 上找不到 schtasks.exe）
         data["schedule"]["unavailable"] = sched["unavailable"]
+    if sched.get("enabled") is False:                   # 任务计划程序里被停用了
+        data["schedule"]["enabled"] = False
     try:
         from maapilot.flows import report
         data["unseen_problems"] = [{k: p.get(k) for k in ("run_id", "started_at", "status", "lines", "report")}
@@ -651,7 +677,9 @@ def brief_lines(d: dict) -> list[str]:
         lines.append("还没跑过日常。")
     s = d["schedule"]
     if s.get("unavailable"):
-        lines.append(f"定时日常这台电脑上还设不了：{s['unavailable']}；日常要在对话里手动跑。")
+        lines.append(f"定时日常这台电脑上设不了：{s['unavailable']}；日常要在对话里手动跑。")
+    elif s["installed"] and s.get("enabled") is False:
+        lines.append(f"定时日常（{'、'.join(s['times'])}）的任务被停用了，到点不会跑；用户同意后 daily schedule 重新设。")
     else:
         lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
     n = d.get("news") or {}
