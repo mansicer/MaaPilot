@@ -215,7 +215,8 @@ def _stops_with_us(proc: subprocess.Popen):
                 pass
     atexit.register(stop)
     try:
-        yield
+        with procs.on_console_stop(stop):           # Windows：主线程卡在等 maa 上时信号处理跑不了，由控制台事件的线程先结束 maa
+            yield
     finally:
         stop()
         atexit.unregister(stop)
