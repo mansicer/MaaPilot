@@ -52,6 +52,7 @@ class _Parser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     p = _Parser(prog="maapilot", description="明日方舟账号助手的命令行工具（输出一律 JSON）")
+    p.add_argument("--version", action="store_true", help="MaaPilot 的版本（和当前提交）")
     sub = p.add_subparsers(dest="group", metavar="<命令>", parser_class=_Parser)
     for mod in GROUPS:
         importlib.import_module(mod).register(sub)
@@ -132,6 +133,9 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         args, extra = parser.parse_known_args(argv)
         if extra and not getattr(args, "accepts_extra", False):
             parser.error(f"unrecognized arguments: {' '.join(extra)}")
+        if getattr(args, "version", False) and not getattr(args, "func", None):
+            from maapilot import version
+            args.func, args.command = (lambda _a: version.info()), "version"
         if not getattr(args, "func", None):
             raise CliError("bad_arguments", "缺少子命令", hint="看 `maapilot --help`", exit=BAD_REQUEST)
         command = getattr(args, "command", None) or command

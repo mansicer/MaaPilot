@@ -25,6 +25,13 @@
 - 森空岛（`maapilot/crew/skland*.py`）用的是**非官方接口**（社区从森空岛 App / 网页版扒出来的，含数美设备指纹），随时可能变；
   坏了先对照社区的实现（docs/cli.md「skland」写了来源）。测试一律用假的 HTTP。用户的 token 在 `private/skland.json`，开发时也不要读、不要打印。
 
+## 发版
+- 版本号只写在 `maapilot/__init__.py` 的 `__version__`（`pyproject.toml` 从这里读），格式 `X.Y.Z`；`maapilot --version`、`doctor`、启动检查会显示它和当前提交。
+  从 0.0.1 起步（用户 10-19 定）：还在早期，改动多就升第三位，有大的新能力（例如 Windows 真机验证完）升第二位，1.0.0 等稳定了再说。
+- 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送提交和标签。
+  CI 在标签上先跑三个系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
+  把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。带 `-` 的标签（`v0.1.0-rc1`）标成预发布。
+
 ## 测试环境
 - 本机的模拟器、服务器、日常时间都看 `private/config.yaml`，不写进仓库。
 - 旧项目 `~/Developer/MAA` 只作参考，它的定时任务已停。

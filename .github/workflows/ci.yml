@@ -3,7 +3,11 @@ name: tests
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: write          # 推 v* 标签时建 Release 草稿
 
 jobs:
   test:
@@ -22,6 +26,10 @@ jobs:
         run: |
           uv venv --python 3.12
           uv pip install --python .venv -e ".[dev]"
+      - name: Tag matches maapilot.__version__
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: uv run --no-sync python -c "import maapilot,sys; t='${{ github.ref_name }}'; sys.exit(0 if t=='v'+maapilot.__version__ else f'标签 {t} 和 maapilot.__version__ {maapilot.__version__} 对不上')"
       - name: Import smoke
         run: uv run --no-sync python -c "import maapilot.crew.maa, maapilot.crew.maacore, maapilot.crew.maacore_runner, maapilot.flows.daily, maapilot.cli"
       - name: Startup check (no setup yet)
@@ -34,3 +42,14 @@ jobs:
           echo "$out" | uv run --no-sync python -c "import json,sys; d=json.load(sys.stdin); assert d['data']['next']=='setup', d"
       - name: Tests
         run: uv run --no-sync python -m pytest -q -rsx
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --draft --generate-notes --title "MaaPilot ${{ github.ref_name }}" ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}

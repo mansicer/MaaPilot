@@ -589,6 +589,8 @@ def test_doctor_brief(capsys, monkeypatch):
     monkeypatch.setattr(doctor, "PROBE", FakeProbe({"crontab -l": (0, f"40 4,16 * * * {paths.ROOT}/.venv/bin/maapilot daily run --trigger schedule # maapilot-v2 {paths.ROOT}\n*/15 * * * * /x/maapilot job tick\n".encode(), b"")}))
     code, env = run(capsys, "doctor", "--brief")
     assert code == 0 and env["data"]["next"] == "setup" and env["data"]["setup_done"] is False
+    from maapilot import __version__
+    assert env["data"]["version"]["version"] == __version__
     paths.SETUP.parent.mkdir(parents=True, exist_ok=True)
     paths.SETUP.write_text('{"done_at": "x", "version": 1}', encoding="utf-8")
     paths.GOALS.write_text("## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n\n## 别的\n- 状态：暂停\n", encoding="utf-8")

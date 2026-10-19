@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "maapilot"
-version = "0.1.0"
+dynamic = ["version"]
 description = "明日方舟账号助手：给 Claude Code 用的命令行工具"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -24,6 +24,9 @@ dev = ["pytest==9.1.1"]
 
 [project.scripts]
 maapilot = "maapilot.cli:main"
+
+[tool.hatch.version]
+path = "maapilot/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["maapilot"]

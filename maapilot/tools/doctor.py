@@ -643,6 +643,8 @@ def brief(probe: Probe | None = None) -> dict:
                                    for p in report.unseen_problems()]
     except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
         data["unseen_problems"] = []
+    from maapilot import version
+    data["version"] = version.info()
     data["memory"] = memory_brief() if setup_done else None
     data["session"] = session_brief()
     data["goals"] = goals_brief()
@@ -787,7 +789,9 @@ def cmd(args):
     fixed = fix() if args.fix else None
     checks = run_checks(offline=args.offline)
     ok_all = all(c["ok"] for c in checks if c.get("required", True))
-    data = {"ok_all": ok_all, "setup_done": paths.SETUP.exists(), "offline": bool(args.offline), "checks": checks}
+    from maapilot import version
+    data = {"ok_all": ok_all, "setup_done": paths.SETUP.exists(), "offline": bool(args.offline),
+            "version": version.info(), "checks": checks}
     if fixed is not None:
         data["fixed"] = fixed
     if not ok_all:

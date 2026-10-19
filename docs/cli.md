@@ -6,6 +6,8 @@
 
 - **调用形式**：agent 在仓库根目录用 `maapilot <命令> …`（不写 `./`、不用全路径、一次一条命令，权限规则按这个形式匹配）。
   `maapilot` 装在项目的虚拟环境 `.venv` 里（setup 时用 uv 建，见 skill `maapilot-setup`）；启动钩子 `bin/session-start` 把 `.venv/bin` 加进本次会话的 PATH，所以直接写 `maapilot`。定时任务用 `.venv/bin/maapilot` 的完整路径。
+- **版本**：`maapilot --version` → `data: {version, commit, text}`（`version` 是 `maapilot.__version__`；`commit` 是当前提交的前 7 位，直接读 `.git`，
+  不是 git 仓库时为 `null`；`text` 给人看，如 `"0.0.1（bff8a50）"`）。`doctor` 和 `doctor --brief` 的 `data.version` 同样是这个。
 - **输出**：stdout 只有一个 JSON 信封，进度与日志写 stderr：
 
   ```json
@@ -120,6 +122,7 @@
 {"ok_all": false,
  "setup_done": true,
  "offline": false,
+ "version": {"version": "0.0.1", "commit": "bff8a50", "text": "0.0.1（bff8a50）"},
  "checks": [{"name": "adb", "ok": true, "detail": "Android Debug Bridge 1.0.41", "fix": null, "path": "/opt/…/adb"},
             {"name": "emulator", "ok": false, "detail": "127.0.0.1:5555 连不上：…", "fix": "开模拟器…",
              "candidates": ["emulator-5554"]}],
@@ -135,6 +138,7 @@
  "last_daily": {"at": "2026-09-30T04:40:12+08:00", "ok": true, "report": "/…/private/reports/2026-09-30-0440.md"},
  "schedule": {"installed": true, "times": ["04:40", "16:40"]},
  "next": "setup",
+ "version": {"version": "0.0.1", "commit": "bff8a50", "text": "0.0.1（bff8a50）"},
  "unseen_problems": [{"run_id": "20261004-1640", "started_at": "…", "status": "stopped", "report": "…",
                       "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "…"]}],
  "goals": [{"title": "昨日海", "object": "活动 昨日海", "deadline": "2026-10-30T03:59+08:00", "days_left": 20.5}],
