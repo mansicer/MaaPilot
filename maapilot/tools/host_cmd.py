@@ -14,12 +14,12 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from maapilot import config, hosts, paths
+from maapilot import config, hosts, paths, policy
 from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, CliError
 from maapilot.oscompat import fs, procs
 
-RULES = Path(".codex") / "rules" / "maapilot.rules"
-# 规则文件该给的结论（install 时用 codex execpolicy check 核对）：(结论, 命令)。Windows 的写法（.venv\Scripts\maapilot.exe、
+RULES = policy.CODEX_RULES                 # 由 maapilot/policy.py 生成（maapilot dev rules）
+# 规则文件该给的结论（install 时用 codex execpolicy check 核对；tests/test_policy.py 核对它和 policy 一致）：(结论, 命令)。Windows 的写法（.venv\Scripts\maapilot.exe、
 # adb.exe、maa.exe）也核对：规则文件各系统同一份，规则按命令的第一个词认程序
 EXPECT = [("allow", ["maapilot", "doctor", "--brief"]),
           ("allow", [".venv/bin/maapilot", "doctor", "--brief"]),

@@ -101,7 +101,7 @@
   改了定时日常的时间、`agent` 或要执行的程序（`tools`、`emulator.adb`）就重跑 `maapilot daily schedule`，把输出里要执行的程序（`exec`）告诉用户。
   同一个账号只在一台电脑上设定时日常：两台会抢着登录，还会让对方的货币对账以为钱被偷偷花了。
 - `private/guard/`、`private/lock.json` 只由程序写，不要碰。
-- `.claude/settings.json`（Claude Code 的权限）、`.codex/rules/`（Codex 的命令规则）：两边要一致，不要改。
+- `.claude/settings.json`（Claude Code 的权限）、`.codex/rules/`（Codex 的命令规则）：由程序从同一份规则生成，两边一致，不要改。
 
 ## 无人值守（定时日常叫起你时）
 

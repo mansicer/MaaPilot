@@ -7,6 +7,9 @@
 - 大小事情都让用户的 agent 知道：程序遇到情况（出错、维护、到期、跳过）不自己悄悄处理掉，要叫起或告诉 agent，说明发生了什么，由它判断、告诉用户。
 - 代码：`maapilot/tools/`（工具命令）、`maapilot/flows/`（目标、日常、定时）、`maapilot/crew/`（设备与 MAA，旧项目搬来的）、`maapilot/knowledge/`（游戏数据）。
 - 测试：`.venv/bin/python -m pytest -q`，改完要全过。
+- **权限规则只改 `maapilot/policy.py`**，再跑 `maapilot dev rules` 生成 `.claude/settings.json` 的 `permissions`、`.codex/rules/maapilot.rules` 和 docs/cli.md 里抄的设置；
+  这几处不要手改（`maapilot dev rules --check`、`tests/test_policy.py` 会发现）。加了新的子命令要在 policy 里给结论（`test_every_subcommand_has_rule`）。
+  Claude Code 的自动模式可能拦下改 `.claude/settings.json`（算改自己的权限）：那时请用户自己跑 `maapilot dev rules`。
 - 查用户的 agent 哪里出错、用错命令：`maapilot dev review [--since 3d] [--exclude <会话>]`（读命令记录和 Claude Code 会话记录，见 docs/cli.md「dev」），不用手动翻会话记录。
 - **规则写死的命令必须在模拟器上测过才算做完**（用户 2026-10-13 定）：快捷命令、导航、识图 / 识字、点击坐标、页面判断、读数解析这类固定规则，
   单元测试和截图回归之外，还要在真模拟器上实际跑通一次（按下面「碰模拟器前」的规矩），把实测结果写进提交说明或汇报。没实测的要明说"还没上模拟器"，不能算完成。
