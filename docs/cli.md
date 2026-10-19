@@ -66,6 +66,7 @@
 | `goals list / add / update / remove / move / expire` | 否 | 放行 | B |
 | `op upgrade / mastery / progress`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
+| `daily done` | 否（定时日常叫起的 agent 交代结果） | 放行 | B |
 | `daily schedule / unschedule` | 否（改 crontab / Windows 任务计划程序） | 放行 | B |
 | `host status` / `host install <claude\|codex>` | 否（`install codex` 改 Codex 的用户设置） | 放行 | A |
 | `report show / latest / list / write` | 否 | 放行 | B |
@@ -106,7 +107,7 @@
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
-| `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。找法同定时日常：写了 `tools.<agent>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`maapilot.hosts` 的 `CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`（Claude Code 原生安装的 `%USERPROFILE%\.local\bin\claude.exe`、Codex 的 npm 包里自带的 `codex.exe`）。`warnings`（Windows，不算没通过）：还是 `.cmd` / `.bat` / `.ps1` 包装（`.ps1` 起不了，算没通过）、在应用商店程序的隔离目录（`…\Packages\…\LocalCache\`）里（定时任务看不见）。`sandbox`（只在 Windows、`agent` 是 codex 时）：`{supported, detail, version}`，看 `codex exec --help` 认不认 `workspace-write`、`codex sandbox --help` 有没有 Windows（不真的起沙箱、不调模型）；`supported: false` 时 `required: true`（定时日常不会改用 `danger-full-access` 顶上），`null`（帮助跑不出来）只放进 `warnings`。`agent` 写错时项名是 `agent` | 在 `tools.<agent>` 写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex`；没有沙箱：升级 Codex，还不行问用户要不要在 WSL 里用或改用 claude |
+| `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。找法同定时日常：写了 `tools.<agent>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`maapilot.hosts` 的 `CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`（Claude Code 原生安装的 `%USERPROFILE%\.local\bin\claude.exe`、Codex 的 npm 包里自带的 `codex.exe`）。`warnings`（Windows，不算没通过）：还是 `.cmd` / `.bat` / `.ps1` 包装（`.ps1` 起不了，算没通过）、在应用商店程序的隔离目录（`…\Packages\…\LocalCache\`）里（定时任务看不见）。`sandbox`（只在 Windows、`agent` 是 codex 时）：`{supported, detail, version}`，看 `codex exec --help` 认不认 `workspace-write`、`codex sandbox --help` 有没有 Windows（不真的起沙箱、不调模型）；`supported: false` 时 `required: true`（定时日常不会改用 `danger-full-access` 顶上），`null`（帮助跑不出来）只放进 `warnings`。`agent` 写错时项名是 `agent`。`agent` 写了 `command`（自定义的 harness）时项名是它的 `name`：查 `command` 的第一项找得到（同下面「无头 agent」的找法），带 `custom: true`、`command`、`prompt`、`path`，不查信任和沙箱（名字是 codex 时照样要 Codex 信任这个文件夹）；`.ps1` 算没通过，Windows 上 `.cmd` / `.bat` 又写了 `prompt: arg` 时 `warnings` 里提醒提示会改从 stdin 给 | 在 `tools.<agent>`（自定义的：`agent.command` 第一项）写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex`；没有沙箱：升级 Codex，还不行问用户要不要在 WSL 里用或改用 claude |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
@@ -733,7 +734,7 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
 3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）；
    读仓库没成（换日后首页常有弹窗）就再跑一次 `maa startup` 回首页、再读一次，还不成才在汇报里告警、对账以上一次的记录为准。
 4. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
-   - `--trigger schedule`：当场启动无头 agent（`claude -p` 或 `codex exec`，见下面「无头 agent」；加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
+   - `--trigger schedule`：当场启动无头 agent（`claude -p`、`codex exec` 或 `agent.command`，见下面「无头 agent」；加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
      再 `guard check`，然后接着跑下一项；
    - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
      `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
@@ -794,12 +795,20 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
   要问的（只有 `guard allow`）在 exec 里一律被拒（审批固定是"从不"）。规则只有 Codex 信任这个文件夹时才加载（`host install codex`；没信任时 `daily schedule` 拒绝，见下）。
   codex 的每条命令自成进程组：超时时先找出它的子孙进程组一起结束，再结束 codex。
   记录的判读：这一轮报了 `turn.failed`、没有一轮做完（没有 `turn.completed`）、或者没留下最后的话 → 算出错（`is_error`）；顶层的 `error` 事件（断线重连）不算。
-- 提示里长命令的说法按宿主（`prompts.long_command_rule`）：claude——前台跑、Bash 超时设 600000 毫秒、不放后台；codex——前台跑、等它结束（后台命令结束叫不醒它）。
+- 自定义（`agent` 写了 `command`，例如 `{name: dsh, command: [dsh, --profile, headless]}`）：`<command 第一项> <其余参数…>`，`prompt: stdin`（默认）时提示写进 stdin，`prompt: arg` 时放在最后一个参数（Windows 上程序是 `.cmd` / `.bat` 时照样改走 stdin：cmd.exe 会截断多行参数）。程序的找法：绝对路径或 PATH 上的名字（定时任务的 PATH 很短，写绝对路径；Windows 上找到 `.cmd` 包装、同目录有同名 `.exe` 时用 `.exe`）。工作目录、环境（锁的 token、`MAAPILOT_DAILY_RUN`）、时限、超时结束整棵进程树、结束后的收拾都同内置的；stdout 存进同一个记录文件，stderr 进 schedule.log。它的权限、沙箱 MaaPilot 管不到：要它自己的设置只放行 maapilot、不直接跑 adb / maa（AGENTS.md 硬规则照样写在提示和 skill 里）。没实测过。
+- 提示里长命令的说法按宿主（`prompts.long_command_rule`）：claude——前台跑、Bash 超时设 600000 毫秒、不放后台；codex——前台跑、等它结束（后台命令结束叫不醒它）；别的——前台跑、等它结束、不放后台、命令能设超时就给到 10 分钟以上。
 
 工作目录是仓库根目录（运行时由安装位置推出），
 环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
 agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警；它跑的时候（每 3 秒记一次它的子孙进程）起的 maapilot 命令、`maacore_runner` 还在的也结束掉（TERM，10 秒不走再 KILL；pid 和命令行都对得上才算，不碰日常自己和它的祖先）。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
-（程序据此判断 `recovered`）；每个提示都要求全程用中文、**不要** `report write --append`（最后的回复就是总结，程序放进汇报）。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，最后的 `result`（codex：`-o` 写的最后一句话）作为总结进汇报，`agent.host` 是哪个宿主。
+（程序据此判断 `recovered`）；每个提示都要求全程用中文、结束前用 `daily done --summary …` 交代结果（最后的回复也写同样的总结）、**不要** `report write --append`。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，`agent.host` 是哪个宿主（自定义的是 `name`）。
+
+**agent 的结果**（`agent` 里的 `summary`、`reported`、`ok`、`recovered`）：
+- 总结：agent 用 `daily done` 交代过（`reported: true`）就用它（最后一次为准）；没交代时从输出里读（`reported: false`）：claude——最后的 `result`；codex——`-o` 写的最后一句话；自定义的——stdout 去掉 JSON 事件行（`{…}` 的整行）后的最后约 2000 字（名字是 claude / codex 又写了 `command` 的，先按那个宿主的格式读，读不到再取 stdout）。都没有 → `summary: null`、算出错（汇报里写"没有留下总结"）。
+- `ok`：退出码 0、没超时、不算出错。交代过就不算出错；没交代时：claude 看 `result` 的 `is_error`，codex 见上面的判读，自定义的有 stdout 就不算出错。
+- `recovered`：总结里最后一行 `结果：…`（`完成` / `做完` / `处理好了` 算好了）；超时一律 `false`。
+
+`daily done [--summary <文字> | --summary-file <文件>] [--result 完成|没做成]`（不碰模拟器）：定时日常叫起的 agent 结束前交代结果。`--summary` 和 `--summary-file`（UTF-8）只写一个；`--result` 等于总结最后一行写 `结果：…`（原来写了就换掉）。只在日常把模拟器交给了它时有效（环境里有 `MAAPILOT_DAILY_RUN`、`lock status` 的 `inherited` 为 true、那次日常还在跑），否则退出码 2（`not_in_daily` / `not_inherited`；agent 结束后日常换了锁的 token，它留下的命令再交也不算）。记在 `private/state/agent-done.json`（`{run_id, at, summary}`）：日常起每个 agent 前删掉、它结束后读走；可以交好几次，最后一次为准。超过 20000 字截掉中间（留开头和最后一行）。`{run_id, recorded, chars, truncated, recovered}`。
 
 **推进用户的会话**（`daily.session_message`、`maapilot.hosts.push`）：Codex 的后台命令结束叫不醒模型，所以日常结束时把一条通知推进用户的 Codex 会话。
 - 什么时候推：定时运行一结束就推（跑完、出错、没跑完、开头就被拦下）；会话里手动跑的 `daily run` 只在 Codex 里（环境带 `CODEX_THREAD_ID`）推，
@@ -821,7 +830,7 @@ agent 结束（或超时被杀）后日常换一次锁的 token：它留下还�
 
 `daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`：按 `--times` 或 `config.yaml` 的 `schedule` 设定时日常。
 macOS / Linux 写 crontab，每个时间点一行；Windows 在任务计划程序里建一个任务（每个时间点一个每天的触发器）。
-输出带 `exec`：定时日常要执行的程序（`{maa, <agent>（claude 或 codex）, adb}`，`tools.maa`、`tools.<agent>`、`emulator.adb` 解析成的完整路径），agent 在对话里告诉用户
+输出带 `exec`：定时日常要执行的程序（`{maa, <agent>（claude、codex 或自定义的 name）, adb}`，`tools.maa`、`tools.<agent>`（自定义的：`agent.command` 第一项）、`emulator.adb` 解析成的完整路径），agent 在对话里告诉用户
 （定时日常会在用户不在时运行它们）。用户在对话里同意改定时就跑，程序不另外确认、不记录。
 `agent` 是 `codex` 而 Codex 没信任这个文件夹（不带 `--dry-run` 时）→ 退出码 5 `codex_untrusted`（项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa），
 先 `maapilot host install codex`。
@@ -983,7 +992,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 用户可以在 Claude Code 或 Codex 里用 MaaPilot；定时日常叫哪个由 `config.yaml` 的 `agent` 定（`maapilot/hosts.py`）。
 
-`host status`（只读）：`{"agent": "codex", "session": {host, thread, at, ts} | null, "sessions": {"claude": {thread, at, ts}, "codex": {...}}, "hosts": {"claude": {path, trusted}, "codex": {path, trusted}}}`。
+`host status`（只读）：`{"agent": "codex", "session": {host, thread, at, ts} | null, "sessions": {"claude": {thread, at, ts}, "codex": {...}}, "hosts": {"claude": {path, trusted}, "codex": {path, trusted}}}`；`agent` 写了 `command` 时另有 `agent_command: {command, prompt, path}`（`path` 是找到的程序，找不到为 `null`），`agent` 写错时是 `agent_error`。
 `sessions` 是每个宿主记下的最近一个用户会话（启动检查记的，见「doctor」的 `session`；没记过的不列），`session` 是其中最近的那个；`agent` 写错时为 `null`，另给 `agent_error`。
 
 `host install <claude|codex> [--dry-run]`（权限放行：改的是用户的 Codex 设置，agent 先在对话里问过用户）：
@@ -1060,8 +1069,8 @@ private/
 | `emulator.address` | adb 地址（setup 找出来填） | 无（必填） |
 | `emulator.adb` | adb 程序 | `adb` |
 | `server` | 客户端（MAA 的 client_type）：`Official` / `Bilibili` / `YoStarEN` / `YoStarJP` / `YoStarKR` / `txwy` | `Official` |
-| `agent` | 定时日常叫起的 agent：`claude` 或 `codex`（`maapilot/hosts.py`）；别的值 → `invalid_config` | `claude` |
-| `tools.maa` / `tools.claude` / `tools.codex` | 定时任务里用的 maa、agent 程序（setup 写绝对路径；agent 只用 `agent` 选的那个） | `maa` / `claude` / `codex` |
+| `agent` | 定时日常叫起的 agent：`claude` 或 `codex`（`maapilot/hosts.py`）；或者写成映射接别的 harness：`{name: <短名字>, command: [程序, 参数…], prompt: stdin \| arg}`（`name` 必填，小写字母开头、字母数字 `-` `_`，最多 32 个字；`command` 必填，非空的字符串列表，第一项是程序（绝对路径或 PATH 上的名字）；`prompt` 默认 `stdin`）。映射只写 `name: claude` / `codex`、不写 `command` 等于内置的；写了 `command` 就照它起，读输出时先按那个宿主的格式。别的值、缺字段、多出不认识的字段 → `invalid_config`（退出码 2）。见「daily」的「无头 agent」 | `claude` |
+| `tools.maa` / `tools.claude` / `tools.codex` | 定时任务里用的 maa、agent 程序（setup 写绝对路径；agent 只用 `agent` 选的那个；自定义的 agent 用 `agent.command`，不看这里） | `maa` / `claude` / `codex` |
 | `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表） | `["04:40", "16:40"]` |
 | `schedule_options.run_if_missed` | 到点时电脑关着或睡着，开机 / 醒来后补跑这一次（只有 Windows 任务计划程序做得到；cron 不补跑）；不是 true / false → `invalid_config` | `true` |
 | `schedule_options.wake_computer` | 到点时把睡着的电脑叫醒来跑（只有 Windows；电源设置里要允许唤醒定时器）；不是 true / false → `invalid_config` | `false` |
@@ -1209,6 +1218,7 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maapilot daily run:*)",
       "Bash(maapilot daily status:*)",
       "Bash(maapilot daily watch:*)",
+      "Bash(maapilot daily done:*)",
       "Bash(maapilot guard snapshot:*)",
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",

@@ -1,6 +1,8 @@
 """agent 宿主（Claude Code、Codex）：定时日常怎么叫起无头 agent、怎么读它的记录，以及怎么把消息推进用户开着的会话。
 
 - 用哪个：config.yaml 的 `agent`（claude / codex，默认 claude），程序路径在 `tools.<宿主>`。
+  也可以写成映射 `{name, command: [程序, 参数…], prompt: stdin | arg}` 接别的 harness（见 spec）：照 command 起，
+  提示从 stdin 给（默认）或放在最后一个参数；它的输出只当文字看（没有 `maapilot daily done` 时取 stdout 的最后一段当总结）。
 - 无头 agent：
   - claude：`claude -p … --output-format stream-json`，显式带上项目的权限设置，要确认的一律自动拒绝；
   - codex：`codex exec --sandbox workspace-write --json`，项目的 `.codex/rules/` 放行 maapilot、禁止直接碰 adb / maa，
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,16 +28,57 @@ from maapilot.oscompat import exe, procs
 
 HOSTS = ("claude", "codex")
 DEFAULT = "claude"
+PROMPT_MODES = ("stdin", "arg")
+_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+SPEC_KEYS = ("name", "command", "prompt")
+STDOUT_TAIL = 2000                # 自定义 harness 没交代结果时，取 stdout 最后这么多字当总结
 QUEUE_TIMEOUT_S = 30
 # 无头 codex 用不上、又可能越过 maapilot 去动屏幕或网页的能力
 CODEX_DISABLE = ("computer_use", "browser_use", "browser_use_external")
 
 
+def _bad(msg: str) -> CliError:
+    return CliError("invalid_config", msg, exit=BAD_REQUEST,
+                    hint="agent 写 claude / codex，或者写成 {name, command, prompt} 的映射（见 docs/cli.md「private/config.yaml」）")
+
+
+def spec(cfg: dict) -> dict:
+    """config.yaml 的 agent → {name, command, prompt}。command 为 None 是内置的 claude / codex（命令行见 command()）；
+    否则是 argv 列表（照它起，提示按 prompt 给：stdin 默认，arg 放在最后一个参数）。
+    映射写了 claude / codex 又写了 command：照 command 起，读输出时先按那个宿主的格式读，读不到再取 stdout 的最后一段。
+    写错 → invalid_config（退出码 2）。"""
+    raw = cfg.get("agent")
+    if raw is None or raw == "":
+        raw = DEFAULT
+    if isinstance(raw, str):
+        h = raw.strip().lower()
+        if h not in HOSTS:
+            raise _bad(f"config.yaml 的 agent 写的是 {h}，只认 {' / '.join(HOSTS)}；别的 agent 要写成带 command 的映射")
+        return {"name": h, "command": None, "prompt": "stdin"}
+    if not isinstance(raw, dict):
+        raise _bad(f"config.yaml 的 agent 要写 claude / codex 或一个映射，现在是 {raw!r}")
+    extra = [str(k) for k in raw if k not in SPEC_KEYS]
+    if extra:
+        raise _bad(f"config.yaml 的 agent 里有不认识的字段：{'、'.join(extra)}（只认 {' / '.join(SPEC_KEYS)}）")
+    h = raw.get("name")
+    if not isinstance(h, str) or not _NAME.match(h.strip().lower()):
+        raise _bad(f"config.yaml 的 agent.name 要写一个短名字（小写字母开头，字母、数字、- 或 _，最多 32 个字），现在是 {h!r}")
+    h = h.strip().lower()
+    prompt = raw.get("prompt") if raw.get("prompt") is not None else "stdin"
+    if prompt not in PROMPT_MODES:
+        raise _bad(f"config.yaml 的 agent.prompt 只认 stdin 或 arg，现在是 {prompt!r}")
+    cmd = raw.get("command")
+    if cmd is None:
+        if h in HOSTS:
+            return {"name": h, "command": None, "prompt": "stdin"}
+        raise _bad(f"config.yaml 的 agent 是 {h}，要写 command（程序和参数的列表，例如 [{h}, --profile, headless]）")
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(a, str) and a for a in cmd):
+        raise _bad(f"config.yaml 的 agent.command 要写成非空的字符串列表（第一项是程序），现在是 {cmd!r}")
+    return {"name": h, "command": list(cmd), "prompt": prompt}
+
+
 def name(cfg: dict) -> str:
-    h = str(cfg.get("agent") or DEFAULT).strip().lower()
-    if h not in HOSTS:
-        raise CliError("invalid_config", f"config.yaml 的 agent 写的是 {h}，只认 {' / '.join(HOSTS)}", exit=BAD_REQUEST)
-    return h
+    return spec(cfg)["name"]
 
 
 # 定时任务里 PATH 很短（agent 是 claude 时可能没有 codex 所在的目录）：再到这些常见位置找。%VAR% 没有的位置跳过，
@@ -68,6 +112,23 @@ def binary(cfg: dict, host: str | None = None) -> str:
     return resolve(cfg, host) or str((cfg.get("tools") or {}).get(host) or host)
 
 
+def agent_program(cfg: dict, *, which=shutil.which, environ=None) -> tuple[str, str | None]:
+    """定时日常要起的 agent 程序：(写的样子, 绝对路径或 None)。内置的同 resolve；自定义的是 command 的第一项
+    （绝对路径或 PATH 上的程序名；Windows 上找到 .cmd 包装、同目录有同名 .exe 时用 .exe，见 oscompat.exe）。"""
+    sp = spec(cfg)
+    if sp["command"] is None:
+        h = sp["name"]
+        return str((cfg.get("tools") or {}).get(h) or h), resolve(cfg, h, which=which, environ=environ)
+    prog = sp["command"][0]
+    return prog, exe.resolve(Path(prog).stem, [prog], which=which, environ=environ)
+
+
+def agent_binary(cfg: dict) -> str:
+    """要执行的 agent 程序（找得到给绝对路径，找不到给写的样子：起的时候报 OSError，记进汇报）。"""
+    written, found = agent_program(cfg)
+    return found or written
+
+
 def codex_path(cfg: dict) -> str | None:
     """推消息用的 codex 的绝对路径：tools.codex 找不到时也往下找（PATH、常见安装位置），推不到只是少一条通知。
     tools.codex 在的话和无头 agent 用的是同一个。找不到 → None。"""
@@ -85,8 +146,17 @@ def prompt_on_stdin(binary_: str) -> bool:
     return procs.is_batch(binary_)
 
 
-def command(host: str, binary_: str, prompt: str, transcript: Path, *, stdin: bool = False) -> list[str]:
-    """无头 agent 的命令行。stdin=True：提示不放进参数（claude -p 不带提示、codex exec 写 -，都从 stdin 读）。"""
+def custom_on_stdin(sp: dict, binary_: str) -> bool:
+    """自定义的 agent 按 prompt（默认 stdin）；写了 arg 但程序是 .cmd / .bat 时也改走 stdin（理由同上，doctor 提醒）。"""
+    return sp.get("prompt") != "arg" or procs.is_batch(binary_)
+
+
+def command(host: str, binary_: str, prompt: str, transcript: Path, *, stdin: bool = False,
+            sp: dict | None = None) -> list[str]:
+    """无头 agent 的命令行。stdin=True：提示不放进参数（claude -p 不带提示、codex exec 写 -，都从 stdin 读）。
+    sp 带 command（自定义的 agent）：[程序, command 其余的参数…]，不从 stdin 给时提示放在最后。"""
+    if sp and sp.get("command"):
+        return [binary_, *sp["command"][1:], *([] if stdin else [prompt])]
     if host == "codex":
         # --skip-git-repo-check：项目不是 git 仓库（下载的压缩包）也能跑；--ephemeral：无头会话不留在用户的会话列表里
         argv = [binary_, "exec", "-C", str(paths.ROOT), "--sandbox", "workspace-write", "--json",
@@ -146,6 +216,40 @@ def parse(host: str, transcript: Path) -> dict:
         return {"summary": None, "is_error": True}
     return {"summary": (res.get("result") or "").strip() or None, "is_error": bool(res.get("is_error")),
             "cost_usd": res.get("total_cost_usd"), "turns": res.get("num_turns")}
+
+
+def stdout_tail(transcript: Path, limit: int = STDOUT_TAIL) -> str | None:
+    """agent 的 stdout 去掉 JSON 事件行（--json 之类的输出）后的最后一段（最多 limit 个字，从整行开始）；没有 → None。"""
+    try:
+        text = transcript.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    lines = []
+    for ln in text.splitlines():
+        t = ln.strip()
+        if t.startswith("{") and t.endswith("}"):
+            try:
+                if isinstance(json.loads(t), dict):
+                    continue
+            except ValueError:
+                pass
+        lines.append(ln.rstrip())
+    text = "\n".join(lines).strip()
+    if len(text) > limit:
+        text = text[-limit:]
+        text = text.split("\n", 1)[1] if "\n" in text else text
+    return text.strip() or None
+
+
+def read_output(sp: dict, transcript: Path) -> dict:
+    """agent 结束后从它的输出读总结（没用 maapilot daily done 交代时）：内置的 claude / codex 按 parse；
+    自定义的 command 取 stdout 的最后一段（名字是 claude / codex 的先按 parse 读，读不到再取）。没有 → is_error。"""
+    if sp["name"] in HOSTS:
+        info = parse(sp["name"], transcript)
+        if not sp.get("command") or info.get("summary"):
+            return info
+    tail = stdout_tail(transcript)
+    return {"summary": tail, "is_error": tail is None, "cost_usd": None, "turns": None}
 
 
 # --- 用户开着的会话 ------------------------------------------------------------------------------------------------

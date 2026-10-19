@@ -71,7 +71,8 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 5. 项目级权限（可选）：限制 Agent 直接操控模拟器（如通过 adb）
 6. 通知功能（可选）：需要用户介入时直接通知用户
 
-1–3 是在对话里使用的前提，4 是定时日常的前提。目前接好的是 Claude Code 和 Codex。
+1–3 是在对话里使用的前提，4 是定时日常的前提。目前接好的是 Claude Code 和 Codex；
+别的 agent 可以在 `config.yaml` 的 `agent` 里写它的无头命令（见 `templates/config.yaml` 的示例，还没实测过），它结束前用 `maapilot daily done` 交代结果。
 
 ## 亮点功能
 

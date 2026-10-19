@@ -204,16 +204,14 @@ def unschedule(dry_run: bool) -> dict:
 
 
 # --- 要执行的程序 ------------------------------------------------------------------------------------------------
-# 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa、tools.<agent>（claude / codex）、emulator.adb）。
+# 定时日常会在用户不在时执行 config.yaml 里写的程序（tools.maa、tools.<agent>（claude / codex）或 agent.command、emulator.adb）。
 # `daily schedule` 的输出带上它们的完整路径（`exec`），agent 在对话里告诉用户。
 
 def _exec_paths(cfg: dict, which=shutil.which) -> dict:
-    """{maa, <agent 宿主名>, adb}。agent 按无头运行时的找法（hosts.resolve）。"""
+    """{maa, <agent 名>, adb}。agent 按无头运行时的找法（hosts.agent_program：内置的 tools.<宿主>，自定义的 command 第一项）。"""
     from maapilot import hosts
-    tools = cfg.get("tools") or {}
-    host = hosts.name(cfg)
-    return {"maa": config.tool("maa", cfg), host: hosts.resolve(cfg, host, which=which) or str(tools.get(host) or host),
-            "adb": config.adb_path(cfg)}
+    written, found = hosts.agent_program(cfg, which=which)
+    return {"maa": config.tool("maa", cfg), hosts.name(cfg): found or written, "adb": config.adb_path(cfg)}
 
 
 def _resolved(ex: dict) -> dict:

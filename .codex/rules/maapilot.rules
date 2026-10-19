@@ -12,7 +12,7 @@ ADB = ["adb", "adb.exe"]
 # maapilot 后面的部分
 ALLOW = [
     [["doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report", "reset"]],
-    ["daily", ["run", "status", "watch", "schedule", "unschedule"]],
+    ["daily", ["run", "status", "watch", "done", "schedule", "unschedule"]],
     ["guard", ["snapshot", "check", "status"]],
     ["lock", ["status", "release"]],
     ["skland", "status"],
