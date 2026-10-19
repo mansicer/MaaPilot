@@ -6,7 +6,7 @@
 
 <div>
     <img alt="Python" src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white">
-    <img alt="platform" src="https://img.shields.io/badge/platform-macOS-blueviolet">
+    <img alt="platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blueviolet">
     <img alt="Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-D97757">
     <img alt="Codex" src="https://img.shields.io/badge/agent-Codex-412991">
     <img alt="MAA" src="https://img.shields.io/badge/powered%20by-MAA-ff69b4">
@@ -27,7 +27,7 @@
 
 ## 下载与安装
 
-需要：一台 Mac（Windows 正在适配：手动命令、设置和定时日常都可以试，还没在真机上验证完）、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一。
+需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一。
 
 ### 用 Claude Code
 
@@ -51,6 +51,14 @@ codex
 第一次打开时 Codex 问要不要信任这个文件夹，选信任。随便说一句（比如"开始"）就进入设置，步骤和上面一样。
 - 装运行环境要联网，Codex 会请你批准在沙箱外跑这几条命令，点同意就行；
 - 设置里助手会请你同意一次 `maapilot host install codex`（在 Codex 的设置里信任这个文件夹），定时日常要靠它。
+
+### 在 Windows 上
+
+步骤和上面一样，在 PowerShell 里 clone、打开 Claude Code 或 Codex，说一句"开始"。另外注意：
+
+- clone 时最好加上 `-c core.symlinks=true`（`git clone -c core.symlinks=true https://github.com/mansicer/MaaPilot.git`）；忘了也没关系，设置时会补上。
+- 项目文件夹、Python、MAA、adb 和 agent 都装在普通目录（例如 `C:\Users\<你>\` 下）：在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录，定时日常看不到。
+- 定时日常用 Windows 的"任务计划程序"：到点时电脑要开着、保持登录（锁屏可以）；到点时关机或睡着了，开机后会补跑一次。
 
 ### 支持哪些 Agent
 
