@@ -1,10 +1,9 @@
 """agent 宿主（maapilot.hosts、host 命令）：Codex 的无头 agent、往用户的 Codex 会话推消息、超时连子孙进程组一起杀、
-host install、两边的命令规则一致。不碰真的 ~/.codex（conftest 把 CODEX_HOME 指到临时目录），不跑真的 codex。"""
+host install。不碰真的 ~/.codex（conftest 把 CODEX_HOME 指到临时目录），不跑真的 codex。"""
 from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -259,7 +258,7 @@ def test_trust_key_spelled_differently(capsys, env, codex, monkeypatch):
     code, out = run(capsys, "host", "install", "codex")
     assert code == 0 and out["data"]["changed"] is False and "[projects" not in cfgfile.read_text(encoding="utf-8")[5:]
 
-# --- 两边的命令规则一致 ------------------------------------------------------------------------------------------------
+# --- 读 Codex 的规则文件（tests/test_hosts_windows.py 用；两边一致、是生成的见 tests/test_policy.py） -------------------
 
 def _codex_rules() -> list[tuple[list, str]]:
     """.codex/rules/maapilot.rules 是 Starlark；这里只用到和 Python 相同的写法，直接执行、收集 prefix_rule。"""
@@ -277,17 +276,3 @@ def _decide(rules, cmd: list[str]) -> str | None:
         if len(cmd) >= len(pat) and all((t in p) if isinstance(p, list) else t == p for p, t in zip(pat, cmd)):
             best = dec if best is None or order[dec] > order[best] else best
     return best
-
-
-def test_codex_rules_match_claude_settings():
-    perms = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
-    want = {"allow": "allow", "ask": "prompt", "deny": "forbidden"}
-    rules = _codex_rules()
-    for kind, dec in want.items():
-        for r in perms[kind]:
-            m = re.fullmatch(r"Bash\((.+?)(?::\*)?\)", r)
-            if not m:
-                continue
-            cmd = m.group(1).split()
-            got = _decide(rules, cmd)
-            assert got == dec, f"{r}：Claude Code 是 {kind}，Codex 规则给的是 {got}"

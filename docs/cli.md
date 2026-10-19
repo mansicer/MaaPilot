@@ -1029,7 +1029,10 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
  "transcripts": {"dir": "…", "sessions": [{"session", "label", "start", "end", "prompt", "result", "bash", "denied"?, "maapilot_failed"?, "tool_errors"?, "bash_nonstandard"?}], "excluded": [{"session", "why"}]}}
 ```
 
-不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
+`maapilot dev rules [--check] [--root <目录>]`：按 `maapilot/policy.py` 生成两个宿主的权限规则文件和本文件里抄的设置（见「Claude Code 权限设置」）。
+`data`：`{"files": [{"path", "changed"}], "written"}`；`--check` 只核对、不写，有不一样的退出码 1 `rules_out_of_date`（`data.files` 照样带上）。
+
+`dev` 下的命令都不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
 
 ---
 
@@ -1176,8 +1179,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 
 ## Codex 命令规则
 
-`.codex/rules/maapilot.rules`（入库，Starlark 的 `prefix_rule`）和上面 Claude Code 的权限一一对应：放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），
-拒绝 → `forbidden`（`tests/test_hosts.py` 检查两边一致）：`prompt` 只有 `guard allow`；`forbidden` 是直接用 `maa` 跑任务、`adb shell` / `adb -s`、`maapilot skland token`。
+`.codex/rules/maapilot.rules`（入库，Starlark 的 `prefix_rule`）和下面 Claude Code 的权限出自同一份规则 `maapilot/policy.py`，由 `maapilot dev rules` 生成（见「Claude Code 权限设置」；不要手改）：
+放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），拒绝 → `forbidden`：`prompt` 只有 `guard allow`；`forbidden` 是直接用 `maa` 跑任务、`adb shell` / `adb -s`、`maapilot skland token`。
 规则按命令的第一个词认程序：maapilot 的几种写法（`maapilot`、`.venv/bin/maapilot`、`maapilot.exe`、`.venv\Scripts\maapilot.exe`、`.venv/Scripts/maapilot.exe`）
 放行 / 询问 / 禁止都一样，`maa.exe`、`adb.exe` 和 `maa`、`adb` 一样禁止。macOS 上 Codex 还会把绝对路径的程序按程序名认（`execpolicy check --resolve-host-executables` 实测），
 Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的写法还没核实。没列的命令在沙箱里跑（只能写仓库、没有网络，连不上模拟器）。
@@ -1194,7 +1197,12 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
 
 ## Claude Code 权限设置
 
-`.claude/settings.json`（入库，下面是它的全文；`tests/test_docs_consistency.py` 检查 skill 里写的每条命令都有放行或询问的规则）。无头运行（`claude -p`）用同一份设置，"询问"的操作（只有 `guard allow`）自动被拒。
+`.claude/settings.json`（入库，下面是它的全文；`tests/test_docs_consistency.py` 检查 skill 里写的每条命令都有放行或询问的规则）。
+
+**权限规则只写一份**：`maapilot/policy.py`（每个 maapilot 子命令前缀的放行 / 询问 / 拒绝、别的程序 maa / adb / sleep、只有 Claude Code 有的文件规则 Read / Edit / WebFetch）。
+`maapilot dev rules`（开发用）按它生成三处：`.claude/settings.json` 的 `permissions`（别的部分如 `hooks` 原样保留）、整份 `.codex/rules/maapilot.rules`、
+本节下面抄的 settings.json 全文；`--check` 只核对，不一样就退出码 1 `rules_out_of_date`（`tests/test_policy.py` 也核对，并检查两边的结论一致）。这三处都不要手改。
+两边的差别：Claude Code 的放行 / 询问只列本名 `maapilot`、拒绝的列全部写法，Codex 每条都列全部写法；`sleep 300` 在 Claude Code 里精确匹配、在 Codex 里是前缀；文件规则只有 Claude Code 有。无头运行（`claude -p`）用同一份设置，"询问"的操作（只有 `guard allow`）自动被拒。
 
 ```json
 {
@@ -1205,41 +1213,38 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maapilot screen:*)",
       "Bash(maapilot input:*)",
       "Bash(maapilot maa:*)",
-      "Bash(maapilot maa why:*)",
       "Bash(maapilot state:*)",
-      "Bash(maapilot state skland:*)",
       "Bash(maapilot data:*)",
       "Bash(maapilot calc:*)",
       "Bash(maapilot goals:*)",
       "Bash(maapilot op:*)",
       "Bash(maapilot craft:*)",
       "Bash(maapilot report:*)",
-      "Bash(maapilot report seen:*)",
+      "Bash(maapilot reset:*)",
       "Bash(maapilot daily run:*)",
       "Bash(maapilot daily status:*)",
       "Bash(maapilot daily watch:*)",
       "Bash(maapilot daily done:*)",
+      "Bash(maapilot daily schedule:*)",
+      "Bash(maapilot daily unschedule:*)",
       "Bash(maapilot guard snapshot:*)",
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",
       "Bash(maapilot lock status:*)",
+      "Bash(maapilot lock release:*)",
       "Bash(maapilot skland status:*)",
+      "Bash(maapilot host status:*)",
+      "Bash(maapilot host install:*)",
+      "Bash(maapilot tools status:*)",
+      "Bash(maapilot tools install:*)",
       "Bash(maapilot news list:*)",
       "Bash(maapilot news show:*)",
       "Bash(maapilot news told:*)",
-      "Bash(maapilot host status:*)",
-      "Bash(maapilot tools status:*)",
-      "Bash(maapilot tools install:*)",
       "Bash(maapilot game version:*)",
       "Bash(maapilot game update:*)",
       "Bash(maapilot copilot find:*)",
       "Bash(maapilot copilot show:*)",
       "Bash(maapilot copilot strip:*)",
-      "Bash(maapilot daily schedule:*)",
-      "Bash(maapilot daily unschedule:*)",
-      "Bash(maapilot lock release:*)",
-      "Bash(maapilot host install:*)",
-      "Bash(maapilot reset:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/config.yaml)",
@@ -1255,6 +1260,11 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maapilot guard allow:*)"
     ],
     "deny": [
+      "Bash(maapilot skland token:*)",
+      "Bash(.venv/bin/maapilot skland token:*)",
+      "Bash(maapilot.exe skland token:*)",
+      "Bash(.venv\\Scripts\\maapilot.exe skland token:*)",
+      "Bash(.venv/Scripts/maapilot.exe skland token:*)",
       "Bash(maa run:*)",
       "Bash(maa fight:*)",
       "Bash(maa copilot:*)",
@@ -1263,8 +1273,6 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maa reclamation:*)",
       "Bash(maa startup:*)",
       "Bash(maa closedown:*)",
-      "Bash(adb shell:*)",
-      "Bash(adb -s:*)",
       "Bash(maa.exe run:*)",
       "Bash(maa.exe fight:*)",
       "Bash(maa.exe copilot:*)",
@@ -1273,15 +1281,12 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maa.exe reclamation:*)",
       "Bash(maa.exe startup:*)",
       "Bash(maa.exe closedown:*)",
+      "Bash(adb shell:*)",
+      "Bash(adb -s:*)",
       "Bash(adb.exe shell:*)",
       "Bash(adb.exe -s:*)",
-      "Bash(.venv/bin/maapilot skland token:*)",
-      "Bash(maapilot.exe skland token:*)",
-      "Bash(.venv\\Scripts\\maapilot.exe skland token:*)",
-      "Bash(.venv/Scripts/maapilot.exe skland token:*)",
       "Edit(private/guard/**)",
       "Edit(private/lock.json)",
-      "Bash(maapilot skland token:*)",
       "Read(private/skland.json)",
       "Edit(private/skland.json)"
     ]
@@ -1302,7 +1307,7 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
 }
 ```
 
-- `maa why` 只读，`maapilot maa:*` 已经放行，单列一条写明它不碰模拟器。`news …` 只联网、写自己的缓存；`game update` 要下载、覆盖安装游戏，
+- `maa why` 只读，在 `maapilot maa:*` 的放行里。`news …` 只联网、写自己的缓存；`game update` 要下载、覆盖安装游戏，
   但只装官网的包（地址只认官方域名），无头运行里日常要靠它更新，所以都放行。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
 - 只有 `guard allow`（记下花合成玉 / 源石的同意）是 **ask**：真实货币是程序唯一死守的一道（见「命令总览」），再弹一次宿主的确认（远程也能点）；
   无头运行里命令自己也拒绝，换了宿主也一样。

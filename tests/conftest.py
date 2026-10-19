@@ -32,5 +32,8 @@ def _tmp_private(tmp_path, monkeypatch):
     # 本机正好有人在用 maa（用户的 agent 在打作业）时，拿锁的测试不该跟着失败（要测的测试自己换掉）
     from maapilot.crew import lock
     monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
+    # 不用本机项目 .tools/ 里真装好的 maa-cli、adb（要测的测试自己换掉）
+    from maapilot import toolchain
+    monkeypatch.setattr(toolchain, "tools_dir", lambda: tmp_path / "no-tools")
     yield tmp_path / "private"
     paths.set_private(old)

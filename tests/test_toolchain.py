@@ -14,7 +14,7 @@ from tests.portable import WINDOWS
 
 
 @pytest.fixture
-def tools(tmp_path, monkeypatch):
+def tools(tmp_path, monkeypatch):           # conftest 已经把 .tools 指到不存在的目录；这里换成能装东西的
     monkeypatch.setattr(toolchain, "tools_dir", lambda: tmp_path / ".tools")
     return tmp_path / ".tools"
 

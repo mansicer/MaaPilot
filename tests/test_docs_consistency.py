@@ -1,4 +1,4 @@
-"""skills、CLAUDE.md 里写的命令都要是真能跑的命令，权限设置也要对得上。
+"""skills、CLAUDE.md 里写的命令都要是真能跑的命令，权限规则（maapilot/policy.py）也要对得上。
 
 从说明文字里抽出 `maapilot …`（以及反引号里以命令组开头的简写，如 `state depot`），把占位符换成样例值，
 交给 argparse 解析；再检查每条命令都有权限规则（放行或询问），要用户确认的几条在"询问"里。
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from maapilot import cli
+from maapilot import cli, policy
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")) + [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md"]
@@ -136,13 +136,9 @@ def _prefixes(kind: str) -> list[str]:
 
 
 def _rule(argv: list[str]) -> str | None:
-    """这条命令落在哪一类规则（deny > ask > allow，同 Claude Code）。"""
-    line = "maapilot " + " ".join(argv)
-    for kind in ("deny", "ask", "allow"):
-        for p in _prefixes(kind):
-            if line == p or line.startswith(p + " "):
-                return kind
-    return None
+    """这条命令落在哪一类规则（deny > ask > allow，同 Claude Code）。按 maapilot/policy.py 判；
+    入库的 settings.json / Codex 规则就是它生成的（tests/test_policy.py 核对），两边结论一样。"""
+    return policy.decide(["maapilot", *argv], "claude")
 
 
 def _all_subcommands() -> list[list[str]]:
