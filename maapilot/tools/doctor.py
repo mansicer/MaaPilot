@@ -305,9 +305,13 @@ def check_agent(ctx: Ctx) -> dict:
     from maapilot import config, hosts
     from maapilot.oscompat import exe
     try:
-        host = hosts.name(ctx.cfg or {})
+        sp = hosts.spec(ctx.cfg or {})
     except CliError as e:
-        return _item("agent", False, e.message, "把 config.yaml 的 agent 改成 claude 或 codex", required=False)
+        return _item("agent", False, e.message, "把 config.yaml 的 agent 改成 claude 或 codex（或者照 docs/cli.md 写自定义的映射）",
+                     required=False)
+    host = sp["name"]
+    if sp["command"]:
+        return check_custom_agent(ctx, sp)
     prog = config.tool(host, ctx.cfg)
     path = hosts.resolve(ctx.cfg or {}, host, which=ctx.probe.which)
     if path is None:
@@ -339,6 +343,36 @@ def check_agent(ctx: Ctx) -> dict:
                      "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示", required=False,
                      trusted=False, **extra)
     return _item(host, True, detail, required=False, trusted=trusted, **extra)
+
+
+def check_custom_agent(ctx: Ctx, sp: dict) -> dict:
+    """config.yaml 的 agent 写了 command（自定义的 harness，没实测过）：command 的第一项找得到、不是 PowerShell 脚本；
+    Windows 上提醒包装、隔离目录，prompt: arg 而程序是 .cmd / .bat 时提示改走 stdin。不检查它的权限规则（MaaPilot 管不到）。
+    名字是 codex 时照样要 Codex 信任这个文件夹（项目的命令规则才生效）。"""
+    from maapilot import hosts
+    from maapilot.oscompat import exe, procs
+    host = sp["name"]
+    written, path = hosts.agent_program(ctx.cfg or {}, which=ctx.probe.which)
+    extra = {"custom": True, "command": sp["command"], "prompt": sp["prompt"]}
+    if path is None:
+        return _item(host, False, f"找不到 {host} 的程序（{written}）", "在 config.yaml 的 agent.command 第一项写它的绝对路径",
+                     required=False, **extra)
+    warnings = []
+    if exe.is_shim(path):
+        warnings.append(f"这是 {Path(path).name}（包装脚本，不是程序本体）：能用的话最好写程序本体（.exe）的绝对路径")
+        if sp["prompt"] == "arg" and procs.is_batch(path):
+            warnings.append("它经 cmd.exe 转，多行的提示放在参数里会被截断：提示改从 stdin 给（它要能从 stdin 读）")
+    if exe.in_msix_cache(path):
+        warnings.append("它在应用商店程序的隔离目录（…\\Packages\\…\\LocalCache\\）里，定时任务看不见它：换个安装位置")
+    extra.update(path=path, **({"warnings": warnings} if warnings else {}))
+    detail = f"{path}（自定义的 agent，没实测过）" + "".join(f"；{w}" for w in warnings)
+    if exe.is_shim(path) and path.lower().endswith(".ps1"):
+        return _item(host, False, f"{path} 是 PowerShell 脚本，定时日常起不了它", "在 config.yaml 的 agent.command 第一项写程序本体的绝对路径",
+                     required=False, **extra)
+    if host == "codex" and codex_trusted(paths.ROOT) is False:
+        return _item(host, False, f"{detail}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
+                     "maapilot host install codex", required=True, trusted=False, **extra)
+    return _item(host, True, detail, required=False, **extra)
 
 
 def agent_path_warnings(host: str, path: str) -> list[str]:

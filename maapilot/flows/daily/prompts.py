@@ -5,17 +5,21 @@ import shlex
 
 from maapilot.flows import report as reportmod
 
-# 每个无头 agent 的提示都带上：语言、总结怎么交（最后的回复就是总结，程序放进汇报；自己再追加会重复）
+# 每个无头 agent 的提示都带上：语言、总结怎么交（daily done 交给程序放进汇报；自己再追加会重复）。
+# 最后的回复也写同一份：没交代成时程序从输出里读（claude / codex 按各自的格式，别的 harness 取 stdout 的最后一段）
 REPORT_RULES = ("用户偏好在 private/memory/MEMORY.md（目录）和同目录的文件里，做决定前先看。"
                 "全程用中文（包括中间的说明），总结写给用户看。"
-                "不要用 maapilot report write 往汇报里追加：你最后的回复就是总结，程序会把它放进这次的汇报。")
+                "结束前用 maapilot daily done --summary \"<总结>\" 交代结果（总结就是下面说的那几句，连同最后一行「结果：…」），"
+                "程序会把它放进这次的汇报；你最后的回复也写同样的总结。不要用 maapilot report write 往汇报里追加。")
 
 
 def long_command_rule(host: str = "claude") -> str:
     """长命令（maa 任务、刷图、更新游戏）怎么跑：各宿主的说法不同（config.yaml 的 agent，见 maapilot.hosts）。"""
     if host == "codex":
         return "长命令在前台跑，等它结束再继续（不要放后台：后台命令结束时叫不醒你）"
-    return "长命令在前台跑、Bash 超时设 600000 毫秒（10 分钟），不放后台"
+    if host == "claude":
+        return "长命令在前台跑、Bash 超时设 600000 毫秒（10 分钟），不放后台"
+    return "长命令在前台跑、等它结束再继续，不放后台（命令能设超时就给到 10 分钟以上）"
 
 
 def evidence_lines(ev: dict | None, task: str) -> list[str]:

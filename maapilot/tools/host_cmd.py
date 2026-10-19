@@ -92,7 +92,11 @@ def status() -> dict:
     from maapilot.tools import doctor
     out = {"agent": None, "session": hosts.session(), "sessions": hosts.sessions(), "hosts": {}}
     try:
-        out["agent"] = hosts.name(cfg)
+        sp = hosts.spec(cfg)
+        out["agent"] = sp["name"]
+        if sp["command"]:                                           # 自定义的 agent：照 command 起（没实测过的 harness）
+            written, found = hosts.agent_program(cfg, which=doctor.PROBE.which)
+            out["agent_command"] = {"command": sp["command"], "prompt": sp["prompt"], "path": found}
     except CliError as e:
         out["agent_error"] = e.message
     for h in hosts.HOSTS:
@@ -134,7 +138,11 @@ def install(host: str, dry_run: bool) -> dict:
     out["trusted"] = codex_trusted(paths.ROOT) if not dry_run else trusted
     out["rules"] = _rules_check(binary)
     nxt = []
-    if (cfg.get("agent") or hosts.DEFAULT) != "codex":
+    try:
+        agent = hosts.name(cfg)
+    except CliError:
+        agent = None
+    if agent != "codex":
         nxt.append("定时日常要改用 Codex：config.yaml 写 agent: codex、tools.codex: " + binary
                    + "，再 maapilot daily schedule（用户同意后）")
     out["next"] = nxt

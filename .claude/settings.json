@@ -19,6 +19,7 @@
       "Bash(maapilot daily run:*)",
       "Bash(maapilot daily status:*)",
       "Bash(maapilot daily watch:*)",
+      "Bash(maapilot daily done:*)",
       "Bash(maapilot guard snapshot:*)",
       "Bash(maapilot guard check:*)",
       "Bash(maapilot guard status:*)",

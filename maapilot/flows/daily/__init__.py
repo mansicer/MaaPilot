@@ -1,5 +1,7 @@
 """`maapilot daily run / status / schedule / unschedule`：日常与定时。契约见 docs/cli.md「daily」，设计见 docs/design.md 第 6 节。
 
+`daily done`（agent.report_done）：定时日常叫起的 agent 结束前交代结果，日常在它结束后读走、放进汇报。
+
 daily run 只做编排，每一步都调别的命令（子进程 `python -m maapilot.cli …`，继承本进程的模拟器锁）：
   开始前：限时目标到期、官方公告（旧了重拉；停机维护中 → MAA 项、对账都不跑，status maintenance；
   定时运行叫一个不碰模拟器的 agent 看看对目标的影响）、
@@ -36,7 +38,7 @@ from maapilot.flows.daily.base import (  # noqa: F401
     _set_step, _Stop, _take_marker, running)
 from maapilot.flows.daily.agent import (  # noqa: F401
     _OUTCOME, LEFTOVER_KILL_GRACE_S, LEFTOVER_WAIT_S, TIMEOUT_LEFTOVER_WAIT_S, _after_agent, _claude_bin,
-    _leftover_maa, _run_group, _stop_leftover_maa, agent_command, maapilot_call, parse_transcript, run_agent)
+    _leftover_maa, _run_group, _stop_leftover_maa, agent_command, maapilot_call, parse_transcript, report_done, run_agent)
 from maapilot.flows.daily.prompts import (  # noqa: F401
     REPORT_RULES, _titles, _ver, evidence_lines, expired_line, expired_prompt, goals_prompt, long_command_rule,
     maintenance_prompt, recovery_prompt, update_prompt)
@@ -89,6 +91,12 @@ def register(sub) -> None:
         from maapilot.flows import watch
         return watch.watch(a.timeout_min)
     p.set_defaults(func=_watch, command="daily watch")
+
+    p = gs.add_parser("done", help="定时日常叫起的 agent 结束前交代结果（总结进这次的汇报）")
+    p.add_argument("--summary", help="给用户看的几句中文总结")
+    p.add_argument("--summary-file", help="总结写在这个文件里（UTF-8）")
+    p.add_argument("--result", choices=["完成", "没做成"], help="这件事做成没有（等于总结最后一行「结果：…」）")
+    p.set_defaults(func=lambda a: report_done(a.summary, a.summary_file, a.result), command="daily done")
 
     p = gs.add_parser("schedule", help="设定时任务（crontab 或 Windows 任务计划程序，只动本项目的）")
     p.add_argument("--times", help="HH:MM[,HH:MM]；默认 config.yaml 的 schedule")
