@@ -43,7 +43,7 @@ description: 明日方舟打关卡 via MaaPilot —— 刷已三星的关（maa 
    作业的要求都满足、却没打成的，可以换一份作业再试。
 3. **进编队页**：把游戏停在这关的关卡页，**再点"开始行动"进编队页**（从关卡页、剿灭页直接启动时 MAA 会跳过编队）。
    主线：首页"终端"→"主题曲"→ 章节 → 地图上左右滑找关卡号，点开。活动关从终端的活动入口进。每一步 `screen shot` 看。
-4. **打**：`maapilot maa copilot maa://<作业编号> --formation`（`--formation` 让 MAA 按作业自动编队）。本地作业文件写路径。
+4. **打**：`maapilot maa copilot prts://<作业编号> --formation`（`--formation` 让 MAA 按作业自动编队）。本地作业文件写路径。
    其他参数：`--formation-index N` 用第几个编队；`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管练度要求；
    `--support 1|2|3` 借助战（1 只缺一人时借；2 缺一人时借、否则借 `--support-name <干员>`；3 缺一人时借、否则随便借）；`--raid raid` 打突袭。
 5. **核对**：打完马上 `screen shot` 看结算页：三星（三颗星）才算。`maa copilot` 的结果里没有星数，命令返回时结算页可能已经过去了：

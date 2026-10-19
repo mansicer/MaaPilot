@@ -2,6 +2,8 @@ private/
 # reset 留下的备份（里面有账号数据和森空岛凭据）
 private.bak-*/
 .venv/
+# maapilot tools install 装的 maa-cli、adb
+.tools/
 __pycache__/
 *.pyc
 *.egg-info

@@ -212,8 +212,8 @@ def _exec_paths(cfg: dict, which=shutil.which) -> dict:
     from maapilot import hosts
     tools = cfg.get("tools") or {}
     host = hosts.name(cfg)
-    return {"maa": str(tools.get("maa") or "maa"), host: hosts.resolve(cfg, host, which=which) or str(tools.get(host) or host),
-            "adb": str((cfg.get("emulator") or {}).get("adb") or "adb")}
+    return {"maa": config.tool("maa", cfg), host: hosts.resolve(cfg, host, which=which) or str(tools.get(host) or host),
+            "adb": config.adb_path(cfg)}
 
 
 def _resolved(ex: dict) -> dict:

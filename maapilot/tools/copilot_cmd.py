@@ -225,7 +225,7 @@ def annotate(plan: dict, box: dict | None, mtypes: dict | None = None) -> dict:
         all_owned = not missing
     doc = c.get("doc") or {}
     rated = not plan.get("not_enough_rating") and plan.get("rating_level") is not None
-    return {"id": plan.get("id"), "uri": f"maa://{plan.get('id')}", "title": doc.get("title"),
+    return {"id": plan.get("id"), "uri": f"prts://{plan.get('id')}", "title": doc.get("title"),
             "stage": c.get("stage_name"), "uploader": plan.get("uploader"), "uploaded_at": plan.get("upload_time"),
             "views": plan.get("views"), "hot": round(plan["hot_score"]) if plan.get("hot_score") else None,
             "like": plan.get("like"), "dislike": plan.get("dislike"),
@@ -270,10 +270,11 @@ def cmd_find(args) -> dict:
 
 
 def _plan_id(text: str) -> int:
-    s = str(text).strip().removeprefix("maa://")
-    if not s.isdigit():
-        raise CliError("bad_arguments", f"作业编号应是数字（或 maa://数字）：{text}", exit=BAD_REQUEST)
-    return int(s)
+    from maapilot.tools.maa_cmd import plan_id_of
+    pid = plan_id_of(text)
+    if pid is None:
+        raise CliError("bad_arguments", f"作业编号应是数字（或 prts://数字）：{text}", exit=BAD_REQUEST)
+    return pid
 
 
 def cmd_show(args) -> dict:
@@ -317,8 +318,8 @@ def register(sub) -> None:
     p.add_argument("--limit", type=int, default=20, help="最多看几份作业（默认 20）")
     p.set_defaults(func=cmd_find, command="copilot find")
     p = gs.add_parser("show", help="一份作业的说明、干员、可选位、动作数（同样标注练度）")
-    p.add_argument("id", metavar="作业编号", help="作业编号（或 maa://编号）")
+    p.add_argument("id", metavar="作业编号", help="作业编号（或 prts://编号）")
     p.set_defaults(func=cmd_show, command="copilot show")
     p = gs.add_parser("strip", help="去掉作业的练度要求，存成本地文件（--ignore-requirements 还不行时用）")
-    p.add_argument("id", metavar="作业编号", help="作业编号（或 maa://编号）")
+    p.add_argument("id", metavar="作业编号", help="作业编号（或 prts://编号）")
     p.set_defaults(func=cmd_strip, command="copilot strip")

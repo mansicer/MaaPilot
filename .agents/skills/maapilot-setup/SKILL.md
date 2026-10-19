@@ -24,7 +24,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 启动检查里是 `no_env`（项目里还没有 `.venv/bin/maapilot`）：`maapilot` 命令都用不了，先装好。命令都在仓库根目录跑。
 1. 跟用户说一次：要在这个文件夹里建一个 Python 运行环境，默认用 uv 装（uv 会自己准备 Python 3.12，一两分钟）。问用户同不同意。
 2. **同意**：
-   - 没有 uv（`uv --version` 跑不了）：有 Homebrew 就 `brew install uv`，没有就 `curl -LsSf https://astral.sh/uv/install.sh | sh`（装在 `~/.local/bin`，之后用 `~/.local/bin/uv`）。
+   - 没有 uv（`uv --version` 跑不了）：`curl -LsSf https://astral.sh/uv/install.sh | sh`（官方安装脚本，装在 `~/.local/bin`，之后用 `~/.local/bin/uv`）。
    - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
 3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
    再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
@@ -65,10 +65,10 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 | 项 | 常见处理 |
 |---|---|
-| `adb` | 没有 adb：先征得用户同意，`brew install --cask android-platform-tools`（没有 Homebrew 就请用户按 https://brew.sh 装）。Windows：优先用模拟器自带的 adb（MuMu 12 在安装目录的 `shell\adb.exe`，雷电在安装目录的 `adb.exe`，问用户装在哪），绝对路径写进 `emulator.adb`（单引号，见模板）；没有再 `winget install Google.PlatformTools`。maa-cli 会跟着用这个 adb，别让 PATH 上另一个版本的 adb 同时连 |
+| `adb` | 没有 adb：先征得用户同意，`maapilot tools install adb`（从 Google 官方下载 platform-tools 装进项目的 `.tools/`，`emulator.adb` 保持写 `adb` 就会用它）。Windows：优先用模拟器自带的 adb（MuMu 12 在安装目录的 `shell\adb.exe`，雷电在安装目录的 `adb.exe`，问用户装在哪），绝对路径写进 `emulator.adb`（单引号，见模板）；没有再 `maapilot tools install adb`。maa-cli 会跟着用这个 adb，别让 PATH 上另一个版本的 adb 同时连 |
 | `emulator` | 见上一步；模拟器没开、ADB 没打开、地址填错 |
 | `screen` | 分辨率不对：请用户在模拟器设置里改成 1280×720（16:9），改完多半要重启模拟器 |
-| `maa_cli` | 征得同意后 `brew install MaaAssistantArknights/tap/maa-cli`，再 `maa install`（下载 MaaCore 和资源，几分钟）。你的 agent 可能要用户批准这两条命令。Windows：从 https://github.com/MaaAssistantArknights/maa-cli/releases 下最新的 `maa_cli-x86_64-pc-windows-msvc.zip`，解压到一个固定的文件夹（例如 `%LOCALAPPDATA%\maa-cli`），`maa.exe` 的绝对路径写进 `tools.maa`，再 `<那个路径> install`；MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
+| `maa_cli` | 征得同意后 `maapilot tools install maa-cli`：从 GitHub 下载实测过的 maa-cli 版本装进项目的 `.tools/`，MaaCore 和资源还没有就顺手 `maa install`（几分钟，要联网）；`tools.maa` 保持写 `maa` 就会用它。用户已经自己装好了 maa-cli（Homebrew 等）也行：写了绝对路径就照它，`doctor` 只看版本在不在实测范围。太旧（`doctor` 不通过）也是 `maapilot tools install maa-cli`，`tools.maa` 写了别的路径时问用户要不要改成 `maa`。Windows：MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `claude` / `codex` | 定时日常叫起的 agent（`config.yaml` 的 `agent`）。`trusted: false`：Claude Code——请用户在这个文件夹里正常启动一次 claude 并接受信任提示（这项只是提示）；Codex——征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。Codex 这项是必须的：不信任时项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住不该跑的，`daily schedule` 会拒绝 |
@@ -142,7 +142,7 @@ Windows 上 `schedule` 项的 `old_entries` 是任务计划程序 `MaaPilot` 文
 ## 问用户的情形
 
 - 模拟器装没装、是哪个、ADB 地址找不到时；
-- 装软件（Python、uv、Homebrew、adb、maa-cli、VC++ 运行库）前；
+- 装软件（Python、uv、adb、maa-cli、VC++ 运行库）前；
 - 服务器认不出时；
 - 日常几次几点、做哪些、没目标刷哪关；Windows 上错过了要不要补跑、要不要叫醒电脑；
 - 游戏更新后的用户协议要不要直接同意；

@@ -92,7 +92,7 @@
 - `--fix`：顺手做不需要问用户的本地修复：从 maa-cli 资源复制 OCR 模型、把 maa-cli 配置模板（`templates/maa-config/` 的
   `cli.toml`、`profiles/default.toml`）装进本项目的 maa-cli 配置目录 `private/maa-config/`（已有的不覆盖）、缺数据表时 `data sync`、
   没有单独的 MaaCore（或版本太旧）时从 MAA 的 GitHub 发布下载（见下表 `maa_core`）。
-  装软件（Homebrew、maa-cli、adb）不在这里做：由 agent 问过用户后在终端里做。
+  装软件（maa-cli、adb）不在这里做：由 agent 问过用户后用 `maapilot tools install`（见「tools」）。
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
 检查项（`data.checks[].name`）；每项 `{name, ok, detail, fix}`，有的另带字段（`candidates`、`resolution`、`old_entries`…）。
@@ -101,11 +101,11 @@
 | name | 查什么 | 修复建议 |
 |---|---|---|
 | `config` | `private/config.yaml` 在、能解析、`emulator.address` 已填 | 做 setup |
-| `adb` | adb 程序能跑（版本） | 按系统给安装方法（macOS `brew install --cask android-platform-tools`；Windows `winget install Google.PlatformTools` 或模拟器自带的 adb.exe） |
+| `adb` | adb 程序能跑（版本）；程序按 `config.adb_path`（`emulator.adb` 写了路径就照它，写 `adb` 时先用 `.tools/` 里装好的） | `maapilot tools install adb`（Windows 优先用模拟器自带的 adb.exe） |
 | `emulator` | `adb connect` + 设备 online；地址没填或连不上时列出在线的候选（`adb devices` 与常见端口的 `adb connect` 探测） | 开模拟器、打开 ADB 调试、填地址 |
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
-| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径 | 按系统给安装方法（macOS `brew install MaaAssistantArknights/tap/maa-cli`；Windows `winget` 或 GitHub 下载压缩包）、`maa install` |
+| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
 | `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。找法同定时日常：写了 `tools.<agent>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`maapilot.hosts` 的 `CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`（Claude Code 原生安装的 `%USERPROFILE%\.local\bin\claude.exe`、Codex 的 npm 包里自带的 `codex.exe`）。`warnings`（Windows，不算没通过）：还是 `.cmd` / `.bat` / `.ps1` 包装（`.ps1` 起不了，算没通过）、在应用商店程序的隔离目录（`…\Packages\…\LocalCache\`）里（定时任务看不见）。`sandbox`（只在 Windows、`agent` 是 codex 时）：`{supported, detail, version}`，看 `codex exec --help` 认不认 `workspace-write`、`codex sandbox --help` 有没有 Windows（不真的起沙箱、不调模型）；`supported: false` 时 `required: true`（定时日常不会改用 `danger-full-access` 顶上），`null`（帮助跑不出来）只放进 `warnings`。`agent` 写错时项名是 `agent` | 在 `tools.<agent>` 写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex`；没有沙箱：升级 Codex，还不行问用户要不要在 WSL 里用或改用 claude |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
@@ -219,7 +219,7 @@ Windows 上任务被停用了另有 `enabled: false`（`lines` 里写一行"到�
 | `award` | | Award（任务奖励、邮件、免费单抽） |
 | `fight <关卡>` | `[--times N] [--medicine N] [--expiring-medicine [天]]` | Fight（刷关；`--times` 默认打到理智用完；`--medicine` 默认 0；`--expiring-medicine` 只用 N 天内过期的，不写天数为 2） |
 | `annihilation` | `[--stage <剿灭关>] [--times N] [--medicine N]` | Fight（剿灭；默认当期剿灭、打 1 次；`--stage` 也可写 龙门外环 / 龙门市区 / 切尔诺伯格） |
-| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`maa://<id>` 或本地 JSON，如 `copilot strip` 存的；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
+| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`prts://<id>`（旧写法 `maa://<id>`、纯数字也认；作业集 `prts://s<id>` 还不支持）或本地 JSON，如 `copilot strip` 存的。作业站的作业先取下来存成 `private/cache/copilot/<id>.json` 再把文件交给 maa-cli：0.7.6 起它的作业码改成 `prts://`、`maa://` 会报弃用，0.7.5 只认 `maa://`，给文件哪个版本都一样，`data.copilot.file` 是这个文件；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
 | `closedown` | | CloseDown（关游戏） |
 
 `config.yaml` 的 `daily.params.<任务>` 会先合进默认参数，`--params` 最后合。理智液（`--medicine N`）：用户第一次同意后按记忆办。
@@ -314,13 +314,13 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 | 命令 | 做什么 |
 |---|---|
 | `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、热度高 |
-| `copilot show <作业编号>` | 一份作业（编号或 `maa://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
+| `copilot show <作业编号>` | 一份作业（编号或 `prts://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
 | `copilot strip <作业编号>` | 去掉作业里所有干员的练度要求（`requirements`），存成 `private/cache/copilot/<编号>_noreq.json`（`maa copilot --ignore-requirements` 还被 MAA 拒绝时，把这个文件交给 `maa copilot`）。`{id, path, removed}` |
 
 ```json
 // copilot find
 {"stage": "YW-8", "stage_id": "act…_08", "keyword": "act…_08", "count": 20, "box_at": "…", "box_source": "skland",
- "plans": [{"id": 64408, "uri": "maa://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
+ "plans": [{"id": 64408, "uri": "prts://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
             "views": 1200, "hot": 35, "like": 40, "dislike": 1, "rating": 9,
             "opers": [{"name": "能天使", "skill": 3, "required": {"elite": 2, "level": 60, "skill_level": 10},
                        "have": true, "current": {"elite": 2, "level": 90, "potential": 1, "skill_level": 7, "mastery": 2, "modules": [...]},
@@ -948,6 +948,37 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
 "有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的、赶上维护的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
 `doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
 
+## tools —— 项目里的 maa-cli 和 adb（不碰模拟器）
+
+maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的 `.tools/`（不进 git）：`.tools/maa-cli/maa`、`.tools/platform-tools/adb`（Windows 带 `.exe`），
+各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源仍由 maa-cli 下载到它自己的数据目录。
+
+找程序（`config.tool("maa")`、`config.adb_path()`，doctor、日常、定时任务都用它）：`config.yaml` 的 `tools.maa` / `emulator.adb` 写的是路径 → 照它；
+写的是程序名（模板默认的 `maa`、`adb`）或没写 → `.tools/` 里装了就用装好的，没装再在 PATH 上找。所以自己用 Homebrew 等装好、写了绝对路径的照样能用。
+
+`maapilot tools status`（只读）
+
+```json
+{"dir": ".tools", "maa_cli_tested": ["0.7.5", "0.7.7"],
+ "maa-cli": {"installed": "/…/.tools/maa-cli/maa", "version": "0.7.7", "using": "/opt/homebrew/bin/maa", "configured": "/opt/homebrew/bin/maa",
+             "note": "config.yaml 的 tools.maa 写的是 /opt/homebrew/bin/maa，用的是它；要改用装好的，把 tools.maa 改成 maa"},
+ "adb": {"installed": null, "version": null, "using": "adb", "configured": "adb"}}
+```
+
+`maapilot tools install maa-cli|adb [--version <maa-cli 版本>]`
+下载装好（拿模拟器锁：日常、MAA 在跑时不换，被占用退出码 4）。maa-cli 默认装 `maa_cli_tested` 的上限（`toolchain.MAA_CLI_TESTED`，实测过的最新版），
+`--version` 装别的版本；包从 GitHub 发布页按系统和 CPU 选（`maa_cli-v<版本>-<aarch64|x86_64>-<apple-darwin|pc-windows-msvc|unknown-linux-gnu>`）。
+装好后 MaaCore 还没装就顺手 `maa install`（几分钟）。adb 从 Google 下 `platform-tools-latest-<darwin|windows|linux>.zip`，整个 `platform-tools/` 留着。
+旧的整个换掉（先挪开、换好再删）。走系统的代理环境变量（`HTTPS_PROXY`）。
+
+```json
+{"name": "maa-cli", "version": "0.7.7", "path": "/…/.tools/maa-cli/maa", "url": "https://github.com/…", "replaced": "0.7.5",
+ "core": "6.18.0", "using": "/…/.tools/maa-cli/maa"}
+```
+
+失败：`network`（下载不了，退出码 1）、`install_failed`（包里没有程序、旧的换不掉）、`maa_install_failed`（maa-cli 装好了但 `maa install` 没成）、`unsupported_platform`（5）。
+要联网、会换掉定时日常执行的程序：agent 先问过用户。`config.yaml` 写了别的路径时 `note` 提示怎么改用装好的（改不改问用户）。
+
 ## host —— agent 宿主（不碰模拟器）
 
 用户可以在 Claude Code 或 Codex 里用 MaaPilot；定时日常叫哪个由 `config.yaml` 的 `agent` 定（`maapilot/hosts.py`）。
@@ -1187,6 +1218,8 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "Bash(maapilot news show:*)",
       "Bash(maapilot news told:*)",
       "Bash(maapilot host status:*)",
+      "Bash(maapilot tools status:*)",
+      "Bash(maapilot tools install:*)",
       "Bash(maapilot game version:*)",
       "Bash(maapilot game update:*)",
       "Bash(maapilot copilot find:*)",

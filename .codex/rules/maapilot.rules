@@ -17,6 +17,7 @@ ALLOW = [
     ["lock", ["status", "release"]],
     ["skland", "status"],
     ["host", ["status", "install"]],
+    ["tools", ["status", "install"]],
     ["news", ["list", "show", "told"]],
     ["game", ["version", "update"]],
     ["copilot", ["find", "show", "strip"]],

@@ -6,14 +6,12 @@ from maapilot.oscompat import MACOS, WINDOWS
 MAA_RELEASES = "https://github.com/MaaAssistantArknights/maa-cli/releases"
 
 _HINTS = {
-    "maa": {"darwin": "brew install MaaAssistantArknights/tap/maa-cli",
-            "win32": f"winget install MaaAssistantArknights.maa-cli，或从 {MAA_RELEASES} 下载 Windows 压缩包解压，"
-                     "把 maa.exe 的完整路径写进 config.yaml 的 tools.maa",
-            "linux": f"从 {MAA_RELEASES} 下载 Linux 版解压（Arch 可用 AUR 的 maa-cli），把 maa 的路径写进 config.yaml 的 tools.maa"},
-    "adb": {"darwin": "brew install --cask android-platform-tools",
-            "win32": "winget install Google.PlatformTools，或用模拟器自带的 adb.exe（把完整路径写进 emulator.adb）",
-            "linux": "装 Android platform-tools（如 sudo apt install adb）"},
-    "uv": {"darwin": "brew install uv",
+    "maa": {"*": "maapilot tools install maa-cli（从 GitHub 下载实测过的版本装进项目的 .tools/，没有 MaaCore 顺手 maa install）"},
+    "maa_upgrade": {"*": "maapilot tools install maa-cli（config.yaml 的 tools.maa 写了别的路径时改成 maa）"},
+    "adb": {"darwin": "maapilot tools install adb（Google 官方 platform-tools，装进项目的 .tools/）",
+            "win32": "优先用模拟器自带的 adb.exe（把完整路径写进 emulator.adb）；没有就 maapilot tools install adb",
+            "linux": "maapilot tools install adb，或系统包管理器（如 sudo apt install adb）"},
+    "uv": {"darwin": "curl -LsSf https://astral.sh/uv/install.sh | sh",
            "win32": "winget install astral-sh.uv",
            "linux": "curl -LsSf https://astral.sh/uv/install.sh | sh"},
     "codex": {"*": "npm install -g @openai/codex"},
@@ -38,7 +36,7 @@ def _os() -> str:
 
 
 def install_hint(tool: str) -> str:
-    """这台电脑上装 tool（maa / adb / uv / codex / claude / vcredist）的提示。"""
+    """这台电脑上装 tool（maa / maa_upgrade / adb / uv / codex / claude / vcredist）的提示。"""
     h = _HINTS.get(tool) or {}
     return h.get(_os()) or h.get("*") or f"安装 {tool}"
 

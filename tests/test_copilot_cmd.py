@@ -137,7 +137,7 @@ def test_find_sorts_and_annotates(site, capsys):
     assert "levelKeyword=act52side_04" in site.urls[0] and "order_by=hot" in site.urls[0] and "limit=5" in site.urls[0]
     assert [p["id"] for p in d["plans"]] == [4, 2, 1, 3]          # 都有的在前，差距少的在前，再按热度
     p4, p2, p1, p3 = d["plans"]
-    assert p2["all_owned"] and p2["gap_count"] == 0 and p2["uri"] == "maa://2"
+    assert p2["all_owned"] and p2["gap_count"] == 0 and p2["uri"] == "prts://2"
     assert p1["all_owned"] and p1["gap_count"] == 3
     tex = next(o for o in p1["opers"] if o["name"] == "德克萨斯")
     assert tex["have"] is True and tex["current"]["elite"] == 1 and len(tex["gaps"]) == 3
@@ -178,7 +178,7 @@ def test_network_error(monkeypatch, capsys):
 
 def test_show(site, capsys):
     box(BOX_SKLAND)
-    code, out = run(capsys, "copilot", "show", "maa://1")
+    code, out = run(capsys, "copilot", "show", "prts://1")
     assert code == 0, out
     d = out["data"]
     assert d["id"] == 1 and d["details"] == "说明" and d["actions"] == 3 and d["title"] == "作业1"

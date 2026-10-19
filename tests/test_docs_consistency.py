@@ -66,7 +66,7 @@ def invocations() -> list[tuple[str, str, bool]]:
 
 
 def normalize(cmd: str) -> list[str]:
-    cmd = cmd.replace("maa://<作业编号>", "maa://12345")
+    cmd = cmd.replace("prts://<作业编号>", "prts://12345")
     cmd = re.sub(r"\[([^\]]*)\]", r"\1", cmd)                         # 可选部分照写
     cmd = re.sub(r"<([^<>|]+)\|[^<>]*>", lambda m: PLACEHOLDERS.get(m.group(1), m.group(1)), cmd)
     cmd = re.sub(r"<([^<>]+)>", lambda m: PLACEHOLDERS.get(m.group(1), "X"), cmd)

@@ -89,7 +89,7 @@ def _resolved_adb() -> str | None:
     """config.yaml 的 emulator.adb 解析成绝对路径（和 maapilot 自己用的同一个 adb）；找不到 → None（让 maa-cli 用它的默认）。"""
     try:
         from maapilot import config
-        adb = str((config.load_or_defaults().get("emulator") or {}).get("adb") or "adb")
+        adb = config.adb_path()
     except Exception:                                    # noqa: BLE001 - 配置读不了：不动 profile
         return None
     found = shutil.which(adb)

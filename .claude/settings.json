@@ -28,6 +28,8 @@
       "Bash(maapilot news show:*)",
       "Bash(maapilot news told:*)",
       "Bash(maapilot host status:*)",
+      "Bash(maapilot tools status:*)",
+      "Bash(maapilot tools install:*)",
       "Bash(maapilot game version:*)",
       "Bash(maapilot game update:*)",
       "Bash(maapilot copilot find:*)",

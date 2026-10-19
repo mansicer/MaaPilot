@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from maapilot import config
 from maapilot.cliutil import BAD_REQUEST, FAILED, CliError
@@ -305,17 +306,47 @@ def _local_path(uri: str):
     return Path(path).expanduser()
 
 
-def _copilot_argv(opts: dict) -> tuple[list[str], dict]:
+_PLAN_URI = re.compile(r"^(?:prts://|maa://)?(\d+)$", re.I)
+
+
+def plan_id_of(uri: str) -> int | None:
+    """作业站的作业：`prts://<编号>`（新写法）、`maa://<编号>`（旧写法）或纯数字 → 编号；别的（本地文件）→ None。"""
+    m = _PLAN_URI.match(str(uri).strip())
+    return int(m.group(1)) if m else None
+
+
+def fetch_plan(plan_id: int) -> Path:
+    """从作业站取作业存成 private/cache/copilot/<编号>.json，交给 maa-cli 的是这个本地文件：
+    maa-cli 0.7.6 起作业码改成 prts://（maa:// 会报弃用），0.7.5 只认 maa://，给本地文件哪个版本都一样。"""
+    from maapilot import paths
+    from maapilot.tools import copilot_cmd
+    c = copilot_cmd.content(copilot_cmd.get(plan_id))
+    if not c:
+        raise CliError("bad_plan", f"作业 {plan_id} 的内容读不出来", exit=FAILED)
+    path = paths.PRIVATE / "cache" / "copilot" / f"{plan_id}.json"
+    common.write_json(path, c)
+    return path
+
+
+def _copilot_argv(opts: dict, fetch=fetch_plan) -> tuple[list[str], dict]:
     uri = (opts.get("uri") or "").strip()
     if not uri:
-        raise CliError("bad_arguments", "要给作业：maa://<编号> 或本地 JSON 文件", exit=BAD_REQUEST)
-    if not uri.startswith("maa://"):
-        p = _local_path(uri)
-        if not p.exists():
-            raise CliError("not_found", f"作业文件不存在：{p}", exit=BAD_REQUEST)
-        uri = str(p.resolve())
-    argv = ["copilot", uri]
-    info: dict = {"uri": uri, "formation": bool(opts.get("formation"))}
+        raise CliError("bad_arguments", "要给作业：prts://<编号> 或本地 JSON 文件", exit=BAD_REQUEST)
+    if re.match(r"^prts://s", uri, re.I):
+        raise CliError("bad_arguments", f"作业集（{uri}）还不支持：一份一份跑", exit=BAD_REQUEST,
+                       hint="copilot find 找单份作业，用 prts://<编号>")
+    pid = plan_id_of(uri)
+    if pid is not None:
+        path = Path(fetch(pid)).resolve()
+        info: dict = {"uri": f"prts://{pid}", "file": str(path)}
+    else:
+        path = _local_path(uri)
+        if not path.exists():
+            raise CliError("not_found", f"作业文件不存在：{path}", exit=BAD_REQUEST)
+        path = path.resolve()
+        info = {"uri": str(path)}
+    argv = ["copilot", str(path)]
+    info["formation"] = bool(opts.get("formation"))
     if opts.get("formation"):
         argv.append("--formation")
     if opts.get("formation_index"):
@@ -468,7 +499,7 @@ def register(sub) -> None:
     from maapilot.tools import maa_why
     maa_why.register(gs)
     p = gs.add_parser("copilot", help="作业（自动战斗）")
-    p.add_argument("uri", help="maa://<编号> 或本地 JSON 文件")
+    p.add_argument("uri", help="prts://<编号>（旧写法 maa://<编号> 也认）或本地 JSON 文件")
     p.add_argument("--formation", action="store_true", help="自动编队")
     p.add_argument("--formation-index", type=int, choices=range(1, 5), help="用第几个编队（1–4；默认当前编队）")
     p.add_argument("--add-trust", action="store_true", help="自动编队时空位按信赖从低到高补人")

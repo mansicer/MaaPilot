@@ -56,11 +56,12 @@ def _merge(base: dict, over: dict) -> dict:
 def connection():
     """配置里的模拟器连接（maapilot.crew.device.Connection）；没填地址 → CliError(ENVIRONMENT)。"""
     from maapilot.crew.device import Connection
-    emu = load().get("emulator") or {}
+    cfg = load()
+    emu = cfg.get("emulator") or {}
     if not emu.get("address"):
         raise CliError("no_emulator", "config.yaml 里没有模拟器地址（emulator.address）",
                        hint="跑 maapilot doctor 找地址，或重新做 setup", exit=ENVIRONMENT)
-    return Connection(address=str(emu["address"]), adb=str(emu.get("adb") or "adb"))
+    return Connection(address=str(emu["address"]), adb=adb_path(cfg))
 
 
 # --- 由 server 推出的值 -------------------------------------------------------------
@@ -100,9 +101,19 @@ def package(cfg: dict | None = None) -> str:
 
 
 def tool(name: str, cfg: dict | None = None) -> str:
-    """tools.<name>（maa / claude / codex）：定时任务里 PATH 很短，setup 写绝对路径。"""
+    """tools.<name>（maa / claude / codex）：定时任务里 PATH 很短，setup 写绝对路径。
+    maa 写的是程序名（模板默认）时，项目 .tools 里装了（maapilot tools install）就用装好的（见 maapilot.toolchain）。"""
+    from maapilot import toolchain
     cfg = cfg if cfg is not None else load_or_defaults()
-    return str((cfg.get("tools") or {}).get(name) or name)
+    configured = str((cfg.get("tools") or {}).get(name) or name)
+    return toolchain.resolve(configured, name) if name in toolchain.DIRS else configured
+
+
+def adb_path(cfg: dict | None = None) -> str:
+    """emulator.adb：写了路径就用它；写的是 adb（模板默认）或没写 → 项目 .tools 里装了就用装好的，没有再在 PATH 上找。"""
+    from maapilot import toolchain
+    cfg = cfg if cfg is not None else load_or_defaults()
+    return toolchain.resolve((cfg.get("emulator") or {}).get("adb"), "adb")
 
 
 def schedule_options(cfg: dict | None = None) -> dict:

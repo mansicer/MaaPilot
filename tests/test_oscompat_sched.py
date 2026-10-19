@@ -477,10 +477,11 @@ def test_launch_end_to_end(tmp_path):
 def test_hints_per_os(monkeypatch):
     monkeypatch.setattr(hints, "WINDOWS", False)
     monkeypatch.setattr(hints, "MACOS", True)
-    assert hints.install_hint("maa").startswith("brew ") and 16384 in hints.common_ports()
+    assert hints.install_hint("maa").startswith("maapilot tools install maa-cli") and 16384 in hints.common_ports()
+    assert not any("brew" in hints.install_hint(t) for t in ("maa", "maa_upgrade", "adb", "uv"))
     monkeypatch.setattr(hints, "WINDOWS", True)
     monkeypatch.setattr(hints, "MACOS", False)
-    assert "winget" in hints.install_hint("maa") and "brew" not in hints.install_hint("adb")
+    assert "maapilot tools install" in hints.install_hint("maa") and "模拟器自带" in hints.install_hint("adb")
     assert {16384, 5555, 62001} <= set(hints.common_ports()) and "VCRedist" in hints.install_hint("vcredist")
     monkeypatch.setattr(hints, "WINDOWS", False)
     assert "brew" not in hints.install_hint("adb") and hints.install_hint("codex").startswith("npm ")

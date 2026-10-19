@@ -28,6 +28,7 @@
 ## 发版
 - 版本号只写在 `maapilot/__init__.py` 的 `__version__`（`pyproject.toml` 从这里读），格式 `X.Y.Z`；`maapilot --version`、`doctor`、启动检查会显示它和当前提交。
   第一个发布的版本是 0.1.0（用户 10-19 定：macOS、Windows 都实机跑通了）。修问题升第三位，有大的新能力（例如接新的 agent）升第二位，1.0.0 等稳定了再说。
+- maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：`maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 记实测过的范围（`tools install` 默认装上限这个版本），发版前把本机升到最新、跑通日常和作业后更新上限。
 - 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送提交和标签。
   CI 在标签上先跑三个系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
   把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。带 `-` 的标签（`v0.1.0-rc1`）标成预发布。

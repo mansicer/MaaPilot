@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from maapilot import cli, paths
+from maapilot.cliutil import CliError
 from maapilot.crew import lock
 from maapilot.tools import common
 from tests.portable import WINDOWS, fake_program
@@ -139,20 +140,52 @@ def test_fight_params_default_zero(cfg):
     assert p["stage"] == "Annihilation" and p["times"] == 1 and p["medicine"] == 1 and p["stone"] == 0
 
 
-def test_copilot_argv_flags():
+def test_copilot_argv_flags(tmp_path):
     from maapilot.tools import maa_cmd
-    argv, info = maa_cmd._copilot_argv({"uri": "maa://123", "formation": True})
-    assert argv == ["copilot", "maa://123", "--formation"] and info == {"uri": "maa://123", "formation": True}
+    plan = tmp_path / "123.json"
+    plan.write_text("{}", encoding="utf-8")
+    fetched = []
+
+    def fetch(pid):
+        fetched.append(pid)
+        return plan
+    f = str(plan.resolve())
+    argv, info = maa_cmd._copilot_argv({"uri": "prts://123", "formation": True}, fetch)
+    assert argv == ["copilot", f, "--formation"] and info == {"uri": "prts://123", "file": f, "formation": True}
     argv, info = maa_cmd._copilot_argv({"uri": "maa://123", "formation": True, "formation_index": 2, "add_trust": True,
                                         "ignore_requirements": True, "support": 2, "support_name": "棘刺",
-                                        "raid": "raid", "loop_times": 3})
-    assert argv == ["copilot", "maa://123", "--formation", "--formation-index", "2", "--add-trust",
+                                        "raid": "raid", "loop_times": 3}, fetch)
+    assert argv == ["copilot", f, "--formation", "--formation-index", "2", "--add-trust",
                     "--ignore-requirements", "--support-unit-usage", "2", "--support-unit-name", "棘刺",
                     "--raid", "raid", "--loop-times", "3"]
-    assert info["ignore_requirements"] is True and info["support"] == 2 and info["raid"] == "raid"
-    assert "--use-sanity-potion" not in argv
-    argv, _ = maa_cmd._copilot_argv({"uri": "maa://123", "raid": "normal", "support": 0})
-    assert argv == ["copilot", "maa://123"]
+    assert info["uri"] == "prts://123" and info["ignore_requirements"] is True and info["support"] == 2
+    assert info["raid"] == "raid" and "--use-sanity-potion" not in argv
+    argv, _ = maa_cmd._copilot_argv({"uri": "123", "raid": "normal", "support": 0}, fetch)
+    assert argv == ["copilot", f] and fetched == [123, 123, 123]
+    argv, info = maa_cmd._copilot_argv({"uri": str(plan)}, fetch)                 # 本地文件原样给
+    assert argv == ["copilot", f] and info["uri"] == f and fetched == [123, 123, 123]
+
+
+def test_copilot_plan_uris():
+    from maapilot.tools import maa_cmd
+    assert [maa_cmd.plan_id_of(u) for u in ("prts://64408", "maa://64408", " 64408 ", "PRTS://1")] == [64408, 64408,
+                                                                                                         64408, 1]
+    assert maa_cmd.plan_id_of("prts://s12") is None and maa_cmd.plan_id_of("a.json") is None
+    with pytest.raises(CliError) as e:
+        maa_cmd._copilot_argv({"uri": "prts://s12"}, lambda pid: None)
+    assert e.value.code == "bad_arguments"
+
+
+def test_fetch_plan_saves_content(monkeypatch):
+    from maapilot.tools import copilot_cmd, maa_cmd
+    monkeypatch.setattr(copilot_cmd, "get", lambda pid: {"id": pid, "content": '{"stage_name": "x", "actions": []}'})
+    p = maa_cmd.fetch_plan(7)
+    assert p == paths.PRIVATE / "cache" / "copilot" / "7.json"
+    assert json.loads(p.read_text(encoding="utf-8")) == {"stage_name": "x", "actions": []}
+    monkeypatch.setattr(copilot_cmd, "get", lambda pid: {"id": pid, "content": "坏的"})
+    with pytest.raises(CliError) as e:
+        maa_cmd.fetch_plan(8)
+    assert e.value.code == "bad_plan"
 
 
 @needs_data
@@ -666,3 +699,12 @@ def test_ocr_sanity_far_below_estimate_is_suspect(monkeypatch):
     assert snap["current"] == 29 and snap["suspect"] is True and snap["estimate"] == 120 and snap["shot"]
     monkeypatch.setattr(state, "read_home", lambda game=None: (None, (110, 205), object()))
     assert "suspect" not in state.read_sanity()
+
+
+def test_maa_cli_tested_range(monkeypatch):
+    from maapilot.tools import doctor
+    from maapilot import toolchain
+    monkeypatch.setattr(toolchain, "MAA_CLI_TESTED", ("0.7.5", "0.7.7"))
+    assert doctor._ver("v0.8.0-nightly.1792274176+sha.6b0bc89") == (0, 8, 0) and doctor._ver("?") == ()
+    assert [doctor.maa_cli_range(v) for v in ("0.7.4", "0.7.5", "0.7.7", "0.7.10", "0.8.0-nightly.1", "?")] == \
+        ["old", None, None, "new", "new", None]

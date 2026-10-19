@@ -98,7 +98,8 @@ def check_config(ctx: Ctx) -> dict:
 
 
 def check_adb(ctx: Ctx) -> dict:
-    adb = str(((ctx.cfg or {}).get("emulator") or {}).get("adb") or "adb")
+    from maapilot import config
+    adb = config.adb_path(ctx.cfg or {})
     path = ctx.probe.which(adb)
     if path is None:
         return _item("adb", False, f"找不到 adb（{adb}）",
@@ -254,6 +255,21 @@ def maa_dir(ctx: Ctx, which: str) -> Path | None:
     return Path(lines[-1]) if r.returncode == 0 and lines else None
 
 
+def _ver(v: str) -> tuple[int, ...]:
+    """"0.7.7" / "v0.8.0-nightly.1+sha.x" → (0, 7, 7) / (0, 8, 0)。"""
+    m = re.match(r"v?(\d+(?:\.\d+)*)", str(v).strip())
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+def maa_cli_range(cli: str) -> str | None:
+    """不在实测范围：低于下限 → "old"，高于上限 → "new"；在范围里或认不出 → None。"""
+    from maapilot.toolchain import MAA_CLI_TESTED
+    v, lo, hi = _ver(cli), _ver(MAA_CLI_TESTED[0]), _ver(MAA_CLI_TESTED[1])
+    if not v:
+        return None
+    return "old" if v < lo else "new" if v > hi else None
+
+
 def check_maa_cli(ctx: Ctx) -> dict:
     from maapilot import config
     maa = config.tool("maa", ctx.cfg)
@@ -269,8 +285,15 @@ def check_maa_cli(ctx: Ctx) -> dict:
     if res is None or not (res / "PaddleOCR").exists():
         return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maa update",
                      version=cli, core=core)
+    from maapilot.toolchain import MAA_CLI_TESTED
+    lo, hi = MAA_CLI_TESTED
+    rng = maa_cli_range(cli)
+    if rng == "old":
+        return _item("maa_cli", False, f"maa-cli {cli} 太旧（实测过的是 {lo}–{hi}）", hints.install_hint("maa_upgrade"),
+                     version=cli, core=core, tested=list(MAA_CLI_TESTED))
+    extra = {"warnings": [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"]} if rng == "new" else {}
     return _item("maa_cli", True, f"maa-cli {cli}、MaaCore {core}", version=cli, core=core, resource=str(res),
-                 path=path)
+                 path=path, tested=list(MAA_CLI_TESTED), **extra)
 
 
 def check_agent(ctx: Ctx) -> dict:
