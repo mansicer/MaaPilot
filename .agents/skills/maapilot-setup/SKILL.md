@@ -1,11 +1,11 @@
 ---
 name: maapilot-setup
-description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、设定时任务、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
+description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的会话内定时定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
 ---
 
 # maapilot-setup：第一次设置
 
-目标：让日常能自己跑起来。**只问跑起来必须的事**（模拟器、日常几点跑、做哪些、没目标时刷哪关、旧定时任务怎么办）；
+目标：让日常能自己跑起来。**只问跑起来必须的事**（模拟器、日常几点跑、做哪些、没目标时刷哪关、旧版的定时任务怎么办）；
 其余（理智液算不算能用、汇报要多详细……）以后第一次遇到时再问。整个过程大约 10–20 分钟，开头告诉用户。
 
 一次只问一个问题。每一步做完用一两句话告诉用户到哪了。命令输出都是 JSON，按 `data`、`error.hint` 判断，别把输出念给用户。
@@ -14,8 +14,8 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 说清你是谁、接下来做什么，例如："你好！我是你的明日方舟助手，能帮你每天自动做日常、练干员、合材料。先花十几分钟把环境设好：确认模拟器、装 MAA、问你几个日常的偏好。先问一句：电脑上已经装好安卓模拟器、装了明日方舟吗？"
 
-用户说要从头设置（全部重来）：先 `maapilot reset --dry-run` 把会挪走什么、删掉哪个定时任务给用户看，用户同意再 `maapilot reset`（
-用户偏好记录也要清才加 `--memory`；日常在跑或模拟器被占着时它不做，等一会儿再来），然后请用户重新开一次会话。
+用户说要从头设置（全部重来）：先 `maapilot reset --dry-run` 把会挪走什么给用户看，用户同意再 `maapilot reset`（
+用户偏好记录也要清才加 `--memory`；日常在跑或模拟器被占着时它不做，等一会儿再来），然后删掉这个会话里还没到的定时日常（见「定时日常」），请用户重新开一次会话。
 
 重新设置（`private/setup.json` 已经在）时：先 `maapilot doctor` 看哪些已经好了，只重做用户想改的和没通过的部分。
 
@@ -36,9 +36,8 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv -e .`；不用 uv 时是 `<python.exe 路径> -m venv .venv`、`.venv\Scripts\python.exe -m pip install -e .`。
 - 之后命令写成 `.venv\Scripts\maapilot.exe <命令> …`（`maapilot` 提示找不到时；见 AGENTS.md「命令约定」）。
 - 仓库最好用 `git clone -c core.symlinks=true …` 拿（`.claude/skills` 是指向 `.agents/skills` 的链接）；已经普通 clone 了，`maapilot doctor --fix` 会把这个链接补上。
-- 定时日常在 Windows 上用"任务计划程序"（第 5 步设）。**项目文件夹、Python、maa、adb、claude / codex 都要装在普通目录**：
-  在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录（`…\AppData\Local\Packages\…\LocalCache\…`），任务计划程序看不到，`daily schedule` 会拒绝（`isolated_install`）。
-  遇到时请用户在普通的 PowerShell 里重新装到普通目录。
+- **项目文件夹、Python、maa、adb 最好装在普通目录**（例如 `C:\Users\<你>\` 下）：在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录（`…\AppData\Local\Packages\…\LocalCache\…`），
+  别的程序看不到。遇到时请用户在普通的 PowerShell 里重新装到普通目录。
 
 ## 1. 模拟器
 
@@ -61,7 +60,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 
 ## 2. 环境逐项通过
 
-反复 `maapilot doctor`，按每项的 `fix` 处理，直到 `ok_all: true`（`schedule`、`setup` 两项此时不通过是正常的，最后才做）。
+反复 `maapilot doctor`，按每项的 `fix` 处理，直到 `ok_all: true`（`setup` 这项此时不通过是正常的，最后才做）。
 
 | 项 | 常见处理 |
 |---|---|
@@ -71,12 +70,14 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `maa_cli` | 征得同意后 `maapilot tools install maa-cli`：从 GitHub 下载实测过的 maa-cli 版本装进项目的 `.tools/`，MaaCore 和资源还没有就顺手 `maa install`（几分钟，要联网）；`tools.maa` 保持写 `maa` 就会用它。用户已经自己装好了 maa-cli（Homebrew 等）也行：写了绝对路径就照它，`doctor` 只看版本在不在实测范围。太旧（`doctor` 不通过）也是 `maapilot tools install maa-cli`，`tools.maa` 写了别的路径时问用户要不要改成 `maa`。Windows：MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
-| `claude` / `codex` | 定时日常叫起的 agent（`config.yaml` 的 `agent`）。`trusted: false`：Claude Code——请用户在这个文件夹里正常启动一次 claude 并接受信任提示（这项只是提示）；Codex——征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。Codex 这项是必须的：不信任时项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住不该跑的，`daily schedule` 会拒绝 |
+| `legacy_schedule` | 还留着旧版的系统定时任务：见第 4 步「旧版的定时任务」，用户同意后 `maapilot daily unschedule` |
+| `agent_config` | `config.yaml` 里还写着旧版的 `agent`（现在用不到了）：跟用户说一声，同意后删掉那几行 |
+
+**在 Codex 里**还要信任这个文件夹：`maapilot host status` 里 codex 的 `trusted` 是 `false` 时，征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。
+必须做：不信任时 Codex 不加载项目的命令规则，`guard allow` 每次弹确认这道护栏就没了。
 
 装软件前说清装什么、为什么；用户不同意就停在这里，告诉用户缺了它哪些事做不了。
 
-定时日常叫哪个 agent：你现在跑在哪个里面（Claude Code 还是 Codex），`agent` 就写哪个（`claude` / `codex`），不用问用户；用户想换再改。
-然后把 `tools.maa`、`tools.<agent>` 改成绝对路径（定时任务的 PATH 很短）：`doctor` 的 `maa_cli`、`claude` / `codex` 两项的 `path` 就是，写进 `private/config.yaml`。那一项没通过时问用户它装在哪。
 Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的 `\` 会被当成转义；`private/` 下的文件存成 UTF-8。
 
 ## 3. 试启动、第一次读账号
@@ -89,22 +90,17 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ## 4. 问日常（一次一个问题）
 
-1. **每天几次、几点**：默认每天两次 04:40 和 16:40。说明：游戏 04:00 换日，别放在 04:00 前后；到点时电脑要开着、不能睡眠，模拟器也要开着
-   （Windows 上还要保持登录，锁屏可以；睡眠、关机的情形见下面第 5、6 问）。
+1. **每天几次、几点**：默认每天两次 04:40 和 16:40。说明：游戏 04:00 换日，别放在 04:00 前后；分钟别选整点、半点（:00、:30，有的 harness 会提前一两分钟叫醒）。
+   到点时电脑要开着、不能睡眠，模拟器也要开着，**这个会话也要一直开着**（Codex 桌面版要应用开着）：定时是记在这个会话里的，关掉就没了。
 2. **做哪些日常项**，默认全做，逐项用玩家的话说：启动游戏、公开招募、基建换班收菜、信用商店与访问好友、剿灭（本周合成玉拿满就不打）、领任务奖励和邮件。用户说"都做"就不再细问。
 3. **没有目标时刷哪关**：默认 1-7（产固源岩，理智划算）。有目标时会优先刷目标缺的材料。
 4. **游戏更新后的用户协议**：游戏大版本更新后，有时会弹出《用户协议》《隐私政策》更新，要点"同意"才能进游戏。问："以后遇到这种更新，要我直接替你点同意，还是每次先问你？"
    说清：选"直接同意"，半夜的定时日常也能自己把游戏更新好接着跑；选"每次问"，遇到时日常会停在那里等你回来。写进 `game.accept_terms`（`true` / `false`）。
-5. **（只在 Windows）到点时电脑关着或睡着，开机 / 醒来后要不要补跑这一次**：默认要。说清：补跑时可能是你正在用电脑的时候，模拟器会被打开、占一阵。
-   写进 `schedule_options.run_if_missed`（`true` / `false`）。
-6. **（只在 Windows）到点时电脑睡着了，要不要把它叫醒来跑**：默认不要。说清：选"要"，半夜电脑会自己醒来（笔记本合着盖也可能醒），跑完不会自动再睡；
-   还要电源设置里允许"唤醒定时器"。写进 `schedule_options.wake_computer`（`true` / `false`）。
-   macOS / Linux 不问这两个：cron 到点时电脑睡着就跳过这一次，不补跑也不唤醒（告诉用户一句）。
-
-**旧版 MaaPilot 的定时任务**：`doctor` 的 `schedule` 项会报出旧版的定时行（命令里有 job tick 或 bin/daily.sh）。有的话：
-- 把那一行**原样**给用户看，说明两边同时跑会抢模拟器、重复做日常；
-- 问用户要不要停掉旧的：**只有用户能决定**，不要自己删。用户同意后在第 5 步用 `daily schedule --replace-old` 删掉；用户想自己处理，就告诉他在终端 `crontab -e` 里删掉或注释掉这一行。
-Windows 上 `schedule` 项的 `old_entries` 是任务计划程序 `MaaPilot` 文件夹里别的目录的 MaaPilot 装的任务（同一个账号别装两份）：一样给用户看、由用户决定，`--replace-old` 删掉，或者请用户在"任务计划程序"里自己删。
+**旧版的定时任务**：以前的 MaaPilot 用系统的定时任务（macOS / Linux 的 crontab、Windows 的"任务计划程序"）跑定时日常，现在改成会话里的定时。
+启动检查里有 `legacy_schedule`（或 `doctor` 报出旧的定时）时：
+- 先 `maapilot daily unschedule --dry-run`，把要删的那几行 / 那个任务给用户看，说明留着它会和会话里的定时重复跑日常、抢模拟器；
+- 问用户要不要删：**只有用户能决定**，不要自己删。用户同意后 `maapilot daily unschedule`；用户想自己处理，就告诉他在终端 `crontab -e` 里删掉那一行，或在"任务计划程序"的 `MaaPilot` 文件夹里删掉。
+- 别的目录装的更早版本的定时（命令里有 job tick 或 bin/daily.sh）`daily unschedule` 不删：原样给用户看，请用户自己删。
 
 ## 4b. 要不要接森空岛（可选）
 
@@ -120,33 +116,40 @@ Windows 上 `schedule` 项的 `old_entries` 是任务计划程序 `MaaPilot` 文
 之后 `maapilot skland status` 看 `configured` 是 `true`，再 `maapilot state skland` 读一次，告诉用户读到了几名干员。
 `choose_role`（绑了好几个角色）：把 `data.roles` 给用户看，请用户在终端里跑 `maapilot skland token --uid <要用的>`。
 
-## 5. 写配置、设定时、收尾
+## 5. 写配置、定时日常、收尾
 
-1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行）：`schedule`、`schedule_options`（Windows）、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`agent`、`tools`。改完 `maapilot doctor` 再确认一次。
+1. 把回答写进 `private/config.yaml`（用编辑文件的工具或普通 shell 命令都行）：`schedule`、`daily.tasks`（按模板里的顺序，去掉不做的）、`daily.default_stage`、`game.accept_terms`、前面的 `server`、`emulator`、`tools`。改完 `maapilot doctor` 再确认一次。
 2. 设定时前问一句：这个账号是不是已经在别的电脑上设了定时日常？是的话这里就不设（两台会抢着登录，还会让对方的货币对账以为钱被偷偷花了），跳到第 3 步；用户想换到这台，请他先在那台停掉。
-   `agent` 是 `codex` 时，先确认 `doctor` 的 `codex` 项通过（`maapilot host install codex` 做过），不然 `daily schedule` 会拒绝（`codex_untrusted`）。
-   `maapilot daily schedule`（用户要停旧任务时加 `--replace-old`），把设好的时间和输出里 `exec` 的几个程序（定时日常会在用户不在时运行它们）告诉用户；macOS 可能还会弹"终端想要管理电脑"之类的系统窗口，请用户点允许。
-   Windows 上它在"任务计划程序"里建一个 `MaaPilot` 文件夹下的任务（不要管理员、不存密码）。拒绝时：`program_missing` 是有程序找不到（在 `tools` / `emulator.adb` 写绝对路径），
-   `isolated_install` 是装在了 Codex 的隔离目录里（见上面「Windows」：请用户在普通 PowerShell 里重装到普通目录），处理完再设。
-   设完**以系统里读回来的为准**：再跑一次 `maapilot daily status`（或 `doctor` 的 `schedule` 项），看 `schedule.installed` 是 `true`、`times` 是用户选的、没有 `enabled: false`，
-   告诉用户下一次是什么时候（`next_at`）；对不上就说没设成，别只看 `config.yaml`。
-   Windows 上再跟用户说清：到点时**电脑要开着并保持登录**（锁屏可以，注销或关机就不跑；睡着了按第 4 步第 5、6 问的回答补跑 / 叫醒），模拟器要能连上（最好开着，或确认 `maa` 能自己把它启动）。
+   还留着旧版的定时任务的，先按上面「旧版的定时任务」处理。然后按下面「定时日常」在这个会话里定好。
+
+### 定时日常
+
+用你所在的 harness 自己的**会话内定时**，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
+- **一次性定时接力**（harness 有一次性定时的都这样做）：会话里始终只留**一个**"下一次日常"的一次性定时，时间是 `schedule` 里离现在最近的下一个时间点。
+  setup 时建第一个；以后每次定时日常醒来、跑日常之前先建下一个（见 `maapilot-daily`「定时日常」）。
+  不用每天重复的定时：有的 harness 的重复定时几天后就过期，还会晚响。
+- 提示写成单看这一句就知道要做什么的（到点时前面的对话可能已经被压缩掉了）："定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"（括号里写这一次的时间）。
+- 建之前先列一遍 harness 里已有的定时：已经有下一次日常的就不再建（只留一个）。建完再列一遍，**以 harness 里读回来的为准**：时间对上了才告诉用户"下一次是 10 月 21 日（明天）04:40"；对不上就说没定成。
+- 改时间：删掉还没到的那个，按新时间建下一个。不要定时了：删掉还没到的那个。
+- harness 没有一次性定时、只有重复的：每个时间点建一个每天重复的定时，有过期的照 `docs/harnesses.md` 跟用户说清多久要续一次。
+- harness 没有会话内定时（Codex 命令行）：定时日常做不了，跟用户说清：可以在对话里说"跑一次日常"；想要定时，换用 Claude Code 或 Codex 桌面版。setup 照样做完。
+- 跟用户说清：到点时电脑要开着、不睡眠，模拟器要能连上（最好开着），**这个会话不要关**（Codex 桌面版要应用开着）。
+
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：
-   - 每天几点会自动跑日常，跑完有汇报，打开这个文件夹启动 claude（或 codex）问"今天做了什么"就行；
+   - 每天几点会在这个会话里自动跑日常，跑完当场告诉你；会话别关，回来在这里问"今天做了什么"就行；
    - 可以直接说想做的事："把某某练到精2""合 10 个聚酸酯组""打一次剿灭""现在跑一次日常"；
    - 花合成玉、源石的事每次都会先问；别的第一次遇到时问，之后按用户的回答办。
 5. 问一句要不要现在就跑一次日常（`maapilot-daily`），不跑也没关系。
-6. 开始盯着日常（见 AGENTS.md「盯着日常」）：Claude Code 里后台挂一个 `maapilot daily watch`，以后一直挂着；Codex 里不用挂，日常跑完程序会把通知推进会话。
 
 ## 问用户的情形
 
 - 模拟器装没装、是哪个、ADB 地址找不到时；
 - 装软件（Python、uv、adb、maa-cli、VC++ 运行库）前；
 - 服务器认不出时；
-- 日常几次几点、做哪些、没目标刷哪关；Windows 上错过了要不要补跑、要不要叫醒电脑；
+- 日常几次几点、做哪些、没目标刷哪关；
 - 游戏更新后的用户协议要不要直接同意；
-- 旧版定时任务要不要停；
+- 旧版的定时任务要不要删；
 - 这个账号是不是已经在别的电脑上定时跑着。
 
 除此之外不要问（理智液、汇报详略、代选这类以后遇到再问）。

@@ -1,11 +1,13 @@
 ---
 name: maapilot-daily
-description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（daily run：公招、基建、信用商店、剿灭、领奖励、刷理智）、定时日常里的目标部分（刷目标缺的材料、养成、更新目标、写汇报）、"今天做了什么"、改日常的时间和内容。Use when the user says 跑一次日常 / 重新做日常 / 今天做了什么 / 日常改成几点 / 不做某项, or when a scheduled daily run starts you for the goals part (daily / routine / farming / report).
+description: 明日方舟日常 via MaaPilot —— 定时日常到点叫醒你时的整套做法（daily run 跑公招、基建、信用商店、剿灭；出错接管后接着跑；按目标优先级刷理智、养成；领奖励、对账、daily done 收尾、当场汇报）、用户说跑一次日常、没收尾的日常、"今天做了什么"、改日常的时间和内容。Use when the harness's in-session schedule wakes you with 定时日常, the user says 跑一次日常 / 重新做日常 / 今天做了什么 / 日常改成几点 / 不做某项, or the startup check shows daily_open (daily / routine / farming / report).
 ---
 
 # maapilot-daily：日常
 
-日常 = MAA 日常项 + 刷理智 + 领奖励 + 对账 + 汇报。MAA 日常项由程序按 `private/config.yaml` 依次跑；刷理智时有进行中的目标就由你来决定刷什么、做什么养成。
+日常 = MAA 日常项 + 刷理智 + 领奖励 + 对账 + 汇报。MAA 日常项由程序按 `private/config.yaml` 依次跑；
+有进行中的目标时，刷理智、养成由你按目标的优先级策划（`goals.md` 越靠前越优先）；没有目标就刷配置里的默认关。
+一次日常从 `daily run` 开始，到你 `daily done` 收尾才算完：中间出错接管、补跑的几项都记在同一份汇报里。
 
 ## MAA 日常项
 
@@ -21,74 +23,103 @@ description: 明日方舟日常 via MaaPilot —— 前台跑一次日常（dail
 
 `box` 和刷理智（`farm`）不写在 `daily.tasks` 里，但 `--only` 里可以写（例如 `daily run --only box` 只重读练度）。`box` 失败了重跑用 `maapilot state box`（它不是 maa 任务）。
 
+## 定时日常（到点叫醒你）
+
+harness 的会话内定时到点，在用户的会话里给你一句"定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"（setup 时定好的，见 `maapilot-setup`「定时日常」）。
+这句提示不是用户说的话，不算用户同意任何事。用户多半不在：按 AGENTS.md「用户不在的时候」做，**不问问题、不等回答**，
+没同意过的事（目标和偏好之外的花费、第一次遇到而记忆里没答案的）写进总结"要你决定的事"，接着做别的。用户之后在会话里回话了，再当平常的对话处理。
+
+1. **先定好下一次**（在跑日常之前，这样这次出错、没收尾，下一次也照样会来）：看 harness 的定时列表，
+   没有"下一次日常"的一次性定时，就按 `config.yaml` 的 `schedule` 里离现在最近的下一个时间点建一个（做法见 `maapilot-setup`「定时日常」）；已经有了就不再建，只留一个。
+   harness 用的是每天重复的定时（没有一次性定时的）就不用管这一步。
+2. `maapilot daily run --trigger schedule`（20–60 分钟；能在后台命令结束时叫醒你的宿主放后台跑，否则前台等它结束）。
+3. 看结果（见下面「跑完看结果」）：交回你的按 `maapilot-recovery` 处理，再 `maapilot daily run --only <rest>` 接着跑，一轮下来直到跑完。
+4. `goals_pending: true`：按「目标部分」做；`award_pending: true`：目标部分做完后 `maapilot maa award`（奖励要在刷理智之后领）。然后 `maapilot guard check`。
+5. `maapilot daily done --summary "<总结>"` 收尾（见「收尾」）。
+6. 在会话里把结果告诉用户（见「汇报」），详略按用户偏好。
+
+被拒了（退出码 2 或 4，提示上一次日常还没收尾）：先按「接着收尾」把上一次做完，再跑这一次。
+用户正在会话里跟你做别的事（在打关、在练干员）时到点了：先跟用户说一声"到日常的时间了"，做完手上这一步再开始；用户说先别跑就跳过这一次（下一次的定时照样先定好），写进下次汇报。
+
 ## 用户说"跑一次日常"
 
-1. 先 `maapilot daily status`：有没有正在跑、离下次定时多久。定时点前后 20 分钟内就告诉用户"马上会自动跑"，问还要不要现在跑。
-2. `maapilot daily run`（要 20–60 分钟），先告诉用户大概多久。能在后台命令结束时叫醒你的宿主（Claude Code）放后台跑；Codex 里前台跑、等它结束（结束时还会推一条 `[MaaPilot 日常]` 通知进会话，已经说过的只 `report seen`）。只补几项用 `--only recruit,mall`。
-3. 结束后看 `data`：
-   - 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的、
-     `evidence` 是失败那一刻的截图和 MAA 自己存的截图）。马上按 `maapilot-recovery`「先看」：看这几张截图、`maapilot maa why` 看经过、判断原因，再看屏幕处理；
-     被登出 / 掉线按 `maapilot-recovery`「掉线、被登出」（先问用户是不是在别的设备上登着，同时计时 5 分钟，没回复就重新登录接着跑）；
-     处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑，一轮下来直到跑完；
-   - `failed` 里有失败的项（定时运行里 agent 也没救回来的）：同样按 `maapilot-recovery` 处理，处理完 `daily run --only <这几项>` 补跑；
-   - `goals_pending: true`：程序把刷理智交回给你，按下面「目标部分」做；`award_pending: true` 时领奖励也留给你（奖励要在刷理智之后领）。
-     做完目标部分：`maapilot maa award`（`award_pending` 时）→ `maapilot guard check` → `maapilot report write <run_id> --append "<目标部分做了什么、花了什么>"`，再一起汇报；
-   - 退出码 3：货币对账不过，转述给用户（`maapilot-recovery`「货币对账停机」）；退出码 4：模拟器被占用。
-4. 汇报（见「汇报」）。
+1. 先 `maapilot daily status`：有没有在跑、有没有没收尾的、上一次什么时候。离 `config.yaml` 的 `schedule` 里某个时间点不到 20 分钟，就告诉用户"马上会自动跑"，问还要不要现在跑。
+2. `maapilot daily run`（要 20–60 分钟），先告诉用户大概多久。只补几项用 `--only recruit,mall`。
+3. 后面和定时日常一样：看结果、做目标部分、领奖励、对账、`daily done` 收尾、告诉用户。用户就在旁边，要决定的事当场问。
 
-## 目标部分（定时运行叫起你，或 `goals_pending`）
+## 跑完看结果
+
+- 退出码 1、`error.code` 是 `handoff`：日常停在失败的那一项交给你（`data.handoff`：哪一项、为什么、`rest` 是它和后面还没跑的、
+  `evidence` 是失败那一刻的截图和 MAA 自己存的截图）。马上按 `maapilot-recovery`「先看」：看这几张截图、`maapilot maa why` 看经过、判断原因，再看屏幕处理；
+  被登出 / 掉线按 `maapilot-recovery`「掉线、被登出」；游戏要更新（任务是 `game_update`）按 `maapilot-events`「维护结束」。
+  处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑。处理不了的项就不再跑，写进总结，`rest` 里后面的照样接着跑（`--only` 去掉这一项）。
+- `failed` 里有失败的项：同样按 `maapilot-recovery` 处理，处理完 `daily run --only <这几项>` 补跑。
+- `goals_pending: true`：程序把刷理智交回给你，按下面「目标部分」做；`award_pending: true` 时领奖励也留给你。
+- 结果里有官方日程的消息（新公告、维护、活动开始）：按 `maapilot-events` 跟用户说，说完 `news told`。
+- 正在维护：日常什么都没跑。告诉用户维护到几点、那之后的下一次日常会照常跑；维护结束后按 `maapilot-events`「维护结束」更新游戏。照样 `daily done` 收尾。
+- 有过期的目标（程序开头已经把它挪进已完成）：看它的笔记里还有没有没做完的（活动商店没换完、签到没领完），在总结里提一句。
+- 退出码 3：货币对账不过，按 `maapilot-recovery`「货币对账停机」，等用户回来；退出码 4：模拟器被占用（`lock status` 看是谁）。
+
+## 目标部分（`goals_pending`）
+
+按目标的优先级策划这次的理智和养成：`goals.md` 里越靠前越优先，材料不够分时先给前面的目标。目标里同意过的花费（龙门币、经验、材料、理智、为它兑换的东西）直接做，不再问。
 
 1. `maapilot goals list`：只看"进行中"的。`problems` 里有写错的目标，照着修好那几行（`goals update`）。
 2. `maapilot state sanity` 看理智（结果带 `suspect` 时是首页读数可能读错了：看 `shot` 截图核对，以截图为准）；`state show depot` 的时间是今天这次日常之前的，就先 `state depot`。
 3. 逐个目标（按文件里的顺序；"分解与进展"里写了先后的照写的）：
    - 读它的"分解与进展"，接着上次做；
    - `maapilot calc need "<对象>"`（技能等级、专精按笔记里记的加 `--from`）：`short` 为空 → 现在就做（`maapilot-training`）；缺的能合成 → `maapilot-base` 合出来再做；
-   - `关卡`、`其他` 类目标按笔记里的分解做（`maapilot-battle`）。
+   - `关卡`、`其他` 类目标按笔记里的分解做（`maapilot-battle`）；`活动` 目标见 `maapilot-events`「日常里怎么推进活动目标」。
 4. 刷理智：把所有目标还缺的基础材料合起来，`maapilot calc stages 固源岩=20 聚酸酯=8 …`，按 `plan` 刷（`maapilot maa fight <关卡> --times N`，只刷 `open_today` 的关）。
-   **分批**：一条命令最长跑 10 分钟，一批只打大约 8 分钟的量（一场 1.5–3 分钟，芯片本、长关更久：第一批先打 3 次，再按 `maa fight` 返回的 `duration_s` 算下一批几次），命令超时给到 10 分钟，一批一批接着打。
+   **分批**：前台跑时一条命令最长 10 分钟，一批只打大约 8 分钟的量（一场 1.5–3 分钟，芯片本、长关更久：第一批先打 3 次，再按 `maa fight` 返回的 `duration_s` 算下一批几次），一批一批接着打；放后台跑的可以一次多打些。
    多个目标抢同一种材料时，按目标顺序先满足前面的。目标都在等（训练室在练、材料在路上）、没东西可刷时，刷 `config.yaml` 的 `daily.default_stage`。
    `maa fight` 失败 `not_open` 就换建议里的下一关；打不了代理（没三星通关过）的关换一关，或按 `maapilot-battle` 处理。
 5. 刷到材料够了就回到第 3 步做养成。
 6. 每个目标做完一段就记一笔：`maapilot goals update <标题> --note "<做了什么、还差什么>"`。完成了（用 `calc need` 或屏幕核对确实达到）：`maapilot goals remove <标题> --status 完成 --reason "<核对依据>"`。
-7. 写汇报（见下）。
 
 **理智液**：默认不用（`--medicine` 不加）。先查用户偏好里用户对理智液（包括快过期的）怎么说：说过"快过期的可以用"就加 `--expiring-medicine`；
-说过"每天可以用 N 瓶"就照办。记忆里没有 → 会话里问一次并记下；定时运行里不用，写进汇报"要你决定的事"。**源石永远不用来恢复理智。**
+说过"每天可以用 N 瓶"就照办。记忆里没有 → 用户在场就问一次并记下；用户不在就不用，写进"要你决定的事"。**源石永远不用来恢复理智。**
 
-## 定时运行里（无人值守）
+## 收尾（`daily done`）
 
-提示里写着这次运行的编号。用户不在场：
-- 先 `maapilot lock status`：`inherited` 为 `true` 才说明日常把模拟器交给了你；不是就别操作，写进总结后结束。
-- 不问问题；`guard allow`、`report seen`、`news told` 会被拒，别试。
-- 命令都在前台跑、不放后台（Claude Code 里命令超时给到 10 分钟）：你一结束日常就收回模拟器，留下没跑完的会被停掉。刷图照上面分批。时间有上限（默认 90 分钟），先做最要紧的。
-- 只做目标里同意过的花费；合成玉、源石一律不碰；第一次遇到、记忆里没答案的事不做，写进汇报。
-- 结束前用 `maapilot daily done --summary "<总结>"` 交代结果：做了什么、花了什么、目标进展到哪、要用户决定的事，最后一行「结果：完成」或「结果：没做成」（全程用中文，写给用户看）。程序会把它放进汇报；最后的回复也写同样的总结。不要用 `report write --append`。
+不管顺不顺利，最后都要收尾：`maapilot daily done --summary "<总结>"`（长的写进文件用 `--summary-file <文件>`）。
+程序把总结写进这次汇报的「目标部分」、清掉"进行中"。不收尾，下一次日常开不了，`guard allow` 也一直被拒。
+总结全程用中文、写给用户看，就是下面「汇报」的四样：做了什么、目标进度、花了什么、要用户决定的事。整次都没做成的加 `--result 没做成`。
+退出码 2（`not_in_daily`）是没有要收尾的日常（已经收过了），不用再管。
+
+## 接着收尾（启动检查里有 `daily_open`）
+
+上一次日常程序跑完了，但还没收尾（会话断了、上次忘了）：
+1. `maapilot report show --last` 看跑到哪了、哪些失败、`goals_pending` / `award_pending` 有没有。
+2. 没做完的照上面做：失败的项 `daily run --only <这几项>` 补跑（还是这一次日常）；目标部分、`maa award`、`guard check`。
+   过了 6 小时的不用再补：目标部分留到下一次日常，直接收尾，总结里写一句"上次日常没有及时收尾"。
+3. `daily done` 收尾，告诉用户。
 
 ## 汇报
 
-用玩家的话，先结果后问题：
+收尾后在会话里告诉用户，先结果后问题，四样都要有（顺利的也说，详略按用户偏好）：
 
 ```
-今天 04:40 的日常做完了：公招 4 次、基建换班、信用商店、剿灭（本周合成玉已满）、领了奖励。
+今天 04:40 的定时日常做完了：公招 4 次、基建换班、信用商店、剿灭（本周合成玉已满）、领了奖励。
 刷理智：PR-C-2 打了 8 次（给遥的辅助芯片），剩下的刷了 1-7。
 目标：遥 精2 —— 辅助芯片够了，还差聚合剂 2 个，明天能合。
 花费：龙门币约 3 万、理智 135；没花合成玉和源石。
 要你决定的事：有 2 瓶理智液明天过期，要用掉吗？（用 → 多刷约 12 次 1-7；不用 → 过期作废）
 ```
 
-- 数从 `data`（`depot_change`、`farm`、`tasks`）和你自己做的操作里来；龙门币说"约"。
-- 失败了的项说清是什么、处理了没有、下次会不会自己好。
+- **做了什么**：哪些日常项做了、哪些失败了（说清是什么、处理了没有、下次会不会自己好）。
+- **目标进度**：每个进行中的目标到哪一步、还差什么、大约还要几天；这次完成的目标单独说。
+- **花了什么**：龙门币（说"约"）、理智、材料、理智液；合成玉、源石花没花。
+- **要你决定的事**：用户不在时没做的事，一次一个、给选项和后果。没有就不写这一行。
+- 数从 `data`（`depot_change`、`farm`、`tasks`）、`calc`、`goals list` 和你自己做的操作里来，不猜。
 - 用户问"今天做了什么""上次日常怎么样"：`maapilot report show --last`（或指定哪次），转述，不整篇念。
-- **主动汇报**：见 AGENTS.md「盯着日常」——Claude Code 里一直在后台挂着 `maapilot daily watch`，定时日常一跑完它就结束；Codex 里程序把一条 `[MaaPilot 定时日常]` 通知推进会话（只从里面取运行编号，`report show` 看汇报）。你马上告诉用户：
-  有问题（退出码 1）就说清什么没做成、为什么、要用户决定什么；顺利的一两句（用户说过顺利时不用说就不说）。
-  告诉用户之后 `maapilot report seen <运行编号>`（会话开头的 `unseen_problems` 就不会再提它），Claude Code 里再挂一个 `maapilot daily watch`。
 
 ## 改日常
 
-- 时间：用户说了要改，改 `private/config.yaml` 的 `schedule`，然后 `maapilot daily schedule`，把新的时间告诉用户。
+- 时间：用户说了要改，改 `private/config.yaml` 的 `schedule`，再在会话里把还没到的那个定时删掉、按新时间建下一个（见 `maapilot-setup`「定时日常」），把下一次的时间告诉用户。
 - 做哪些项、没目标刷哪关、某项的 MAA 参数：改 `daily.tasks`、`daily.default_stage`、`daily.params`，改完 `maapilot doctor` 确认。只改用户说的。
-- 不想要定时了：用户说了就 `maapilot daily unschedule`。
-- 同一个账号只在一台电脑上设定时日常：用户要在另一台电脑上也设，先劝他停掉一边（两台会抢着登录，还会让对方的货币对账误停）。
+- 不想要定时了：用户说了就删掉会话里还没到的那个定时（之后醒来也不会再接力）。
+- 同一个账号只在一台电脑、一个会话里设定时日常：用户要在另一台电脑或另一个会话里也设，先劝他停掉一边（会重复跑；两台电脑还会抢着登录、让对方的货币对账误停）。
 
 ## 问用户的情形
 

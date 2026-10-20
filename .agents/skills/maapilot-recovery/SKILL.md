@@ -1,6 +1,6 @@
 ---
 name: maapilot-recovery
-description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页面卡住、弹窗、公告、掉线重登、服务器维护、回首页、模拟器被占用、货币对账停机（合成玉/源石减少）；定时日常里某项失败时被叫起来接管这一项。Use when a maapilot command fails, the game is stuck on an unknown page, the game went offline, doctor fails, the lock is busy, guard stopped, or a scheduled run starts you to recover a failed task (recover / stuck / offline / error / guard).
+description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页面卡住、弹窗、公告、掉线重登、服务器维护、回首页、模拟器被占用、货币对账停机（合成玉/源石减少）；日常里某项失败交回你时接管这一项、处理完接着跑。Use when a maapilot command fails, the game is stuck on an unknown page, the game went offline, doctor fails, the lock is busy, guard stopped, or a daily run hands a failed task back to you (recover / stuck / offline / error / guard).
 ---
 
 # maapilot-recovery：出错了怎么办
@@ -10,7 +10,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 ## 1. 先看
 
 1. **先看失败那一刻的截图**：`maa` 任务失败时程序当场截了一张，还找了 MAA 自己在这段时间存的截图，都在 `data.evidence`
-   （日常交给你时在 `data.handoff.evidence`，定时运行写在提示里）：`shot_now` 是失败那一刻，`maa_shots` 是 MAA 出错时存的（按时间），`missing` 是没取到的。用读图逐张看。
+   （日常交给你时在 `data.handoff.evidence`）：`shot_now` 是失败那一刻，`maa_shots` 是 MAA 出错时存的（按时间），`missing` 是没取到的。用读图逐张看。
    提示框常常一闪而过，等你截图时已经没了，所以这几张比现在的屏幕更能说明出了什么事。
 2. **再查经过**：`maapilot maa why`（默认最近一次失败的 maa 任务；指定哪项用 `--task <项>`，指定时间段用 `--since <时间> --until <时间>`）。
    它只读 MAA 的详细日志，不碰模拟器，只给事实、不给结论：`steps`（MAA 一步步做了什么、认出 / 点了什么）、`tried`（它在找哪一页）、`errors`（找不到的页面）、
@@ -24,7 +24,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
    - `screencap_failures` 多 → 模拟器连接有问题。
    - 看不出就说看不出，别编原因；拿不准是不是别的设备登录，就问用户。
 3. 现在停在哪：`maapilot screen shot`，用读图看截图。要找字就 `maapilot screen ocr`（`--find "<正则>"` 只要匹配的）。
-4. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件工具看最后一段；不用 `cat`/`grep` 接管道，无人值守时这种命令要批准、会被拒）、`data.errors`。
+4. 失败的命令给了什么：`error.code`、`error.hint`、`data.log`（maa-cli 的日志，用读文件工具看最后一段；不用 `cat`/`grep` 接管道，这种命令要用户批准，用户不在时就卡住了）、`data.errors`。
 
 ## 2. 常见情形
 
@@ -68,15 +68,16 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 截图或 `maa why` 看到的字显示游戏回到了标题页（"开始唤醒"）、出现掉线 / 网络 / 别的设备登录的提示，或任务带着 `offline` 失败时：
 
 - **服务器维护**：什么都别点，告诉用户维护中；不重登、不重试。
-- **会话里（用户在场）**：重新登录会把在别的设备上玩的用户挤下线，所以先问一句，同时开始计时：
+- **用户在会话里叫你做的事**（包括用户说的"跑一次日常"）：重新登录会把在别的设备上玩的用户挤下线，所以先问一句，同时开始计时：
   1. 跟用户说（先说发生了什么）："基建做到一半游戏被登出了，回到了开始唤醒的页面。是不是在别的设备上登着这个账号？5 分钟内没回复，我就重新登录接着跑。"
   2. 起一个 5 分钟的计时器 `sleep 300`：能在后台命令结束时叫醒你的宿主（Claude Code）就放后台跑；叫不醒的（Codex）前台跑，用户这期间说的话会在它结束后看到。
-  3. 用户先回答：照用户说的办。在别的设备上玩着 → 不登录、不重跑，告诉用户玩完说一声"接着跑日常"，你再 `maapilot maa startup` 后用 `maapilot daily run --only <没跑完的几项>` 补上（或者等下次定时日常）；
+  3. 用户先回答：照用户说的办。在别的设备上玩着 → 不登录、不重跑，告诉用户玩完说一声"接着跑日常"，你再 `maapilot maa startup` 后用 `maapilot daily run --only <没跑完的几项>` 补上（这次日常先别收尾，等他说；当天没等到就收尾，没跑的写进总结）；
      不是 / 可以登 → 马上重新登录接着跑（下一步）。
   4. 计时器先到（用户没回复）：重新登录 —— `maapilot maa startup`（`data.home` 为 `true` 就是回到了首页；也可以截图看到"开始唤醒"就点它），
      再把没做完的接着跑（日常交给你的就 `maapilot daily run --only <rest>`）。跟用户说一句"5 分钟没等到回复，已经重新登录接着跑了"。
   5. 计时器没用了（用户已经回答）就不用管它，它到点结束不影响什么。
-- **定时运行里（用户不在场）**：没人能回答，当作已经超时：直接 `maapilot maa startup` 重新登录，重跑这一项，并在总结里写明"几点被登出、已重新登录"。
+- **定时叫醒你的日常**（这次日常是你按定时的提示用 `--trigger schedule` 开的）：用户多半不在，不问、不等：直接 `maapilot maa startup` 重新登录，
+  `maapilot daily run --only <rest>` 接着跑，总结里写明"几点被登出、已重新登录"。
 - 重新登录后又很快被登出：不要再登，说明有人在别处玩着或网络不稳，写清楚，等用户。
 
 不用别的方式通知用户（不发消息、不弹窗），就在对话里问。
@@ -88,20 +89,21 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 1. `maapilot guard status` 看少了多少、什么时候。
 2. 告诉用户："合成玉少了 600（9 月 30 日 21:40 之后），我没有记录到你同意过这笔花费，所以日常先停下了。是你自己在游戏里花的吗？"
 3. 用户说是自己花的 / 同意这笔：`maapilot guard allow 合成玉 600 --reason "用户说是自己寻访用的（日期）"`（宿主可能还要用户点一次同意），再 `maapilot guard check`，对上了就恢复。
+   有日常在跑或还没收尾时这条命令会被拒：先把那次日常 `daily done` 收尾，再记。
 4. 用户也不知道：别放行，请用户在游戏里查（寻访记录、采购中心），可以帮着截图看。
 
-## 6. 定时日常里被叫起来
+## 6. 日常里交回你（`handoff`）
 
-提示里写着哪次运行、哪一项失败、日志和截图在哪。用户不在场：
-0. 先 `maapilot lock status`：`inherited` 应为 `true`（日常把模拟器锁交给了你）。不是就什么都别点（截图看看可以，截图不用锁），最后一条回复写明"没拿到模拟器"。
-1. 先看提示里的截图、`maapilot maa why` 的经过，自己判断原因（见「先看」），再按上面看屏幕、处理（被登出就直接重新登录，见「掉线、被登出」）；处理完可以把这一项重跑一次（提示里写了原来的命令，照抄），重跑还失败就不再试。命令在前台跑（Claude Code 里命令超时给到 10 分钟）。
-2. **最后把游戏留在首页**，日常会接着跑下一项。
-3. 要用户决定的、会花钱的一律不做（`guard allow` 也会被拒）；不 `report seen`、不 `news told`。
-4. 结束前用 `maapilot daily done --summary "<总结>"` 交代两三句给汇报用：卡在哪、怎么处理的、重跑成没成、要不要用户做什么，最后一行「结果：完成」或「结果：没做成」。用玩家的话；最后一条回复也写同样的总结。
+`daily run` 停在失败的那一项交给你：`data.handoff` 里是哪一项、为什么、`rest`（它和后面还没跑的）、`evidence`（截图）。
+1. 按「先看」看截图、`maapilot maa why`，判断原因，再看屏幕、按上面处理（被登出按「掉线、被登出」）。
+2. **把游戏留在首页**，再 `maapilot daily run --only <rest 用逗号连起来>` 接着跑：还是这一次日常，记在同一份汇报里。
+   同一项处理过还失败、或处理不了：不再试，`--only` 里去掉它、后面的照跑，在总结里写清卡在哪、要用户做什么。
+3. 要用户决定的、会花钱的：用户叫你跑的日常就当场问；定时叫醒你的日常不问、不做，写进总结"要你决定的事"（`guard allow` 这时也会被拒）。
+4. 整次日常最后照 `maapilot-daily` 收尾（`daily done`），总结里写上：卡在哪、怎么处理的、补跑成没成。
 
 ## 7. 会话里
 
-处理完告诉用户：什么坏了、怎么处理的、现在好了没有。日常里失败的项处理完用 `maapilot daily run --only <这几项>` 补跑（Claude Code 里放后台，Codex 里前台）。
+处理完告诉用户：什么坏了、怎么处理的、现在好了没有。用户自己让你做的事（不在日常里）失败了，处理完接着做；日常里失败的项照上一节接着跑。
 处理不了：说清卡在哪、屏幕上是什么，请用户自己看一眼。
 
 ## 问用户的情形
@@ -110,7 +112,7 @@ description: 明日方舟出错恢复 via MaaPilot —— MAA 任务失败、页
 - 多选一奖励选哪个（记忆里没有"你替我选"时）；
 - 合成玉、源石少了是不是用户自己花的；
 - 要用户重启模拟器、手动登录时；
-- 游戏被登出时，是不是在别的设备上登着（会话里问，5 分钟不回就重新登录，见「掉线、被登出」）。
+- 游戏被登出时，是不是在别的设备上登着（用户叫你做的事里问，5 分钟不回就重新登录；定时日常不问，见「掉线、被登出」）。
 
 ## 记住什么（写进用户偏好 private/memory/）
 
