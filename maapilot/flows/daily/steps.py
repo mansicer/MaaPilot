@@ -14,7 +14,7 @@ from maapilot.flows.daily.base import (BOX, BOX_TIMEOUT_MIN, FARM, UPDATE, _drop
 from maapilot.flows.daily.close import close_run
 from maapilot.flows.daily.farm import farm_timeout, read_sanity_for_farm
 from maapilot.flows.daily.preflight import _game_version, _goals_change, _preflight, goals_snapshot
-from maapilot.flows.daily.tasks import (_annihilation_failed, _annihilation_skip, _box_fresh, _box_from_skland,
+from maapilot.flows.daily.tasks import (_annihilation_skip, _box_fresh, _box_from_skland,
                                         _depot_snapshot, _guard, _maa_task, depot_change)
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
 
@@ -231,9 +231,7 @@ def _steps(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | Non
                     r.data["tasks"].append(row)
                     continue
                 row = _maa_task(r, cfg, t, [t], env, lk)
-                if t == "annihilation" and not row["ok"] and row.get("code") not in ("offline", "busy"):
-                    _annihilation_failed(r)             # 交给 agent 之前先记一次：连着没打成就这周不打
-                handoff(row)
+                handoff(row)                            # 剿灭没打成也一样交回：原因（不能代理、找不到入口、掉线）由 agent 判断
         if read_box and want(BOX):                     # 刷理智、目标部分之前：让它们看到今天的练度
             fresh = _box_fresh()
             if fresh:

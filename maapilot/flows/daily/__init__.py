@@ -34,7 +34,7 @@ from maapilot.flows.daily.base import (  # noqa: F401
 from maapilot.flows.daily.calls import (  # noqa: F401
     LEFTOVER_KILL_GRACE_S, TIMEOUT_LEFTOVER_WAIT_S, _leftover_maa, _run_group, _stop_leftover_maa, maapilot_call)
 from maapilot.flows.daily.tasks import (  # noqa: F401
-    SKLAND_TIMEOUT_S, _annihilation_failed, _annihilation_skip, _box_fresh, _box_from_skland, _depot_snapshot,
+    SKLAND_TIMEOUT_S, _annihilation_skip, _box_fresh, _box_from_skland, _depot_snapshot,
     _guard, _maa_task, depot_change)
 from maapilot.flows.daily.farm import (  # noqa: F401
     DEFAULT_STAGE_COST, FARM_MARGIN_MIN, FARM_MIN_PER_FIGHT, SANITY_FRESH_MIN, _age_min, _sanity_estimate,

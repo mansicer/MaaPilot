@@ -422,23 +422,21 @@ def test_annihilation_week_resets_and_counts_orundum(monkeypatch):
     (paths.STATE / "annihilation.json").write_text(json.dumps({"week": "2000-01-03", "runs": 9, "orundum": 1800,
                                                                 "capped": True}), encoding="utf-8")
     assert maa_cmd.annihilation_week() == {"week": maa_cmd.annihilation_week()["week"], "runs": 0, "orundum": 0,
-                                           "capped": False, "failures": 0}
+                                           "capped": False}
 
 
-def test_annihilation_blocked_after_repeated_failures(capsys, env):
+def test_annihilation_failures_always_handed_back(capsys, env):
+    """剿灭没打成每次都交回 agent（原因由它判断），程序不计数、不整周跳过（10-20 用户定）。"""
     cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
     cfg["daily"]["tasks"] = ["startup", "annihilation", "award"]
     paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     env["behavior"]["fail"] = {"annihilation"}
-    run(capsys, "daily", "run")
-    code, out = run(capsys, "daily", "run", "--only", "annihilation")
-    assert any("这周的日常先不打了" in a for a in out["data"]["alerts"])
-    close(capsys)
-    env["calls"].clear()
-    code, out = run(capsys, "daily", "run")
-    assert "annihilation" not in maa_tasks(env)
-    row = next(t for t in out["data"]["tasks"] if t["task"] == "annihilation")
-    assert "没打成" in row["skipped"]
+    for _ in range(3):
+        code, out = run(capsys, "daily", "run") if _ == 0 else run(capsys, "daily", "run", "--only", "annihilation")
+        assert code == 1 and out["data"]["handoff"]["task"] == "annihilation"
+    assert "annihilation" in maa_tasks(env)
+    from maapilot.tools import maa_cmd
+    assert "blocked" not in maa_cmd.annihilation_week() and "failures" not in maa_cmd.annihilation_week()
 
 
 # --- 子进程 ----------------------------------------------------------------------------------------------------------

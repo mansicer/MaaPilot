@@ -244,10 +244,10 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 `fight` / `annihilation` 结束时用日志里最后一次的理智更新 `private/state/sanity.json`（`source: "maa-log"`）。
 `annihilation` 另有 `orundum_gained`（这次掉的合成玉）、`week`（本游戏周累计 `{runs, orundum}`）和 `weekly_capped`（本周合成玉已经拿满：打了、认出了掉落却没有合成玉，或累计到 1800）。
-每周记录在 `private/state/annihilation.json`（`{week, runs, orundum, capped, failures, blocked?, progress?}`，周一 04:00 清零）；`weekly_capped` 之后 `daily run` 跳过剿灭（`tasks` 里这一项 `skipped`）。
+每周记录在 `private/state/annihilation.json`（`{week, runs, orundum, capped, progress?}`，周一 04:00 清零）；`weekly_capped` 之后 `daily run` 跳过剿灭（`tasks` 里这一项 `skipped`）。
 接了森空岛时，游戏里的本周剿灭合成玉（`{current, total}`，比自己累加的准）以它为准覆盖 `orundum`、拿满就 `capped`，记在 `progress: {current, total, source: "skland", at}`：
 `state skland` 每次顺手记；`daily run` 判断要不要跳过剿灭前（自己的记录还没拿满时）也只为这个读一次森空岛（不碰模拟器、不改 `box.json`；读不到按自己的记录）。
-日常里剿灭连续 2 次没做成（接管也没救回来）记 `blocked`，这周的日常也跳过；打成一次 `failures` 清零。
+剿灭没做成不另记：`daily run` 和别的项一样交回 agent，由它判断原因（不能代理、找不到入口、掉线），要用户决定的写进总结。
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
 重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
@@ -749,7 +749,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
 7. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
-剿灭失败（不管交不交给 agent，先记一次）在一周里连续 2 次 → 这周的日常不再打（`skipped`），汇报里告警，多半是还不能代理；下周一 04:00 清零。
+剿灭失败和别的项一样交回 agent（程序不计数、不整周跳过，10-20 用户定）。
 本周合成玉拿满也跳过：自己的记录还没拿满时先问一次森空岛（接了的话，见「maa」），跳过的原因里写 `（current/total）`。
 停下交给 agent → 退出码 1（`handoff`）；`--only` 补跑完还有没做成的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`
 （第一段就没拿到模拟器、什么都没做时不留"没收尾"，`open: false`）。

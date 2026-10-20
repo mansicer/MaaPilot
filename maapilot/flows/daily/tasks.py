@@ -168,17 +168,4 @@ def _annihilation_skip() -> str | None:
     if w.get("capped"):
         p = w.get("progress") or {}
         return "本周剿灭的合成玉已经拿满" + (f"（{p['current']}/{p['total']}）" if p.get("total") else "")
-    if w.get("blocked"):
-        return f"这周已经连着 {w.get('failures')} 次没打成（多半是还不能代理），这周先不打"
     return None
-
-
-def _annihilation_failed(r: _Run) -> None:
-    try:
-        from maapilot.tools.maa_cmd import record_annihilation_failure
-        w = record_annihilation_failure()
-    except Exception:
-        return
-    if w.get("blocked"):
-        r.data["alerts"].append(f"剿灭这周连着 {w['failures']} 次没打成，这周的日常先不打了；"
-                                "多半是这张图还不能代理（没 400 杀满过），要用户决定怎么办")

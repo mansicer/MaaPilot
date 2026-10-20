@@ -239,19 +239,15 @@ def result(task: str, mrun, info: dict) -> dict:
 ORUNDUM_WEEKLY_CAP = 1800
 
 
-ANNIHILATION_MAX_FAILURES = 2   # 同一周日常里剿灭连续失败几次后这周不再打（多半是还不能代理：没 400 杀满过）
-
-
 def annihilation_week() -> dict:
     """本游戏周（周一 04:00 起）剿灭的记录 `private/state/annihilation.json`：
-    {week, runs, orundum, capped, failures}；跨周清零。"""
+    {week, runs, orundum, capped}；跨周清零。剿灭没打成不在这里记：交给 agent 判断原因。"""
     from maapilot import paths
     from maapilot.knowledge.calendar import week_start
     wk = week_start().date().isoformat()
     d = common.read_json(paths.STATE / "annihilation.json") or {}
     if d.get("week") != wk:
         d = {"week": wk, "runs": 0, "orundum": 0, "capped": False}
-    d.setdefault("failures", 0)
     return d
 
 
@@ -262,7 +258,6 @@ def record_annihilation(times: int, got: int, *, drops_seen: bool) -> dict:
     d = annihilation_week()
     d["runs"] += int(times or 0)
     d["orundum"] += int(got or 0)
-    d["failures"] = 0
     if (times and not got and drops_seen) or d["orundum"] >= ORUNDUM_WEEKLY_CAP:
         d["capped"] = True
     common.write_json(paths.STATE / "annihilation.json", d)
@@ -279,16 +274,6 @@ def note_annihilation_progress(current: int, total: int, *, source: str = "sklan
     common.write_json(paths.STATE / "annihilation.json", d)
     return d
 
-
-def record_annihilation_failure() -> dict:
-    """日常里剿灭没打成（接管也没救回来）记一次；本周连续 ANNIHILATION_MAX_FAILURES 次 → blocked，这周日常不再打。"""
-    from maapilot import paths
-    d = annihilation_week()
-    d["failures"] = int(d.get("failures") or 0) + 1
-    if d["failures"] >= ANNIHILATION_MAX_FAILURES:
-        d["blocked"] = True
-    common.write_json(paths.STATE / "annihilation.json", d)
-    return d
 
 
 def _local_path(uri: str):
