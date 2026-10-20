@@ -1,5 +1,6 @@
 """权限规则只写一份（maapilot/policy.py），生成两个宿主的文件：入库的文件就是生成的结果；两边的结论一致；
-和改成生成之前手写的两份（tests/fixtures/rules_baseline/，10-19）比，结论没变（有意的改动列在 BASELINE_CHANGES）。"""
+和改成生成之前手写的两份（tests/fixtures/rules_baseline/，10-19）比，没有变松（原来拒绝 / 询问 / 放行的照旧；
+原来没规则的 maapilot 命令改成整个放行后可以有结论，10-20）。"""
 from __future__ import annotations
 
 import json
@@ -14,8 +15,6 @@ from tests.test_docs_consistency import _all_subcommands
 
 ROOT = paths.ROOT
 BASELINE = Path(__file__).parent / "fixtures" / "rules_baseline"
-# 改成生成之后有意改了结论的命令（maapilot 后面的部分）：{命令: 现在的结论}
-BASELINE_CHANGES = {("daily", "done"): policy.ALLOW}
 
 
 def run_cli(capsys, *argv):
@@ -59,8 +58,8 @@ def codex_decide(rules, argv: list[str]) -> str | None:
 
 def universe() -> list[list[str]]:
     """拿来比的命令：每种 maapilot 写法 × 每个子命令（和整组、带参数的），maa / adb / sleep 的各种写法。"""
-    subs = _all_subcommands() + [[c.words[0]] for c in policy.COMMANDS] + [list(c.words) for c in policy.COMMANDS]
-    subs += [s + ["--x", "1"] for s in subs] + [["dev", "review"], ["dev", "rules"], ["nonexistent"]]
+    subs = _all_subcommands() + [list(c.words[:1]) for c in policy.COMMANDS] + [list(c.words) for c in policy.COMMANDS]
+    subs += [s + ["--x", "1"] for s in subs] + [["dev", "review"], ["dev", "rules"], ["nonexistent"], []]
     out = [[p, *s] for p in policy.MAAPILOT + ("maapilot.cmd", "/abs/maapilot") for s in subs]
     for prog in ("maa", "maa.exe", "adb", "adb.exe"):
         for a in ("run", "fight", "copilot", "ssscopilot", "roguelike", "reclamation", "startup", "closedown",
@@ -131,12 +130,21 @@ def test_key_decisions():
         assert d([form, "guard", "allow", "源石", "1"], "codex") == policy.ASK
         assert d([form, "skland", "token"], "codex") == d([form, "skland", "token"], "claude") == policy.DENY
         assert d([form, "daily", "done"], "codex") == policy.ALLOW
-    assert d(["maapilot", "guard", "check"]) == policy.ALLOW and d(["maapilot", "dev", "rules"]) is None
+    assert d(["maapilot", "guard", "check"]) == policy.ALLOW and d(["maapilot", "dev", "rules"]) == policy.ASK
+    assert d(["maapilot", "brand-new-command"]) == policy.ALLOW                     # 新命令不用改规则
+    assert d([".venv/bin/maapilot", "dev", "rules"], "codex") == policy.ASK
     assert d(["maa.exe", "fight", "1-7"]) == policy.DENY and d(["maa", "install"]) is None
     assert d(["adb", "-s", "x", "shell"]) == policy.DENY and d(["adb", "connect", "x"]) is None
     assert d(["sleep", "300"]) == policy.ALLOW and d(["sleep", "300", "x"]) is None and d(["sleep", "5"]) is None
     deny = claude_rules(json.loads((ROOT / policy.SETTINGS).read_text(encoding="utf-8")))[policy.DENY]
     assert {"Read(private/skland.json)", "Edit(private/skland.json)", "Edit(private/guard/**)"} <= set(deny)
+
+
+def test_exceptions_name_real_commands():
+    """maapilot 整个放行，例外（询问 / 拒绝）写的命令得真有：改了名例外就悄悄失效了。"""
+    real = {tuple(s) for s in _all_subcommands()} | {(s[0],) for s in _all_subcommands()}
+    stale = [" ".join(c.words) for c in policy.COMMANDS if c.decision != policy.ALLOW and c.words not in real]
+    assert not stale, f"policy.COMMANDS 的例外里有不存在的命令：{stale}"
 
 
 def test_install_check_expectations_follow_policy():
@@ -147,16 +155,8 @@ def test_install_check_expectations_follow_policy():
 
 # --- 和改成生成之前手写的两份比 --------------------------------------------------------------------------------------
 
-def _expected_change(argv: list[str]):
-    rest = tuple(argv[1:])
-    for k, v in BASELINE_CHANGES.items():
-        if argv[0] in policy.MAAPILOT and rest[:len(k)] == k:
-            return v
-    return "same"
-
-
 @pytest.mark.parametrize("host", ["claude", "codex"])
-def test_same_decisions_as_baseline(host):
+def test_not_looser_than_baseline(host):
     if host == "claude":
         old = claude_rules(json.loads((BASELINE / "settings.json").read_text(encoding="utf-8")))
         new = claude_rules(json.loads((ROOT / policy.SETTINGS).read_text(encoding="utf-8")))
@@ -164,10 +164,13 @@ def test_same_decisions_as_baseline(host):
     else:
         old, new, dec = codex_rules(BASELINE / "maapilot.rules"), codex_rules(ROOT / policy.CODEX_RULES), codex_decide
     for argv in universe():
-        want = _expected_change(argv)
-        if want == "same" or (host == "claude" and argv[0] != policy.BARE and want != policy.DENY):
-            want = dec(old, argv)
-        assert dec(new, argv) == want, f"{host}：{' '.join(argv)} 原来是 {dec(old, argv)}，现在是 {dec(new, argv)}"
+        was, now = dec(old, argv), dec(new, argv)
+        if was is not None or argv[0] not in policy.MAAPILOT:
+            assert now == was, f"{host}：{' '.join(argv)} 原来是 {was}，现在是 {now}"
+    # 原来没规则、现在有的只能是 maapilot 本身的命令；Claude Code 里只有本名放行 / 询问
+    assert dec(new, ["maapilot", "dev", "rules"]) == policy.ASK
+    if host == "claude":
+        assert dec(new, [".venv/bin/maapilot", "daily", "done"]) is None
 
 
 def test_same_file_rules_as_baseline():

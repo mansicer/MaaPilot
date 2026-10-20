@@ -126,15 +126,6 @@ def _settings() -> dict:
     return json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
 
 
-def _prefixes(kind: str) -> list[str]:
-    out = []
-    for rule in _settings()["permissions"][kind]:
-        m = re.fullmatch(r"Bash\((.*?)(?::\*)?\)", rule)
-        if m:
-            out.append(m.group(1))
-    return out
-
-
 def _rule(argv: list[str]) -> str | None:
     """这条命令落在哪一类规则（deny > ask > allow，同 Claude Code）。按 maapilot/policy.py 判；
     入库的 settings.json / Codex 规则就是它生成的（tests/test_policy.py 核对），两边结论一样。"""
@@ -171,16 +162,12 @@ def test_every_subcommand_has_rule():
 def test_dev_commands_not_for_user_agent():
     """开发用的命令：skill、CLAUDE.md 里不提，也没有放行规则。"""
     assert not [c for _, c, _ in INVOCATIONS if c.split(" ", 1)[0] in DEV_ONLY]
-    assert all(_rule([d, "review"]) is None for d in DEV_ONLY)
+    assert all(_rule([d, "review"]) == "ask" for d in DEV_ONLY)                     # dev rules 会改 agent 自己的权限
 
 
 def test_confirm_commands_are_ask():
     for c in ASK:
-        assert _rule(c.split()) == "ask", f"`{c}` 必须是询问"
-    allowed_ask = [c for c in ASK if any(c.startswith(p.removeprefix("maapilot ")) or
-                                          p.removeprefix("maapilot ") == c.split()[0]
-                                          for p in _prefixes("allow"))]
-    assert not allowed_ask, f"放行规则盖住了要询问的命令：{allowed_ask}"
+        assert _rule(c.split()) == "ask", f"`{c}` 必须是询问"       # 询问优先于整个放行的 maapilot:*
 
 
 def test_user_only_commands_and_token_file_are_denied():

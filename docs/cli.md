@@ -71,7 +71,8 @@
 | `host status` / `host install <claude\|codex>` | 否（`install codex` 改 Codex 的用户设置） | 放行 | A |
 | `report show / latest / list / write` | 否 | 放行 | B |
 
-"放行"的命令不弹确认；"询问"的（只有 `guard allow`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`），无头运行（`claude -p` / `codex exec`）里一律被拒。
+权限规则是 `maapilot` 整个放行、只列例外，表里没列的新命令也放行。
+"放行"的命令不弹确认；"询问"的（`guard allow`，还有开发用的 `dev`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`），无头运行（`claude -p` / `codex exec`）里一律被拒。
 
 **程序只死守真实货币**（docs/design.md「思路」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
 定时日常叫起的无头 agent 里（环境里有 `MAAPILOT_DAILY_RUN`，空的也算；或者这条命令是正在跑的日常进程的子孙，清掉环境变量也认得出）
@@ -1209,42 +1210,7 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(maapilot doctor:*)",
-      "Bash(maapilot screen:*)",
-      "Bash(maapilot input:*)",
-      "Bash(maapilot maa:*)",
-      "Bash(maapilot state:*)",
-      "Bash(maapilot data:*)",
-      "Bash(maapilot calc:*)",
-      "Bash(maapilot goals:*)",
-      "Bash(maapilot op:*)",
-      "Bash(maapilot craft:*)",
-      "Bash(maapilot report:*)",
-      "Bash(maapilot reset:*)",
-      "Bash(maapilot daily run:*)",
-      "Bash(maapilot daily status:*)",
-      "Bash(maapilot daily watch:*)",
-      "Bash(maapilot daily done:*)",
-      "Bash(maapilot daily schedule:*)",
-      "Bash(maapilot daily unschedule:*)",
-      "Bash(maapilot guard snapshot:*)",
-      "Bash(maapilot guard check:*)",
-      "Bash(maapilot guard status:*)",
-      "Bash(maapilot lock status:*)",
-      "Bash(maapilot lock release:*)",
-      "Bash(maapilot skland status:*)",
-      "Bash(maapilot host status:*)",
-      "Bash(maapilot host install:*)",
-      "Bash(maapilot tools status:*)",
-      "Bash(maapilot tools install:*)",
-      "Bash(maapilot news list:*)",
-      "Bash(maapilot news show:*)",
-      "Bash(maapilot news told:*)",
-      "Bash(maapilot game version:*)",
-      "Bash(maapilot game update:*)",
-      "Bash(maapilot copilot find:*)",
-      "Bash(maapilot copilot show:*)",
-      "Bash(maapilot copilot strip:*)",
+      "Bash(maapilot:*)",
       "Bash(sleep 300)",
       "Read(private/**)",
       "Edit(private/config.yaml)",
@@ -1257,7 +1223,8 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "WebFetch(domain:maa.plus)"
     ],
     "ask": [
-      "Bash(maapilot guard allow:*)"
+      "Bash(maapilot guard allow:*)",
+      "Bash(maapilot dev:*)"
     ],
     "deny": [
       "Bash(maapilot skland token:*)",

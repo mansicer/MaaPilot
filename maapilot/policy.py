@@ -53,20 +53,13 @@ def _cmds(decision: str, *specs: str, why: str | None = None) -> list[Cmd]:
     return [Cmd(tuple(s.split()), decision, why) for s in specs]
 
 
-# maapilot 的子命令。没列的（如开发用的 dev）两边都按默认：Claude Code 弹确认、Codex 在沙箱里跑（连不上模拟器）。
-# 只有记下花合成玉 / 源石的同意（guard allow）要问；用户自己在终端里跑的（skland token）拒绝；其余以用户在对话里的同意为准，放行。
+# maapilot 的命令：整个放行，只列例外（拒绝 > 询问 > 放行，两边都是）。加普通的新命令不用改这里，也不用重新生成。
+# 例外：记下花合成玉 / 源石的同意（guard allow）要问；开发命令（dev，其中 dev rules 会改 agent 自己的权限）要问；
+# 用户自己在终端里跑的（skland token）拒绝。其余以用户在对话里的同意为准（AGENTS.md 硬规则 3），程序那层另有把关（锁、对账、定时日常里拒绝）。
+# 新命令要是会花合成玉 / 源石、碰凭据或改权限，记得加进这里的例外。
 COMMANDS: list[Cmd] = [
-    *_cmds(ALLOW, "doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report", "reset"),
-    *_cmds(ALLOW, "daily run", "daily status", "daily watch", "daily done", "daily schedule", "daily unschedule"),
-    *_cmds(ALLOW, "guard snapshot", "guard check", "guard status"),
-    *_cmds(ALLOW, "lock status", "lock release"),
-    *_cmds(ALLOW, "skland status"),
-    *_cmds(ALLOW, "host status", "host install"),
-    *_cmds(ALLOW, "tools status", "tools install"),
-    *_cmds(ALLOW, "news list", "news show", "news told"),
-    *_cmds(ALLOW, "game version", "game update"),
-    *_cmds(ALLOW, "copilot find", "copilot show", "copilot strip"),
-    *_cmds(ASK, "guard allow"),
+    Cmd((), ALLOW),
+    *_cmds(ASK, "guard allow", "dev"),
     *_cmds(DENY, "skland token", why=TOKEN_WHY),
 ]
 
@@ -155,7 +148,7 @@ def dump_json(d: dict) -> str:
 CODEX_HEADER = """\
 # MaaPilot：Codex 的命令规则。由 maapilot/policy.py 生成（maapilot dev rules），不要手改；和 .claude/settings.json 的权限出自同一份。
 # allow 在沙箱外跑、不弹确认；prompt 每次问用户（无头 codex exec 里等于拒绝）；forbidden 一律拒绝。
-# 只有合成玉 / 源石的放行（guard allow）要问；其余以用户在对话里的同意为准。
+# maapilot 整个放行，只列例外：合成玉 / 源石的放行（guard allow）、开发命令（dev）要问，森空岛凭据拒绝；其余以用户在对话里的同意为准。
 # 禁止的只有绕过锁和对账的直接操作（直接用 maa 跑任务、直接 adb shell）和森空岛凭据。
 # 规则按命令的第一个词认程序，所以 maapilot 的几种写法（PATH 里的、.venv 里的、Windows 的 .exe）、adb / maa 的 .exe 都列上。
 # Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样拆开的命令还没核实过；写绝对路径的也认不出来
@@ -170,12 +163,13 @@ def _s(x) -> str:
 
 def _patterns(cmds: list[Cmd]) -> list[list]:
     """同一前缀的合成一条：整组的放进一个列表，`daily run / status …` 写成 ["daily", ["run", "status", …]]。"""
+    whole = [[]] if any(not c.words for c in cmds) else []          # 空前缀：整个程序
     singles = [c.words[0] for c in cmds if len(c.words) == 1]
     groups: dict[tuple, list[str]] = {}
     for c in cmds:
         if len(c.words) > 1:
             groups.setdefault(c.words[:-1], []).append(c.words[-1])
-    out = [[singles]] if singles else []
+    out = whole + ([[singles]] if singles else [])
     for head, last in groups.items():
         out.append([*head, last if len(last) > 1 else last[0]])
     return out

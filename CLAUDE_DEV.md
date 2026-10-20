@@ -9,7 +9,9 @@
 - 代码：`maapilot/tools/`（工具命令）、`maapilot/flows/`（目标、日常、定时）、`maapilot/crew/`（设备与 MAA，旧项目搬来的）、`maapilot/knowledge/`（游戏数据）。
 - 测试：`.venv/bin/python -m pytest -q`，改完要全过。
 - **权限规则只改 `maapilot/policy.py`**，再跑 `maapilot dev rules` 生成 `.claude/settings.json` 的 `permissions`、`.codex/rules/maapilot.rules` 和 docs/cli.md 里抄的设置；
-  这几处不要手改（`maapilot dev rules --check`、`tests/test_policy.py` 会发现）。加了新的子命令要在 policy 里给结论（`test_every_subcommand_has_rule`）。
+  这几处不要手改（`maapilot dev rules --check`、`tests/test_policy.py` 会发现）。
+  `maapilot` 整个放行、只列例外（`guard allow`、`dev` 询问，`skland token` 拒绝；10-20 用户定）：加普通的新命令不用改规则、不用重新生成；
+  新命令要是会花合成玉 / 源石、碰凭据或改权限，才加进 `policy.COMMANDS` 的例外（例外写的命令得真有，`test_exceptions_name_real_commands`）。
   Claude Code 的自动模式可能拦下改 `.claude/settings.json`（算改自己的权限）：那时请用户自己跑 `maapilot dev rules`。
 - 查用户的 agent 哪里出错、用错命令：`maapilot dev review [--since 3d] [--exclude <会话>]`（读命令记录和 Claude Code 会话记录，见 docs/cli.md「dev」），不用手动翻会话记录。
 - **规则写死的命令必须在模拟器上测过才算做完**（用户 2026-10-13 定）：快捷命令、导航、识图 / 识字、点击坐标、页面判断、读数解析这类固定规则，
