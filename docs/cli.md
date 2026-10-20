@@ -46,7 +46,7 @@
 |---|---|---|---|
 | `doctor [--brief] [--offline] [--fix]` | 除 `--brief`/`--offline` 外只读 | 放行 | A |
 | `screen shot / ocr` | 只读，**不拿锁** | 放行 | A |
-| `input tap / swipe / back / text` | 操作 | 放行 | A |
+| `input tap / swipe / back / text / home` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
 | `maa why` | 否（只读 MAA 的日志） | 放行 | A |
 | `copilot find / show / strip` | 否（联网查作业站） | 放行 | A |
@@ -194,9 +194,23 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 | `input swipe X1 Y1 X2 Y2 [--ms 毫秒]` | 滑动（默认 500 ms） |
 | `input back` | 安卓返回键 |
 | `input text "<文字>"` | 往当前输入框输入 |
+| `input home` | 回首页（只导航），截一张首页 |
 
 `data`：`{"done": true}`。操作之后不自动截图：要看结果就 `screen shot`。坐标超出 1280×720 退出码 2（`bad_point`）；
 设备上没做成退出码 1（`input_failed`）。
+
+`input home`：和 `maa startup` 之后回首页同一套（`nav.ensure_home`）：关掉认得的弹窗（表在 `maapilot/crew/overlays.py`：连接故障、公告、月签到、
+登录活动页、获得物资、设置页……，点的都是关闭按钮或空白处）、左上菜单"首页"、返回键，最多 3 轮；不点会花东西的按钮。到了之后截一张首页（同 `screen shot --name home`）。
+关掉的弹窗都写进结果，不悄悄处理：`overlays` 是路上关掉的（按先后，去重），`seen` 是其中要交给 agent 的——活动签到页（`login_event`，新活动的限时登录签到）
+和月签到（`sign_in`）：程序只关不领，`seen` 不为空时带 `hint`，agent 按 `maapilot-daily`「活动签到」回去领。没回到首页 → 退出码 1（`not_home`，`data` 同样给全，看 `shot`）。
+
+```json
+{"home": true, "shot": "/…/private/shots/20261021-051200-home.png", "overlays": ["announcement", "login_event"],
+ "seen": ["login_event"], "hint": "路上关掉了活动签到页（程序只关不领）：…"}
+```
+
+别的命令导航时关掉的活动签到页 / 月签到也一样记下：带运行编号（`daily run` 的子进程）的记进 `private/state/overlays.jsonl`，`daily run` 结束时写进汇报（见「daily」的 `seen_overlays`）；
+`maa startup` 回首页时关掉的写进它的 `data.overlays` / `data.seen`（没关掉什么就没有这两个字段）。
 这里没有页面拦截；合成玉、源石的防线是[对账](#guard-货币对账)。
 
 ## maa —— 调 MAA
@@ -210,7 +224,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 
 | 任务 | 参数 | MAA 任务 |
 |---|---|---|
-| `startup` | | StartUp（启动游戏、登录）；成功后再用 MaaFramework 回首页（游戏已经开着时 MAA 不管停在哪页），`data.home`：`true` 到了 / `false` 没回去 / `null` 连不上 |
+| `startup` | | StartUp（启动游戏、登录）；成功后再用 MaaFramework 回首页（游戏已经开着时 MAA 不管停在哪页），`data.home`：`true` 到了 / `false` 没回去 / `null` 连不上；路上关掉了弹窗时 `data.overlays` / `data.seen`（同 `input home`） |
 | `recruit` | | Recruit（公招；默认 4 次、刷新、3★4★ 自动招、5★6★ 留给用户） |
 | `infrast` | | Infrast（基建换班、收菜；无人机加速贸易站） |
 | `mall` | | Mall（信用商店、访问好友；优先买招聘许可，不买家具零件） |
@@ -773,6 +787,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
  "failed": [], "goals_active": 0, "goals_pending": false, "award_pending": false, "farm": {"stage": "1-7", "times_done": 12, …},
  "depot_change": [{"id": "4001", "name": "龙门币", "delta": 12000}],
  "guard": {"ok": true}, "alerts": [], "report": "private/reports/2026-09-30-0440.md",
+ "seen_overlays": ["login_event"],                                               // 回首页时关掉了活动签到页 / 月签到才有
  "game_version": {"installed": {"version": "2.7.81", …}, "latest": {"version": "2.7.81", …}, "update_needed": false},
  "goals_expired": [{…同 goals list 的一项…}],                                    // 有到期挪走的才有
  "goals_change": {"removed": [{"title": "…", "fields": {…}, "done_entry": {"status": "完成", "ended": "…"}}],
@@ -789,6 +804,9 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
 `goals_change`：每段结束时（不论怎么结束）把 goals.md 里进行中、暂停的目标和这次日常开头的快照比（`fields` 是固定 6 行的原文，`field` 用输出名 `status` / `object` / `deadline`…）；
 没变就没有这个字段。`removed` 的 `done_entry` 是 goals-done.md 里同名那段的状态与结束行，`null` 表示没经过 `goals remove` / 到期就没了；改标题算一删一加。
 汇报里写成「目标变动」一节，`lines` 里也有（目标变动不算问题，但要告诉用户）。
+`seen_overlays`：这次日常的子命令（`maa startup` 回首页、`guard snapshot` 读仓库……）导航时关掉的活动签到页（`login_event`）/ 月签到（`sign_in`），
+接着跑的几段合在一起；有的话「要注意」（和 `lines` 的"告警："）里写一条"回首页时看到了活动签到页，被程序关掉了，奖励没领：领奖励交给 agent"，`next` 提示收尾前 `input home` 回去看。
+不算问题（`has_problem` 不看它），agent 按 `maapilot-daily`「活动签到」处理。MAA 自己（`maa-cli` 的任务里）关掉的看不到。
 `news`：官方日程（开头拉过的缓存，同 `doctor --brief` 的 `news`）；`due` 不为空时 `lines` 里有一行，agent 按 `maapilot-events` 跟用户说、`news told`。
 `lines`：每次都给的几句中文（怎么结束的、维护时段、目标变动、到期要看的、没做成的项、官方日程……），agent 照着转述。
 
@@ -1062,6 +1080,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 `depot.json`：`{"at": iso, "items": {"<id>": count}}`；`box.json`：`{"at": iso, "operators": {"<名>": {"id", "rarity", "elite", "level", "potential"}}}`；
 `sanity.json`：`{"at": iso, "current": n, "max": n}`；
 `live.json`：`{"operators": {"<名>": {"elite", "level", "skill_level", "mastery": {"<技能>": 专几}, "at", "source"}}}`（只有读到的项，都是下界）。
+`overlays.jsonl`：导航时关掉的活动签到页 / 月签到，一行一个 `{"at", "name", "run_id"}`（`run_id` 是 `daily run` 的运行编号，别的命令为 `null`；见「input」）。
 
 ### log/
 

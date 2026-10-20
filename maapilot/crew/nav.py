@@ -61,8 +61,8 @@ def recover_offline(g: Game, timeout: float = 45.0, interval: float = 3.0) -> di
 
 
 def dismiss_dialogs(g: Game) -> None:
-    """关掉认得的遮挡（连接故障、公告、月签到、登录活动页、设置页、角色档案教程……，表在 maapilot.crew.overlays），
-    再确认"离开罗德岛基建"（导航要离开基建时才对，所以不在那张表里）。"""
+    """关掉认得的遮挡（连接故障、公告、月签到、登录活动页、设置页、角色档案教程……，表在 maapilot.crew.overlays；
+    关掉的都记在那里，活动签到页、月签到交给 agent），再确认"离开罗德岛基建"（导航要离开基建时才对，所以不在那张表里）。"""
     overlays.dismiss_all(g)
     if g.find(r"离开罗德岛基建", (300, 260, 700, 80)):
         g.tap(842, 495, delay=2.5)                       # confirm leaving the base
@@ -78,6 +78,7 @@ def open_drawer(g: Game) -> bool:
         if g.find(r"首页|终端|基建", (40, 80, 720, 200)):
             return True
         if g.find(r"月签到", (0, 60, 400, 80)):          # that tap hit the home sign-in icon => we are home
+            # we opened it ourselves (not shown by the game), so it is not recorded as a closed overlay
             g.tap(1215, 68, delay=2.0)
             return False
         time.sleep(1.5)
