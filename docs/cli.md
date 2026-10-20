@@ -5,7 +5,7 @@
 ## 通用约定
 
 - **调用形式**：agent 在仓库根目录用 `maapilot <命令> …`（不写 `./`、不用全路径、一次一条命令，权限规则按这个形式匹配）。
-  `maapilot` 装在项目的虚拟环境 `.venv` 里（setup 时用 uv 建，见 skill `maapilot-setup`）；启动钩子 `bin/session-start` 把 `.venv/bin` 加进本次会话的 PATH，所以直接写 `maapilot`。定时任务用 `.venv/bin/maapilot` 的完整路径。
+  `maapilot` 装在项目的虚拟环境 `.venv` 里（setup 时用 uv 建，见 skill `maapilot-setup`）；启动钩子 `bin/session-start` 把 `.venv/bin` 加进本次会话的 PATH，所以直接写 `maapilot`。
 - **版本**：`maapilot --version` → `data: {version, commit, text}`（`version` 是 `maapilot.__version__`；`commit` 是当前提交的前 7 位，直接读 `.git`，
   不是 git 仓库时为 `null`；`text` 给人看，如 `"0.0.1（bff8a50）"`）。`doctor` 和 `doctor --brief` 的 `data.version` 同样是这个。
 - **输出**：stdout 只有一个 JSON 信封，进度与日志写 stderr：
@@ -34,12 +34,11 @@
 - **坐标**：所有坐标、区域都是 1280×720 参考坐标系（截图也按这个尺寸存），与设备真实分辨率无关（要求 16:9）。
 - **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
   只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
-  （无头 `claude -p` / `codex exec`）通过环境变量 `MAAPILOT_LOCK_TOKEN` 继承锁，子进程里的命令不会被挡（见 `maapilot/crew/lock.py`）。
+  （它调的 `maapilot maa …` 等）通过环境变量 `MAAPILOT_LOCK_TOKEN` 继承锁，子进程里的命令不会被挡（见 `maapilot/crew/lock.py`）。
 - **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行；别的命令失败（包括参数写错、退出码 2）或有结果摘要的（`calc need`、`goals` 改动）也记一行（见[文件](#private-文件)）。
 - **物品与干员名**：参数里用游戏里的中文名；输出里物品同时给 `id` 与 `name`。
 - **长命令**：`daily run` 要 20–60 分钟，`maa fight`、`state box` 等可能几分钟。Claude Code 的 Bash 超时最长 10 分钟：
-  预计超过几分钟的放后台跑，结束时会收到通知（`CLAUDE.md`）。Codex 的后台命令结束叫不醒模型：前台跑、等它结束；
-  `daily run` 在 Codex 会话里结束时还会推一条 `[MaaPilot 日常]` 通知（见「daily」的推送）。
+  预计超过几分钟的放后台跑，结束时会收到通知（`CLAUDE.md`）。Codex 的后台命令结束叫不醒模型：前台跑、等它结束。
 
 ## 命令总览
 
@@ -59,26 +58,24 @@
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
 | `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
-| `daily watch`、`report seen` | 否（只读 / 记账） | 放行 | B |
 | `reset [--dry-run] [--memory]` | 否 | 放行 | B |
 | `guard snapshot / check / status` | 只读 | 放行 | A |
 | `guard allow` | 否 | **询问** | A |
 | `goals list / add / update / remove / move / expire` | 否 | 放行 | B |
 | `op upgrade / mastery / progress`、`craft` | 操作 | 放行 | B |
 | `daily run / status` | `run` 操作 | 放行 | B |
-| `daily done` | 否（定时日常叫起的 agent 交代结果） | 放行 | B |
-| `daily schedule / unschedule` | 否（改 crontab / Windows 任务计划程序） | 放行 | B |
+| `daily done` | 否（agent 收尾这次日常） | 放行 | B |
+| `daily unschedule` | 否（删 v0.1 留下的 crontab 行 / Windows 任务） | 放行 | B |
 | `host status` / `host install <claude\|codex>` | 否（`install codex` 改 Codex 的用户设置） | 放行 | A |
 | `report show / latest / list / write` | 否 | 放行 | B |
 
 权限规则是 `maapilot` 整个放行、只列例外，表里没列的新命令也放行。
-"放行"的命令不弹确认；"询问"的（`guard allow`，还有开发用的 `dev`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`），无头运行（`claude -p` / `codex exec`）里一律被拒。
+"放行"的命令不弹确认；"询问"的（`guard allow`，还有开发用的 `dev`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`）。
 
 **程序只死守真实货币**（docs/design.md「设计哲学」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
-定时日常叫起的无头 agent 里（环境里有 `MAAPILOT_DAILY_RUN`，空的也算；或者这条命令是正在跑的日常进程的子孙，清掉环境变量也认得出）
-用户不在场，直接退出码 3 `needs_user`，什么也没做（`maapilot/tools/confirm.py`）。
-别的会改东西的命令（`daily schedule / unschedule`、`reset`、`host install`、`lock release`、改 `config.yaml`）都放行：agent 先在对话里问清楚、用户同意后再跑（AGENTS.md 硬规则），程序不另弹确认。
-同样按"是不是定时日常叫起的"拒绝的还有 `report seen`、`news told`（退出码 2 `not_allowed`）：用户还没看到，不能替他标成已读 / 已告知。
+有日常在跑、或者跑完还没收尾（`daily done` 之前；不分手动、定时）时，直接退出码 3 `needs_user`，什么也没做（`maapilot/tools/confirm.py`）：
+定时日常多半是用户不在的时候跑的，这时记下的"同意"一定是假的；日常里本来就不该临时决定花真实货币，等收尾后用户在对话里同意再记。
+别的会改东西的命令（`daily unschedule`、`reset`、`host install`、`lock release`、改 `config.yaml`）都放行：agent 先在对话里问清楚、用户同意后再跑（AGENTS.md 硬规则），程序不另弹确认。
 `private/guard/` 下的记录文件 agent 改不改得了，靠宿主的权限 / 沙箱（Claude Code：拒绝编辑 `private/guard/**`；Codex 管不了，见「Codex 命令规则」）。
 
 ---
@@ -98,7 +95,7 @@
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
 检查项（`data.checks[].name`）；每项 `{name, ok, detail, fix}`，有的另带字段（`candidates`、`resolution`、`old_entries`…）。
-标 `required: false` 的（`claude` / `codex`——只有 `agent` 是 `codex` 而 Codex 没信任这个文件夹、或在 Windows 上没有沙箱时是必需项、`game`、`schedule`、`skills_link`、`setup`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
+标 `required: false` 的（`agent_config`、`game`、`legacy_schedule`、`skills_link`、`setup`、`maa_core`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
 
 | name | 查什么 | 修复建议 |
 |---|---|---|
@@ -108,13 +105,13 @@
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
-| `claude` / `codex`（项名是 `config.yaml` 的 `agent`） | 找得到 `tools.<agent>`（定时日常叫无头 agent 用）；`path` 是绝对路径（setup 写进 `tools.<agent>`）；`trusted`：这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`（没信任时无头 `claude -p` 忽略项目的放行规则），Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时不加载 `.codex/rules/`，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa，所以这时 `required: true`）。找法同定时日常：写了 `tools.<agent>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`maapilot.hosts` 的 `CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`（Claude Code 原生安装的 `%USERPROFILE%\.local\bin\claude.exe`、Codex 的 npm 包里自带的 `codex.exe`）。`warnings`（Windows，不算没通过）：还是 `.cmd` / `.bat` / `.ps1` 包装（`.ps1` 起不了，算没通过）、在应用商店程序的隔离目录（`…\Packages\…\LocalCache\`）里（定时任务看不见）。`sandbox`（只在 Windows、`agent` 是 codex 时）：`{supported, detail, version}`，看 `codex exec --help` 认不认 `workspace-write`、`codex sandbox --help` 有没有 Windows（不真的起沙箱、不调模型）；`supported: false` 时 `required: true`（定时日常不会改用 `danger-full-access` 顶上），`null`（帮助跑不出来）只放进 `warnings`。`agent` 写错时项名是 `agent`。`agent` 写了 `command`（自定义的 harness）时项名是它的 `name`：查 `command` 的第一项找得到（同下面「无头 agent」的找法），带 `custom: true`、`command`、`prompt`、`path`，不查信任和沙箱（名字是 codex 时照样要 Codex 信任这个文件夹）；`.ps1` 算没通过，Windows 上 `.cmd` / `.bat` 又写了 `prompt: arg` 时 `warnings` 里提醒提示会改从 stdin 给 | 在 `tools.<agent>`（自定义的：`agent.command` 第一项）写绝对路径；Claude Code：在这个文件夹里交互地启动一次 claude、接受信任提示；Codex：`maapilot host install codex`；没有沙箱：升级 Codex，还不行问用户要不要在 WSL 里用或改用 claude |
+| `agent_config` | `config.yaml` 里还写着 v0.1 的设置（`agent`、`schedule_options`、`daily.agent_timeout_min`、`daily.recovery_timeout_min`：定时叫起无头 agent、系统定时用的）：现在不用了，写了也忽略；`legacy` 列出是哪几个。`required: false` | 用户同意后从 `config.yaml` 删掉（不删也不影响） |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
-| `schedule` | 系统里（crontab / Windows 任务计划程序）有没有本项目的定时日常，读回来的时间；有没有旧版 MaaPilot 的定时任务（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务；列在 `old_entries`）。任务被停用了（`enabled: false`）、定时要执行的程序找不到或装在 Codex 应用的隔离目录里（`problems`，同 `daily schedule` 装之前查的）时不通过。Windows 上通过时提醒电脑要保持登录（锁屏可以）。找不到 schtasks.exe 时 `unavailable: true` | `daily schedule` |
+| `legacy_schedule` | 系统里（crontab / Windows 任务计划程序）还留着 v0.1 的定时日常没有（同 `daily unschedule` 删的那些；`times`、`entries`）：留着会到点自己跑 `daily run`，不通过。更旧的 MaaPilot 的定时（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务）列在 `old_entries`，不算。读不了时不通过（`detail` 写原因）；这台电脑上没有系统定时（Windows 上找不到 schtasks.exe）算通过。`required: false` | 用户同意后 `daily unschedule`，再用 harness 的定时在会话里定好（`maapilot-setup`） |
 | `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
 
@@ -138,11 +135,10 @@
  "goals_active": 2,
  "guard_stop": null,
  "last_daily": {"at": "2026-09-30T04:40:12+08:00", "ok": true, "report": "/…/private/reports/2026-09-30-0440.md"},
- "schedule": {"installed": true, "times": ["04:40", "16:40"]},
+ "daily_open": {"run_id": "20260930-0440", "trigger": "schedule", "started_at": "…", "age_h": 1.5, "stale": false, "running": false},
+ "legacy_schedule": {"times": ["04:40", "16:40"], "backend": "cron"},
  "next": "setup",
  "version": {"version": "0.0.1", "commit": "bff8a50", "text": "0.0.1（bff8a50）"},
- "unseen_problems": [{"run_id": "20261004-1640", "started_at": "…", "status": "stopped", "report": "…",
-                      "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "…"]}],
  "goals": [{"title": "昨日海", "object": "活动 昨日海", "deadline": "2026-10-30T03:59+08:00", "days_left": 20.5}],
  "news": {"at": "…", "lines": ["进行中：昨日海（到 10月30日 03:59）"], "due": ["6774:2026-10-09T12:00:00+08:00"]},
  "sources": [{"source": "skland", "name": "森空岛", "at": "…", "message": "森空岛的数据格式变了（缺 status.ap）",
@@ -151,17 +147,17 @@
 ```
 
 `next`：`"setup"`（没有 `setup.json`，用户一开口 agent 就进入 `maapilot-setup`）、`"guard"`（对账停机中，先告诉用户）或 `null`。
-`lines` 是给会话开头看的几行中文摘要。`schedule` 是从系统里读回来的（同 `daily status`）：设不了定时时另有 `unavailable`（原因），
-Windows 上任务被停用了另有 `enabled: false`（`lines` 里写一行"到点不会跑"）。`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（`seen.json` 不算；读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
+`lines` 是给会话开头看的几行中文摘要。`daily_open`：没收尾的日常（同 `daily status` 的 `open`，另有 `running`：`daily run` 还在跑；正在跑时带 `step`），没有为 `null`；
+`lines` 里写一行：还在跑 / 还没收尾（做完目标部分、领奖励、对账后 `daily done`）/ 超过 6 小时没收尾（下次 `daily run` 自动收尾）。
+`legacy_schedule`：系统里还留着 v0.1 的定时日常（同 `doctor` 的 `legacy_schedule` 项）时是 `{times, backend}`，`lines` 里提示用户同意后 `daily unschedule`、再用 harness 定好；没有（或看不了）为 `null`。
+`last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
-`lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说）；`daily watch` 交出去过的（`handed`）照样列，直到 `news told`。
+`lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说），列到 `news told` 为止。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
-`session`：这次启动检查是在哪个宿主的会话里跑的 `{host: "claude" | "codex", thread}`（看环境里的 `CLAUDECODE` / `CODEX_THREAD_ID`，两个都有算 Claude Code——
-在 Codex 的终端里开的 claude 也继承了 `CODEX_THREAD_ID`；看不出来、或是定时日常叫起的 agent 为 `null`），
-同时记进 `private/state/agent-session.json`（每个宿主各记最近一个：`{"claude": {thread, at, ts}, "codex": {...}}`），日常结束时按它推送（见「daily」的推送）。
+v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定时、不再记"告诉过用户没有"、不再记会话往里推消息）。
 `memory`：用户偏好记录 `{dir: "private/memory", index: [MEMORY.md 里的 "- …" 行], imported}`（没设置过为 `null`）。偏好由 agent 读写（格式见 `AGENTS.md`「用户偏好」），
 不依赖哪个 agent 的记忆功能。还没有 `private/memory/MEMORY.md`、也没搬过（没有记号文件 `private/memory/.imported-from-claude`）时，启动检查把 Claude Code 给这个项目记的自动记忆复制过来
 （目录已经在也照样搬；同名文件不覆盖；原来的不删），写下记号（来源和时间；之后用户删掉 MEMORY.md 也不会再搬），`imported` 是复制的文件名。
@@ -261,7 +257,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 **失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
 再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
 （`interface/`、`other/` 等子目录下的 `YYYY.MM.DD-HH.MM.SS.mmm_raw.png`，本地时间，最多 6 张），**复制进 `private/shots/`**
-（`<YYYYmmdd-HHMMSS>-maa-<任务>-<毫秒>.png`：MAA 的日志目录在项目外，无头 agent 读不了），放进 `data.evidence`：
+（`<YYYYmmdd-HHMMSS>-maa-<任务>-<毫秒>.png`：MAA 的日志目录在项目外，agent 不一定读得了），放进 `data.evidence`：
 
 ```json
 {"shot_now": "/…/private/shots/20261002-160918-fail-infrast.png",
@@ -369,14 +365,14 @@ token 不出现在任何输出、日志、报错里；Claude Code 里 agent 读�
 国服游戏内公告（官服、B 服共用一套维护和活动日程，`news.applies()`；别的服日程不一样，不看）（游戏里"公告"那一栏，不用登录：`ak-webview.hypergryph.com/api/game/bulletinList`、`bulletin/<cid>`）里的停机维护和活动（`maapilot/knowledge/news.py`）。
 程序只做可靠的事：拉下来、去掉 HTML、按固定写法抽出时间段（`10月09日 12:00 - 10月30日 03:59`、`维护时间：2026年10月09日06:00 ~ 12:00`；没写年份取发布那年，止只写时刻算同一天），
 分成 `活动`（标题有 活动即将开启 / 活动开启 / SideStory / 限时活动）、`维护`（标题有 维护 / 闪断 / 版本更新，或正文开头写了停机维护、闪断更新）、`其他`（只存标题）。
-只看最近 30 天发的公告；抽不出的时间由 agent 读全文自己看。缓存 `private/state/news.json`：`{at, items, told: {<key>: 时间}, handed: {<key>: 时间}}`，超过 6 小时算旧。
-`told`：告诉过用户了（`news told`）；`handed`：`daily watch` 已经因为它结束过一次。拉公告时先拉、再读盘上的 `told` / `handed` 合进来存（别的进程这几秒里记下的不丢）。
+只看最近 30 天发的公告；抽不出的时间由 agent 读全文自己看。缓存 `private/state/news.json`：`{at, items, told: {<key>: 时间}}`，超过 6 小时算旧。
+`told`：告诉过用户了（`news told`）。拉公告时先拉、再读盘上的 `told` 合进来存（别的进程这几秒里记下的不丢）。
 
 | 命令 | 做什么 |
 |---|---|
 | `news list [--refresh] [--days N]` | 缓存旧了（或 `--refresh`）先重拉：拉不到而有缓存就用缓存（`refresh_error` 写原因），没缓存退出码 1（`network`）。`--days`：`upcoming` 看几天（默认 3）。`server` 不是官服或 B 服退出码 2（`unsupported_server`） |
 | `news show <cid>` | 一条公告的全文（`其他` 类现拉）。缓存里没有退出码 2（`not_found`，先 `list --refresh`），拉不到退出码 1（`network`） |
-| `news told <key>…` | 这些时间点已经告诉过用户（记进 `told`）：`daily watch`、启动检查不再因为它们提醒。`{told, due}`；不认识的 key 退出码 2（`unknown_event`）；定时日常叫起的 agent 里退出码 2（`not_allowed`：用户还没看到） |
+| `news told <key>…` | 这些时间点已经告诉过用户（记进 `told`）：启动检查、`daily run` 的结果不再提。agent 在会话里说了就是说过了，日常在跑或没收尾时也能记。`{told, due}`；不认识的 key 退出码 2（`unknown_event`） |
 
 ```json
 // news list
@@ -395,9 +391,9 @@ token 不出现在任何输出、日志、报错里；Claude Code 里 agent 读�
   活动、维护公告本身还有一个 `公告`（key `<cid>:公告`，`at` 是发布日，带 `kind`、`start`（最早开始）、`end`（最晚结束）、`forced_update`）。`forced_update`：正文写了强制更新 / 重新下载和安装。
 - `upcoming`：接下来 `--days` 天内的时间点。`due`：还没 `told`、会话里的 agent 该按 `maapilot-events` 去跟用户说的：
   `公告`（新的活动 / 维护公告，还没开始；同一条公告别的时间点已经 `told` 过的不算），活动 `开始`（开始后 72 小时内、还没结束），`维护结束`（结束后 72 小时内）。
-  公告缓存超过 6 小时 `daily watch` 会顺手重拉，所以新公告一般几小时内就提醒。
+  公告缓存超过 6 小时 `daily run` 开头会重拉（`news list` 也会），所以新公告到下一次日常就提醒。
 - `maintenance_now`：现在在不在某条维护公告的维护时段里。`lines`：正在维护、接下来几天的维护和活动开始、进行中的活动，给启动检查和转述用。
-- `daily run` 开头（缓存旧了重拉、维护中不跑；都只对国服）、`daily watch`（有还没 `handed` 的 `due` 就结束，并记成 `handed`）、`doctor --brief`（只读缓存，`due` 列到 `told` 为止）都用这份缓存。
+- `daily run` 开头（缓存旧了重拉、维护中不跑，结果里带 `news`；都只对国服）、`doctor --brief`（只读缓存，`due` 列到 `told` 为止）都用这份缓存。
 
 ## game —— 游戏客户端版本与更新（只有官服）
 
@@ -659,7 +655,7 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 | `operator_not_found` / `prerequisite_not_met` | 1 | `op progress`：干员列表里没找到；前置练度不够（专精要精二，技能 7 级要精一） |
 | `not_home` / `maa_failed` | 1 | `op progress`：开始前回不到首页；MaaCore 连不上模拟器、超时（60 分钟）、没给结果 |
 | `needs_consent` | 2 | `op progress`：5、6 星精二可能花采购凭证买芯片助剂，问过用户再加 `--allow-catalyst` |
-| `needs_user` | 3 | `guard allow`：花合成玉 / 源石要用户在会话里同意，定时日常里一律拒绝。什么都没做，写进汇报等用户回来 |
+| `needs_user` | 3 | `guard allow`：花合成玉 / 源石要用户在会话里同意，日常在跑或没收尾时一律拒绝。什么都没做，等 `daily done` 收尾后用户同意再记 |
 | `maacore_missing` / `maacore_broken` | 5 | `op progress`：没装单独的 MaaCore 或低于 v6.19.0（`doctor --fix`）；本体或资源加载失败 |
 | `not_restored` | 1 | `craft` 双芯片：造好了，但制造站没改回原产物（`data.original`、`shot`） |
 | `not_bought` | 1 | `craft` 兑换：确认之前停下了，什么都没花（余额不够、找不到商品、确认框对不上） |
@@ -681,7 +677,7 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 |---|---|
 | `guard snapshot` | 记下现在的源石、合成玉 → `private/guard/snapshot.json`。**上次对账之后跑过可能花东西的命令**（`private/guard/dirty.json` 在）又已有快照时，改做一次 `check`（`checked_instead: true`，不过就退出码 3），不重记起点：agent 不能靠重记快照抹掉自己的花费。停机中退出码 3（`guard_stop`） |
 | `guard check` | 再读一次，与快照比。减少的部分扣掉快照之后记下的、还没用完的 `allow`（按时间先后，一笔可以分几次用）；还有没放行的减少 → 退出码 3（`currency_decreased`），写 `private/guard/stop.json`，快照不动。通过则更新快照、删掉 `stop.json`。还没有快照时把这次的数记为起点（`baseline: true`） |
-| `guard allow <源石\|合成玉> <数量> --reason <用户同意了什么>` | 记下用户同意的一笔花费 → `private/guard/allowances.jsonl`。每次都要用户先在对话里同意；权限是"询问"（唯一一条）；定时日常里一律拒绝（退出码 3 `needs_user`，见「命令总览」） |
+| `guard allow <源石\|合成玉> <数量> --reason <用户同意了什么>` | 记下用户同意的一笔花费 → `private/guard/allowances.jsonl`。每次都要用户先在对话里同意；权限是"询问"（唯一一条）；有日常在跑或没收尾时一律拒绝（退出码 3 `needs_user`，见「命令总览」） |
 | `guard status` | 快照、未用的放行、是否停机中、上次对账后动过什么（`dirty`）（不碰模拟器） |
 
 **dirty**：`input …`、`maa …`（`startup`、`closedown` 除外）、`op …`、`craft` 拿到模拟器锁时记进 `private/guard/dirty.json`；
@@ -714,212 +710,126 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
 ## lock —— 模拟器锁（内部）
 
 `lock status`：`{"holder": {...} | null, "stale": {...} | null, "stale_reason": "…" | null, "inherited": bool}`（谁占着、从什么时候、在做哪步；残留的锁单列；
-`inherited`：本进程环境里的 `MAAPILOT_LOCK_TOKEN` 对得上有效的锁，即定时日常把锁交给了这个 agent）。
+`inherited`：本进程环境里的 `MAAPILOT_LOCK_TOKEN` 对得上有效的锁，即这条命令是持锁的 `daily run` 起的子进程）。
 碰模拟器的命令被占用时退出码 4（`busy`），`data.holder` 同样是谁占着（`cliutil.device()` 填）（外面有别的 `maa` 进程时是 `{"external_maa_pids": [...]}`）。
 `lock release`：只删掉**已经残留**（持有进程不在了、心跳过期）的锁；有效的锁退出码 4。权限放行（只删残留的锁，没什么可拦的）。
 
 ## daily —— 日常
 
-`maapilot daily run [--only <项,…>] [--trigger manual|schedule] [--interactive] [--no-agent]`（碰模拟器，要 20–60 分钟：Claude Code 里放后台跑，Codex 里前台跑）
+v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。定时日常也是 harness 的会话内定时到点在会话里叫醒 agent，
+由它跑 `daily run --trigger schedule`；项目不再自己定时、不再无头叫起 agent、不往会话里推消息（docs/design.md「运行方式」）。
+`daily run` 遇到要判断的事（某项失败、掉线、游戏要更新、有进行中的目标）就停下交回 agent；agent 处理完用 `--only` 接着跑，
+做完目标部分、领奖励、对账后用 `daily done` 收尾。
 
-1. 对账停机中（`private/guard/stop.json` 在）→ 退出码 3（`guard_stop`）。另一个日常在跑 → 退出码 4（`daily_running`）；
-   在无头 agent 里（环境变量 `MAAPILOT_DAILY_RUN`）→ 退出码 2（`nested_daily`）。记下目标的快照（结束时比较，见下面 `goals_change`），拿模拟器锁。
+`maapilot daily run [--only <项,…>] [--trigger manual|schedule]`（碰模拟器，要 20–60 分钟：Claude Code 里放后台跑，Codex 里前台跑）
+
+`--trigger schedule` 只是标记"这次是定时叫醒的"（写进汇报的 `trigger`，汇报标题写"定时"，`lines` 写"定时日常"），做法和 `manual`（默认）完全一样。
+
+1. 对账停机中（`private/guard/stop.json` 在）→ 退出码 3（`guard_stop`）。另一个日常在跑 → 退出码 4（`daily_running`）。
+   有**没收尾的日常**（见下）：不带 `--only` → 退出码 2（`daily_open`，`data.open` 是那次的 `{run_id, trigger, started_at, age_h, stale}`，hint 说先 `daily done` 收尾或 `--only` 接着跑）；
+   带 `--only` → 接着写那一次（同一个 `run_id`、同一份汇报）。没收尾的超过 6 小时算 agent 放弃了：先自动收尾（那次汇报的「要注意」加一条"agent 没有收尾"，`closed_by: "auto"`），再开新的。
+   新开一次时记下"没收尾的日常"和目标的快照（结束时比较，见下面 `goals_change`），拿模拟器锁。
 2. 开始前（尽力而为：出错记一条告警，照跑）：
-   - 过了期限的目标挪走（同 `goals expire`，挪走的记在 `goals_expired`）；
+   - 过了期限的目标挪走（同 `goals expire`，挪走的记在 `goals_expired`，`lines` 里提醒 agent 看看还有没有没做完的，例如活动商店没换完；接着跑时并进前几段的）；
    - 官方公告缓存旧了重拉（见「news」；拉不到用旧缓存）。**正在停机维护**（`maintenance_now`）→ MAA 项、对账都不跑，`status: maintenance`、`ok: true`、
-     `data.maintenance`（`{cid, title, start, end, forced_update}`），退出码 0；定时运行另叫一个不碰模拟器的无头 agent（最长 10 分钟）看看维护对目标的影响，总结进汇报（`tasks` 里的 `maintenance` 一项）；
-   - 游戏版本（同 `game version`，结果在 `game_version: {installed, latest, update_needed}`；查不了照跑）。要更新时：定时运行当场叫无头 agent
-     （`game update` → `maa startup` 处理第一次启动；用户协议弹窗按 `game.accept_terms`；时限同 `recovery_timeout_min`），之后对账、再查一次版本核实，
-     记一项 `game_update`（`version: {from, to}`）；没更新成 → `status: update_failed`、`failed` 里是 `game_update`，后面都不跑（旧客户端进不了游戏），退出码 1（`daily_incomplete`）。
-     会话里（`manual` 或 `--no-agent`）→ 停下交给在场的 agent：退出码 1（`handoff`），`handoff = {task: "game_update", error, rest, version}`，`rest` 是全部还没跑的项；agent 按 `maapilot-events` 更新好再 `daily run --only <rest>`。
+     `data.maintenance`（`{cid, title, start, end, forced_update}`），退出码 0（agent 告诉用户、想想对目标的影响，再 `daily done` 收尾）；
+   - 游戏版本（同 `game version`，结果在 `game_version: {installed, latest, update_needed}`；查不了照跑）。要更新 → 停下交给 agent：退出码 1（`handoff`），
+     `handoff = {task: "game_update", error, rest, version}`，`rest` 是全部还没跑的项；agent 按 `maapilot-events` 更新好再 `daily run --only <rest>`。
 3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）；
    读仓库没成（换日后首页常有弹窗）就再跑一次 `maa startup` 回首页、再读一次，还不成才在汇报里告警、对账以上一次的记录为准。
-4. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。某项失败：
-   - `--trigger schedule`：当场启动无头 agent（`claude -p`、`codex exec` 或 `agent.command`，见下面「无头 agent」；加载 `maapilot-recovery`，继承锁），等它结束（超时杀掉整个进程组），
-     再 `guard check`，然后接着跑下一项；
-   - `manual`（默认；`--interactive` 同义，agent 在场）：**第一项失败就停下**，不跑后面的，退出码 1（`handoff`），
-     `data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；`rest` 是这一项和后面还没跑的），`status: handed_off`；在场的 agent 处理好后 `daily run --only <rest>` 接着跑；
-   - 掉线 / 维护（`offline`）也照上面交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
+   这次日常的第一份仓库快照记在"没收尾的日常"里：接着跑的几段结束时都和它比（`depot_change` 是整次日常的）。
+4. 按 `config.yaml` 的 `daily.tasks` 依次跑其余 MAA 日常项（每项是一条 `maapilot maa <项>`，继承锁；`award` 留到最后）。
+   **第一项失败就停下**，不跑后面的，退出码 1（`handoff`），`data.handoff = {task, error, log, evidence, rest}`（`evidence` 是这一项的失败取证，见「maa」；
+   `rest` 是这一项和后面还没跑的），`status: handed_off`；agent 按 `maapilot-recovery` 处理好后 `daily run --only <rest>` 接着跑。
+   掉线 / 维护（`offline`）也照样交给 agent（重新登录、等维护由 agent 判断）。只有被占用（`busy`）不交。
 5. 识别干员练度（`box`；接了森空岛先 `state skland`，没成记一条告警、不算失败，再用 `maapilot state box`（继承锁））：`daily.read_box`（默认 `true`）开着、`private/state/box.json` 的 `at` 不在当前游戏日（04:00 换日）里时才跑，
-   读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 4 步（会话里停下交出、定时里叫 agent，提示里的重跑命令是 `maapilot state box`）；失败不改 `box.json`。
-   放在刷理智、目标部分之前，让它们看到今天的练度。
-6. 刷理智（`farm`）：有进行中的目标 → `schedule` 时启动无头 agent（加载 `maapilot-daily`）做目标部分，结束后 `guard check`；
-   `manual` 时交回在场的 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
-   agent 做完目标部分自己 `maa award`、`guard check`、`report write <run_id> --append …`。没有进行中的目标 → `maa fight <default_stage>`（失败同第 4 步）。
-   定时运行里第 2 步有到期挪走的目标：做目标部分的 agent 顺带看（提示里列出）；没有它时另叫一个短的无头 agent（最长 15 分钟，不刷理智、不花东西、不改目标）
-   看看还有没有没做完的（活动商店没换完之类），总结进汇报（`tasks` 里 `goals` 一项，`expired_only: true`），之后对账。
+   读过了就记一行 `skipped`。最长 `daily.box_timeout_min` 分钟（默认 15）。失败同第 4 步（交给 agent）；失败不改 `box.json`。放在刷理智、目标部分之前，让它们看到今天的练度。
+6. 刷理智（`farm`）：有进行中的目标 → 交回 agent（`data.goals_pending: true`），`award` 也不跑（`data.award_pending: true`，领奖励要在刷理智之后）：
+   agent 按目标优先级做目标部分，自己 `maa award`、`guard check`，再 `daily done` 收尾。没有进行中的目标 → `maa fight <default_stage>`（失败同第 4 步）。
 7. `award`；`guard check`；写汇报 `private/reports/<YYYY-MM-DD-HHMM>.md` 与 `.json`（开始时就写一份"还在跑"，每一步后更新）。
 
 任何一次 `guard check` 退出码 3 → 立刻停下（后面的项不跑），退出码 3（`currency_decreased`），汇报里写明。
-剿灭在一周里连续 2 次没做成（接管也没救回来，多半是还不能代理）→ 这周的日常不再打（`skipped`），汇报里告警；下周一 04:00 清零。
+剿灭失败（不管交不交给 agent，先记一次）在一周里连续 2 次 → 这周的日常不再打（`skipped`），汇报里告警，多半是还不能代理；下周一 04:00 清零。
 本周合成玉拿满也跳过：自己的记录还没拿满时先问一次森空岛（接了的话，见「maa」），跳过的原因里写 `（current/total）`。
-会话里跑停下交给 agent → 退出码 1（`handoff`）；定时运行里有没做成（agent 也没处理好）的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`。
-定时运行开头就被拦下（对账停机中、另一个日常在跑、`config.yaml` 写错……，还没开始写汇报）时补写一份最小的汇报：`status: refused`、`ok: false`、
-`error: {code, message, hint}`，`alerts` 里一行"日常没开始：…"（Claude Code 里挂着的 `daily watch` 才看得到，也会推进 Codex 会话）。
+停下交给 agent → 退出码 1（`handoff`）；`--only` 补跑完还有没做成的项 → 退出码 1（`daily_incomplete`），`data` 照常给全。被占用、连不上 → 退出码 4 / 5，汇报的 `status` 是 `aborted`
+（第一段就没拿到模拟器、什么都没做时不留"没收尾"，`open: false`）。
 
-`--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`、识别干员练度写 `box`，不列就不跑）；`--no-agent` 不启动无头 agent（失败只记下）。
+`--only` 只跑列出的项（补跑失败的几项；刷理智写 `farm`、识别干员练度写 `box`，不列就不跑）。接着没收尾的那次跑时：这次要跑的项从 `failed` 里拿掉（再失败会再记上），
+之前没做成的那一行标 `retried: true`（汇报里写"（后面重跑了）"），新的结果另起一行；`segments` 是跑了几段；`trigger`、`started_at` 还是第一段的。
+
+**没收尾的日常**（open daily，`private/daily-open.json`：`{run_id, trigger, started_at, depot_before, goals_before}`）：`daily run` 新开一次时记下，
+`daily run` 进程结束后还在，直到 agent `daily done` 收尾（或者超过 6 小时、下次 `daily run` 开始时自动收尾）。这段时间里：
+`daily run --only …` 接着写同一份汇报；不带 `--only` 的 `daily run` 拒绝；`guard allow` 一律拒绝（见「guard」）。汇报的 `open` 是 `true`，`data.next` 是给 agent 的下一步提示
+（程序生成的一句话：按 `maapilot-recovery` 处理后 `--only <rest>` 接着跑 / 按 `maapilot-daily` 做目标部分、`maa award`、`guard check` / 告诉用户对账停下了……，最后 `daily done` 收尾；只是提示，做不做由 agent 判断）。
+"正在跑"另有运行标记 `private/daily-run.json`（`run_id`、`pid`、`step`；进程结束就删）。
 
 ```json
-{"run_id": "20260930-0440", "trigger": "schedule", "status": "done", "ok": true,
- "started_at": "…", "finished_at": "…",
+{"run_id": "20260930-0440", "trigger": "schedule", "status": "done", "ok": true, "open": true,
+ "started_at": "…", "finished_at": "…", "segments": 2,
  "tasks": [{"task": "recruit", "ok": true, "duration_s": 95},
-           {"task": "infrast", "ok": false, "error": "…", "code": "maa_failed", "log": "…", "recovered": true,
-            "agent": {"ok": true, "summary": "…\n结果：完成", "recovered": true, "timed_out": false,
-                      "transcript": "private/log/agent-20260930-0440-1-infrast.jsonl", "cost_usd": 0.4, "duration_s": 310}},
-           {"task": "farm", "ok": true, "result": {"stage": "1-7", "times_done": 12, "sanity_used": 72, "medicine_used": 0}},
-           {"task": "goals", "ok": true, "agent": {…}}],
- "failed": [], "goals_active": 0, "goals_pending": false, "farm": {"stage": "1-7", "times_done": 12, …},
+           {"task": "infrast", "ok": false, "error": "…", "code": "maa_failed", "log": "…", "retried": true},
+           {"task": "infrast", "ok": true, "duration_s": 310},
+           {"task": "farm", "ok": true, "result": {"stage": "1-7", "times_done": 12, "sanity_used": 72, "medicine_used": 0}}],
+ "failed": [], "goals_active": 0, "goals_pending": false, "award_pending": false, "farm": {"stage": "1-7", "times_done": 12, …},
  "depot_change": [{"id": "4001", "name": "龙门币", "delta": 12000}],
- "guard": {"ok": true}, "alerts": [], "agents": 1, "report": "private/reports/2026-09-30-0440.md",
+ "guard": {"ok": true}, "alerts": [], "report": "private/reports/2026-09-30-0440.md",
  "game_version": {"installed": {"version": "2.7.81", …}, "latest": {"version": "2.7.81", …}, "update_needed": false},
  "goals_expired": [{…同 goals list 的一项…}],                                    // 有到期挪走的才有
  "goals_change": {"removed": [{"title": "…", "fields": {…}, "done_entry": {"status": "完成", "ended": "…"}}],
                   "added": [{"title": "…", "fields": {…}}], "changed": [{"title": "…", "field": "deadline", "before": null, "after": "…"}]},
- "lines": ["9 月 30 日 04:40 的定时日常跑完了，都做成了。", "目标移除：遥 精2（完成，…）"]}
+ "news": {"at": "…", "lines": ["…"], "due": ["6774:公告"]},                     // 同 doctor --brief 的 news；没有为 null
+ "lines": ["9 月 30 日 04:40 的定时日常跑完了，都做成了。", "目标移除：遥 精2（完成，…）"],
+ "next": "最后 maapilot daily done --summary \"<做了什么、目标进度、花了什么、要用户决定的事>\" 收尾，再告诉用户"}
 ```
 
-`status`：`running` / `done` / `stopped`（对账停下）/ `aborted`（没跑完）/ `handed_off`（停下交给在场的 agent）/ `maintenance`（赶上停机维护，没跑）/
-`update_failed`（游戏没更新成，后面没跑）/ `refused`（定时运行开头就被拦下，没开始）。`guard.ok` 为 `null` 表示对账命令本身没做成（汇报里告警；`maintenance` 不对账，不算）；
+`status`：`running` / `done` / `stopped`（对账停下）/ `aborted`（没跑完）/ `handed_off`（停下交给 agent）/ `maintenance`（赶上停机维护，没跑）。
+（v0.1 的汇报里还会有 `update_failed`、`refused`，照样能读。）`guard.ok` 为 `null` 表示对账命令本身没做成（汇报里告警；`maintenance` 不对账，不算）；
 对账因为读不到仓库没做成时另有 `guard_unreadable: true`（算问题，见「guard」）。
-`depot_change` 来自 guard snapshot / check 顺手更新的 `state/depot.json` 前后两份；读不到为 `null`。
-`goals_change`：结束时（不论怎么结束）把 goals.md 里进行中、暂停的目标和开头的快照比（`fields` 是固定 6 行的原文，`field` 用输出名 `status` / `object` / `deadline`…）；
+`depot_change` 来自 guard snapshot / check 顺手更新的 `state/depot.json`：这次日常第一份快照和这一段结束时的比；读不到为 `null`。
+`goals_change`：每段结束时（不论怎么结束）把 goals.md 里进行中、暂停的目标和这次日常开头的快照比（`fields` 是固定 6 行的原文，`field` 用输出名 `status` / `object` / `deadline`…）；
 没变就没有这个字段。`removed` 的 `done_entry` 是 goals-done.md 里同名那段的状态与结束行，`null` 表示没经过 `goals remove` / 到期就没了；改标题算一删一加。
 汇报里写成「目标变动」一节，`lines` 里也有（目标变动不算问题，但要告诉用户）。
-`lines`：每次都给的几句中文（同 `daily watch` 的 `lines`：怎么结束的、维护时段、目标变动、到期要看的、没做成的项……），agent 照着转述。
+`news`：官方日程（开头拉过的缓存，同 `doctor --brief` 的 `news`）；`due` 不为空时 `lines` 里有一行，agent 按 `maapilot-events` 跟用户说、`news told`。
+`lines`：每次都给的几句中文（怎么结束的、维护时段、目标变动、到期要看的、没做成的项、官方日程……），agent 照着转述。
 
-无头 agent 按 `config.yaml` 的 `agent`（`maapilot/hosts.py`）：
-- `claude`：`<tools.claude> -p "<提示>" --output-format stream-json --verbose --settings <仓库>/.claude/settings.json --permission-mode default --permission-prompts none`，
-  显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝）；
-- `codex`：`<tools.codex> exec -C <仓库> --sandbox workspace-write --json --skip-git-repo-check --ephemeral -o <记录>.last.txt -c notify=[] --disable computer_use --disable browser_use --disable browser_use_external "<提示>"`
-  （`--skip-git-repo-check`：下载的压缩包不是 git 仓库也能跑；`--ephemeral`：无头会话不留在用户的会话列表里）。
-  命令在沙箱里跑（只能写仓库、没有网络），项目的 `.codex/rules/maapilot.rules` 把 maapilot 命令放到沙箱外，
-  要问的（只有 `guard allow`）在 exec 里一律被拒（审批固定是"从不"）。规则只有 Codex 信任这个文件夹时才加载（`host install codex`；没信任时 `daily schedule` 拒绝，见下）。
-  codex 的每条命令自成进程组：超时时先找出它的子孙进程组一起结束，再结束 codex。
-  记录的判读：这一轮报了 `turn.failed`、没有一轮做完（没有 `turn.completed`）、或者没留下最后的话 → 算出错（`is_error`）；顶层的 `error` 事件（断线重连）不算。
-- 自定义（`agent` 写了 `command`，例如 `{name: dsh, command: [dsh, --profile, headless]}`）：`<command 第一项> <其余参数…>`，`prompt: stdin`（默认）时提示写进 stdin，`prompt: arg` 时放在最后一个参数（Windows 上程序是 `.cmd` / `.bat` 时照样改走 stdin：cmd.exe 会截断多行参数）。程序的找法：绝对路径或 PATH 上的名字（定时任务的 PATH 很短，写绝对路径；Windows 上找到 `.cmd` 包装、同目录有同名 `.exe` 时用 `.exe`）。工作目录、环境（锁的 token、`MAAPILOT_DAILY_RUN`）、时限、超时结束整棵进程树、结束后的收拾都同内置的；stdout 存进同一个记录文件，stderr 进 schedule.log。它的权限、沙箱 MaaPilot 管不到：要它自己的设置只放行 maapilot、不直接跑 adb / maa（AGENTS.md 硬规则照样写在提示和 skill 里）。没实测过。
-- 提示里长命令的说法按宿主（`prompts.long_command_rule`）：claude——前台跑、Bash 超时设 600000 毫秒、不放后台；codex——前台跑、等它结束（后台命令结束叫不醒它）；别的——前台跑、等它结束、不放后台、命令能设超时就给到 10 分钟以上。
-
-工作目录是仓库根目录（运行时由安装位置推出），
-环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁，agent 用 `lock status` 的 `inherited` 确认）和 `MAAPILOT_DAILY_RUN`。
-agent 结束（或超时被杀）后日常换一次锁的 token：它留下还在跑的 maapilot 命令不能再拿锁；还有 maa 进程在跑就等 60 秒，不走就结束掉并告警；它跑的时候（每 3 秒记一次它的子孙进程）起的 maapilot 命令、`maacore_runner` 还在的也结束掉（TERM，10 秒不走再 KILL；pid 和命令行都对得上才算，不碰日常自己和它的祖先）。提示里写明是哪次运行、哪一项、错误与 MAA 日志、失败取证的截图路径（`shot_now`、`maa_shots`）和 `maapilot maa why --task <项>`、被登出就直接重新登录、只处理这一项、最后一行写 `结果：完成` 或 `结果：没做成`
-（程序据此判断 `recovered`）；每个提示都要求全程用中文、结束前用 `daily done --summary …` 交代结果（最后的回复也写同样的总结）、**不要** `report write --append`。输出存 `private/log/agent-<run_id>-<序号>-<项>.jsonl`，`agent.host` 是哪个宿主（自定义的是 `name`）。
-
-**agent 的结果**（`agent` 里的 `summary`、`reported`、`ok`、`recovered`）：
-- 总结：agent 用 `daily done` 交代过（`reported: true`）就用它（最后一次为准）；没交代时从输出里读（`reported: false`）：claude——最后的 `result`；codex——`-o` 写的最后一句话；自定义的——stdout 去掉 JSON 事件行（`{…}` 的整行）后的最后约 2000 字（名字是 claude / codex 又写了 `command` 的，先按那个宿主的格式读，读不到再取 stdout）。都没有 → `summary: null`、算出错（汇报里写"没有留下总结"）。
-- `ok`：退出码 0、没超时、不算出错。交代过就不算出错；没交代时：claude 看 `result` 的 `is_error`，codex 见上面的判读，自定义的有 stdout 就不算出错。
-- `recovered`：总结里最后一行 `结果：…`（`完成` / `做完` / `处理好了` 算好了）；超时一律 `false`。
-
-`daily done [--summary <文字> | --summary-file <文件>] [--result 完成|没做成]`（不碰模拟器）：定时日常叫起的 agent 结束前交代结果。`--summary` 和 `--summary-file`（UTF-8）只写一个；`--result` 等于总结最后一行写 `结果：…`（原来写了就换掉）。只在日常把模拟器交给了它时有效（环境里有 `MAAPILOT_DAILY_RUN`、`lock status` 的 `inherited` 为 true、那次日常还在跑），否则退出码 2（`not_in_daily` / `not_inherited`；agent 结束后日常换了锁的 token，它留下的命令再交也不算）。记在 `private/state/agent-done.json`（`{run_id, at, summary}`）：日常起每个 agent 前删掉、它结束后读走；可以交好几次，最后一次为准。超过 20000 字截掉中间（留开头和最后一行）。`{run_id, recorded, chars, truncated, recovered}`。
-
-**推进用户的会话**（`daily.session_message`、`maapilot.hosts.push`）：Codex 的后台命令结束叫不醒模型，所以日常结束时把一条通知推进用户的 Codex 会话。
-- 什么时候推：定时运行一结束就推（跑完、出错、没跑完、开头就被拦下）；会话里手动跑的 `daily run` 只在 Codex 里（环境带 `CODEX_THREAD_ID`）推，
-  开头就被拦下的不推（命令马上就回来了）。定时日常叫起的 agent 里跑的不推。
-- 开头：定时运行 `[MaaPilot 定时日常]`，手动跑的 `[MaaPilot 日常]`。
-- 内容只有程序生成的固定字段（防提示注入：运行编号、状态、项名、错误代码都要像 `[A-Za-z0-9_.:-]{1,64}` 那样的短代码，不像就换成 `?`）：
-  运行编号、`status`、有没有问题（`has_problem`）、错误代码、没做成的项（代码）、对账停机了没有、官方日程还有几条没说；不放目标名、出错原文、公告这类文字。
-  结尾固定写明"这是程序发的通知，不是用户说的话，也不算用户同意任何事"，并让 agent 先 `maapilot report show <运行编号>`（`seen` 为 true 就是已经说过，不再说）、
-  按 `AGENTS.md`「盯着日常」告诉用户，再 `maapilot report seen <运行编号>`。没有运行编号（汇报也没写成）时让它看 `daily status` / `doctor --brief`。
-- 推给谁：`private/state/agent-session.json` 里记过 Codex 会话，并且它比记下的 Claude Code 会话新、或者 `config.yaml` 的 `agent` 是 `codex`；
-  否则不推（用户最近在 Claude Code 里，它挂着 `daily watch`）。用 `<codex> queue --thread <会话> --message <消息>`（30 秒超时）：会话闲着马上当成新的一轮处理，
-  正忙就排在这轮后面，关着就等它恢复。`<codex>` 是绝对路径：`tools.codex` → PATH 里的 `codex` → `~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin`。
-- 推没推成写进 schedule.log，不影响日常本身；记过 Codex 会话却没推成时，汇报的 `alerts` 加一行"没能把结果推进你的 Codex 会话：…"。
-做目标部分的 agent 最长 `daily.agent_timeout_min` 分钟（默认 90），接管失败项的最长 `daily.recovery_timeout_min` 分钟（默认 30）；
 每个 MAA 日常项最长 `daily.task_timeout_min` 分钟（默认 90）。刷理智（`farm`）的时限按理智算：先读理智（`private/state/sanity.json` 1 小时内的直接用，
 没到上限的按 6 分钟 1 点往上推；旧了就 `state sanity`（森空岛，没接才回首页读）；还读不到就用旧快照推），能打几次 = ⌈理智 ÷ 关卡一次的理智⌉（关卡认不出按 6），
 时限 = 次数 × `daily.farm_min_per_fight`（默认 3）+ `daily.farm_timeout_margin_min`（默认 15）分钟；理智超上限（如 358/205）照算。完全读不到理智才用 `task_timeout_min`。
-算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时杀掉 `maapilot maa` 后，20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。提示里要求 agent 前台跑长命令（说法按宿主，见上）、刷图分批。
+算出的时限记在这一项的 `timeout`（`{min, basis, sanity, sanity_source, stage_cost, fights, …}`）。超时结束 `maapilot maa` 的整棵进程树（先 TERM 等 15 秒，再 KILL），
+20 秒内 maa 进程还在就由日常结束掉（TERM，不走再 KILL，告警里写明）。子进程的环境里带 `MAAPILOT_LOCK_TOKEN`（继承锁）和 `MAAPILOT_RUN_ID`（命令记录里的 `run_id`）。
 
-`daily schedule [--times HH:MM[,HH:MM]] [--replace-old] [--dry-run]`：按 `--times` 或 `config.yaml` 的 `schedule` 设定时日常。
-macOS / Linux 写 crontab，每个时间点一行；Windows 在任务计划程序里建一个任务（每个时间点一个每天的触发器）。
-输出带 `exec`：定时日常要执行的程序（`{maa, <agent>（claude、codex 或自定义的 name）, adb}`，`tools.maa`、`tools.<agent>`（自定义的：`agent.command` 第一项）、`emulator.adb` 解析成的完整路径），agent 在对话里告诉用户
-（定时日常会在用户不在时运行它们）。用户在对话里同意改定时就跑，程序不另外确认、不记录。
-`agent` 是 `codex` 而 Codex 没信任这个文件夹（不带 `--dry-run` 时）→ 退出码 5 `codex_untrusted`（项目的命令规则不生效，叫起的 codex 用不了 maapilot、也拦不住直接跑 adb / maa），
-先 `maapilot host install codex`。
+`daily done --summary <文字> | --summary-file <文件> [--result 完成|没做成]`（不碰模拟器）：**agent 收尾这次日常**。
+`--summary` 和 `--summary-file`（UTF-8）只写一个；总结写给用户看（做了什么、目标进度、花了什么、要用户决定的事），进这次汇报的「目标部分」一节
+（没有目标、只跑了固定日常也照样用它收尾）。`--result` 写成总结最后一行 `结果：…`（原来写了就换掉；汇报里不显示这一行）。
+清掉"没收尾"的记录，重新生成汇报（`open: false`、`closed_at`、`closed_by: "agent"`、`goals_summary: {at, text, by, result}`）。超过 20000 字截掉中间（留开头和最后一行）。
+没有没收尾的日常 → 退出码 2（`not_in_daily`）；`daily run` 还在跑 → 退出码 4（`daily_running`，跑完再收尾）。不看环境变量、不要求继承的锁。
+`{run_id, closed, chars, truncated, report}`。
 
-装之前查一遍定时要执行的程序（`.venv` 的 python、maa、agent、adb，要用到 codex 时还有 codex）和项目文件夹：
-- 找不到 → 退出码 5 `program_missing`（`data.problems`），按提示在 `config.yaml` 写绝对路径或先装好；
-- 路径里有 `\Packages\…\LocalCache\`（不分大小写）→ 退出码 5 `isolated_install`：Codex 的 Windows 应用把用户目录重定向到
-  `…\AppData\Local\Packages\<包名>\LocalCache\…`，在里面装的程序和仓库任务计划程序看不到。要在普通的 PowerShell 里重新装到普通目录。
-`--dry-run` 不拒绝，只在 `data.problems` 里列出来。
+`daily status`：`{"running": {run_id, step, started_at, …} | null, "open": {run_id, trigger, started_at, age_h, stale, step?} | null, "last": {run_id, at, ok, status, trigger, open, report} | null}`。
+`open` 是没收尾的日常（`stale`：超过 6 小时；正在跑时带 `step`），`last` 是最近一次汇报。
 
-定时执行的一律是启动器（环境变量和日志都在它的参数里，cron 和任务计划程序一样）：
+`daily unschedule [--dry-run]`：删掉 v0.1 留下的系统定时（用户在对话里同意后跑）。只删本项目的：
+- **cron**（macOS / Linux）：crontab 里以 `# maapilot-v2 <本仓库路径>` 结尾的行（v0.1 的启动器写法和更早的写法——环境变量写在行里、`.venv/bin/maapilot … >> cron.log`——都认），
+  别的行一个字节都不动；更旧的 MaaPilot 的行（`maapilot job tick`、`bin/daily.sh`）列在 `old_entries`，不删。测试用环境变量 `MAAPILOT_CRONTAB` 换掉 crontab 程序。
+- **Windows 任务计划程序**（`schtasks.exe`）：任务 `\MaaPilot\daily-<仓库路径的 sha1 前 8 位>`，描述 `maapilot-daily <仓库路径>`（"本项目的"标记），`schtasks /Delete /TN <任务> /F`。
+  `\MaaPilot\` 下别的任务（别的目录的 MaaPilot）列在 `old_entries`，不动。读的时候只认 `schtasks /Query /FO CSV /NH` 的任务名和 `/Query /TN <任务> /XML` 的内容
+  （UTF-16 / UTF-8 / 系统代码页都认），不解析本地化的表格文字。测试用环境变量 `MAAPILOT_SCHTASKS` 换掉 schtasks 程序。
+  找不到 schtasks.exe → 当作没有（`backend: "none"`，什么都不删）；schtasks 出错 → 退出码 5 `schtasks_failed`。
+`{"backend": "cron" | "schtasks" | "fake", "removed": [...], "old_entries": [...], "dry_run": false}`（`--dry-run` 另有 `preview`：删完剩下的）。
+`fake` 是测试用的（`MAAPILOT_SCHEDULER=fake:<json>`）。还留着没有，`doctor` 的 `legacy_schedule` 会说。
 
-```
-<.venv 的 python> -X utf8 -m maapilot.oscompat.launch --env PATH+=<.venv 的程序目录、maa、agent、adb（和 codex）所在目录、系统目录>
-    [--env MAAPILOT_PRIVATE=…] [--env CODEX_HOME=…] --env PYTHONUTF8=1 --log <private>/log/schedule.log -- daily run --trigger schedule
-```
-
-启动器（`maapilot/oscompat/launch.py`）先设环境变量（`PATH+=` 把这些目录放到 PATH 最前面，`K=V` 照设，`PYTHONUTF8=1` 一定设），
-再把输出（描述符 1、2，Windows 上连同标准句柄；maapilot、MaaCore、子进程写的都算）追加进日志，先写一行 `=== <时间> 定时启动…`，
-然后交给 `maapilot daily run --trigger schedule`，结束写一行退出码。要用到 codex（`agent` 是 codex，或记过用户的 Codex 会话、跑完要推送）时 PATH 也带上 codex 所在目录；
-设定时的环境里有 `MAAPILOT_PRIVATE`、`CODEX_HOME`（Codex 的设置放在别处）就照传，定时日常才找得到对这个文件夹的信任。
-
-- **cron**：`40 4 * * * <启动器命令> # maapilot-v2 <仓库>`。只动以 `# maapilot-v2 <本仓库路径>` 结尾的行（旧写法——环境变量写在行里、`.venv/bin/maapilot … >> cron.log`——也认，重设时换成新写法），
-  别的行一个字节都不动，重复执行结果相同。发现旧版 MaaPilot 的定时任务（`maapilot job tick`、`bin/daily.sh`）时列在 `data.old_entries`，带 `--replace-old` 才删掉它们。
-  cron 不补跑：到点时电脑睡着或关着就跳过这一次（`schedule_options` 对 cron 不起作用）。macOS 会弹窗问终端能否改 crontab，要用户点允许。
-  测试用环境变量 `MAAPILOT_CRONTAB` 换掉 crontab 程序。
-- **Windows 任务计划程序**（`schtasks.exe`）：任务 `\MaaPilot\daily-<仓库路径的 sha1 前 8 位>`，描述 `maapilot-daily <仓库路径>`（"本项目的"标记）。
-  用 `schtasks /Create /TN <任务> /XML <临时文件> /F` 建（任务定义写成 UTF-16 的临时文件，用完删掉），重设是覆盖同一个任务，内容没变就不动。
-  执行 `.venv\Scripts\pythonw.exe`（没有就 `python.exe`），参数是启动器的，工作目录是仓库。只在用户登录时运行（不存密码、不要管理员；锁屏照常跑，注销或关机就不跑），
-  同时只跑一个（`IgnoreNew`），最长 6 小时，用电池也跑。`schedule_options.run_if_missed`（默认 true）→ "错过了就补跑"（开机 / 醒来后跑这一次），
-  `schedule_options.wake_computer`（默认 false）→ "唤醒计算机运行此任务"。每个触发器的起点是这个时间点下一次到点的时刻（不放在过去，免得一装好就当成错过了马上跑）。
-  `\MaaPilot\` 下别的任务（别的目录的 MaaPilot）列在 `data.old_entries`，不动；带 `--replace-old` 才删。读的时候只认 `schtasks /Query /FO CSV /NH` 的任务名和
-  `/Query /TN <任务> /XML` 的内容（UTF-16 / UTF-8 / 系统代码页都认），不解析本地化的表格文字。测试用环境变量 `MAAPILOT_SCHTASKS` 换掉 schtasks 程序。
-  找不到 schtasks.exe → 退出码 5 `no_scheduler`；schtasks 出错 → 退出码 5 `schtasks_failed`。
-
-装完马上读回来核对：系统里本项目的时间和要的不一样、没装上或任务被停用了 → 退出码 5 `schedule_not_applied`（`data` 照给）。
-
-```json
-{"backend": "cron", "times": ["04:40", "16:40"], "installed": [...], "replaced": [...], "old_entries": [...], "removed_old": [...],
- "changed": true, "dry_run": false, "options": {"run_if_missed": true, "wake_computer": false},
- "schedule": {"installed": true, "times": ["04:40", "16:40"], "old_entries": [], "backend": "cron"}, "next_at": "…",
- "exec": {"maa": "/…/maa", "claude": "/…/claude", "adb": "/…/adb"}}
-```
-
-`backend`：`cron` / `schtasks` / `fake`（测试，`MAAPILOT_SCHEDULER=fake:<json>`）。`schedule` 是读回来的（同 `daily status`），`next_at` 是下一次到点。
-`--dry-run` 不写，在 `data.preview` 里给出改完的样子（cron 是 crontab 全文，Windows 是任务定义 XML），没有 `schedule` / `next_at`。
-
-`daily unschedule [--dry-run]`：删掉本项目的定时（crontab 里本项目的行 / 任务计划程序里本项目的任务；用户在对话里同意后跑）。
-`{"backend": "…", "removed": [...], "old_entries": [...], "dry_run": false}`（`--dry-run` 另有 `preview`：删完剩下的）。
-`daily status`：`{"running": {run_id, step, started_at, …} | null, "last": {run_id, at, ok, status, report} | null,
-"schedule": {"installed": true, "times": [...], "old_entries": [...], "backend": "cron"}, "next_at": "…"}`。
-`schedule` 是从系统里读回来的：Windows 上另有 `task`（任务名）、`settings`（`{run_if_missed, wake}`，任务里实际的设置）；任务被停用了有 `enabled: false`（这时 `next_at` 为 null）；
-读不了时 `installed: null` 带 `error`；这台电脑上设不了定时（Windows 上找不到 schtasks.exe）时 `installed: false` 带 `unavailable`。
-
-`daily watch [--timeout-min N]`（只读：不拿锁、不碰模拟器）：等**下一次**跑完的日常（定时或手动；开始时正在跑的那次也算，等它跑完），然后输出它的结果；
-或者等到官方日程有消息（新公告、维护结束、活动开始，还没 `news told` 的）。
-Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯着日常」；Codex 改用推送，见上），结束就告诉用户、`report seen`、再挂一个。
-开始时先看有没有 24 小时内跑完、还没 `report seen` 的（上一个 watch 结束到这一个挂上之间跑完的）：有就直接交出最早的那次，不等。
-之后每 20 秒看一次汇报（`private/reports/*.json` 的 `status`、`finished_at`）和运行标记；
-只认命令开始之后跑完的（`finished_at` 晚于开始时间）。等着的那次进程没了而汇报还写着 `running` → 当成 `aborted`（`alerts` 里写明）。
-每次也看一眼官方日程（只有国服；有缓存而旧了顺手重拉，拉不下来 600 秒内不再拉，没缓存不拉；出错当没有）：有还没交出去过（`handed`）的 `due` → 记成 `handed`，退出码 0，
-`data: {kind: "news", due: [时间点…], lines: [...], seen: false}`（时间点同「news」），agent 按 `maapilot-events` 跟用户说、`news told <key>…`、再挂一个。
-同一个时间点只让 watch 结束一次：agent 没 `told` 就重挂也不会立刻又醒（启动检查的 `news.due` 照样列着，直到 `told`）。
-默认最多等 110 分钟（Claude Code 的后台 Bash 最长 2 小时），等满了没有日常跑完是正常结束：退出码 0，
-`data: {kind: "timeout", waited_min, running, next_at, seen: true}`，agent 什么都不说、再挂一个。
-
-```json
-{"kind": "daily", "run_id": "20261004-1640", "trigger": "schedule", "started_at": "…", "finished_at": "…", "status": "stopped", "ok": false,
- "failed": [{"task": "infrast", "label": "基建", "error": "…", "code": "maa_failed"}], "alerts": [],
- "guard_stop": {"reason": "日常之后发现合成玉 / 源石有没经同意的减少", "before": {…}, "after": {…}, "unexplained": {"orundum": -866}},
- "report": "private/reports/2026-10-04-1640.md", "seen": false,
- "lines": ["10 月 4 日 16:40 的定时日常因为货币对账停下了，有问题。", "对账：…（合成玉 -866）"]}
-```
-
-顺利（`status: done`、`ok` 不是 `false`、没有 `failed`）和赶上维护（`maintenance`，不算问题）退出码 0；有问题（没做成的项、对账停下、没能对账、没跑完、交给 agent、游戏没更新成、开头就被拦下）退出码 1、`daily_problem`，`data` 同上。
-`handoff` 只在停下交给 agent 时有；`guard_stop` 只在 `stopped` 时有；`maintenance` 只在赶上维护时有。`seen`：这次已经 `report seen` 过（告诉过用户）。
-程序里 `maapilot.flows.daily.schedule_info()`、`maapilot.flows.report.latest()` 给 `doctor` 用。
+v0.1 的 `daily schedule`、`daily watch`、`daily run --interactive / --no-agent` 都去掉了：定时由 harness 在会话里定好（按 `config.yaml` 的 `schedule`），
+结果就在会话里，不用再挂 `watch` 等。程序里 `maapilot.flows.daily.open_daily()`、`legacy_schedule()`、`maapilot.flows.report.latest()` 给 `doctor` 用。
 
 ## reset —— 从头设置
 
 `maapilot reset [--dry-run] [--memory]`（不碰模拟器；用户在对话里同意后才跑，程序不另外确认）
 
 用户说要从头设置时用。**什么都不删**：
-1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令或接管的 agent 在操作，包括日常叫起来的 agent 继承着锁；退出码 4 `busy`，`data.holder`）→ 不做。
-2. 本项目的定时任务删掉（同 `daily unschedule`）：crontab 里以 `# maapilot-v2 <本仓库路径>` 结尾的行，别的行（包括别的目录的 MaaPilot）一个字节都不动；
-   Windows 上是任务计划程序里本仓库的任务（`\MaaPilot\` 下别的目录的任务不动）。`data.schedule.remove` 是要删的（cron 的整行 / 任务名），`removed` 是删掉的。
-   这台电脑上设不了定时（Windows 上找不到 schtasks.exe）就当没有，`data.schedule.unavailable` 写着原因，照常重置。
+1. 先查：日常在跑（退出码 4 `daily_running`）、模拟器锁被占着（有命令在操作；退出码 4 `busy`，`data.holder`）→ 不做。
    `private/` 里有文件正被别的程序打开、改不了名（Windows）→ 退出码 4 `in_use`，什么都没动。
+2. 不动系统定时：还留着 v0.1 的定时日常（同 `daily unschedule` 删的那些）就在 `data.legacy_schedule`（`{times, entries, hint}`）里列出来，
+   提示用户同意后 `daily unschedule`；没有为 `null`。
 3. `private/` 整个改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、`setup.json`、目标、快照、日志、汇报、截图、对账都在里面）；
    再把备份里的 `maa-config/`（maa-cli 的配置与任务模板）复制回新的 `private/maa-config/`。之后 `doctor --brief` 的 `next` 是 `setup`。
    恢复：把新建的 `private/` 挪开，把备份改回 `private`（`data.private.restore` 写着）。
@@ -929,11 +839,11 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
    测试用 `MAAPILOT_CLAUDE_PROJECTS_DIR` 换掉 projects 目录。
 5. 留着：`.venv`、`data/`、`resource/`、maa-cli 本身和它的资源。
 
-`--dry-run` 只列出会挪什么、删哪几行，什么都不动。
+`--dry-run` 只列出会挪什么，什么都不动。
 
 ```json
 {"dry_run": false,
- "schedule": {"remove": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "removed": ["…"], "other_lines_kept": true},
+ "legacy_schedule": {"times": ["04:40"], "entries": ["40 4 * * * … # maapilot-v2 /…/MaaPilot"], "hint": "…daily unschedule"},
  "private": {"move": "/…/private", "to": "/…/private.bak-20261002-1700", "entries": ["config.yaml", "goals.md", "log", …],
              "restore": "mv … …", "keep_maa_config": "/…/private/maa-config"},
  "memory": {"move": null, "note": "没带 --memory：用户偏好（private/memory/）留着"},
@@ -949,21 +859,20 @@ Claude Code 会话里的 agent 一直在后台挂着一个（`AGENTS.md`「盯�
 | `report show [--last \| <run_id>]` | 汇报全文（`markdown`）与摘要（`summary`，即 `daily run` 的 data），默认最近一次；agent 转述给用户 |
 | `report latest` | 同 `show --last` |
 | `report list [--limit N]` | 最近的汇报：`{"reports": [{run_id, at, trigger, ok, status, failed, report}]}` |
-| `report write <run_id> --append <文字>` | 在这次运行的汇报后面追加一段"补充"（运行还没结束也可以，结束时保留） |
-| `report seen [<run_id>]` | 记下这次运行的结果已经告诉过用户（默认最近一次）：写进 `private/reports/seen.json`（`{run_id: 时间}`）。`{"run_id", "seen_at"}`；没有这次运行退出码 2（`unknown_run`）；定时日常叫起的 agent 里退出码 2（`not_allowed`：用户还没看到，写进总结） |
+| `report write <run_id> --append <文字>` | 在这次运行的汇报后面追加一段「补充」（运行还没结束、收尾之后都可以，结束时保留）。目标部分的总结用 `daily done` 写，不用它 |
 
-汇报的 Markdown：开头一句（按 `status`）、「做了什么」（每项一行；MAA 项失败时 agent 接手的总结缩进挂在下面；`game_update`、`maintenance` 各一行带 agent 的总结；
-目标部分只写一行"见下面"）、「目标部分」（做目标部分的 agent 的总结全文）、「仓库变化」（维护没跑时不写）、「目标变动」（有 `goals_change` 或 `goals_expired` 时）、
-「要注意」（告警）、「补充」（`report write`；和某个 agent 总结几乎一样的不再重复写）。agent 总结最后的「结果：…」一行（给程序判断用）不写进汇报。
-"有问题、还没告诉过用户"的运行（最近 7 天、最多 5 个，新的在前；还在跑的、赶上维护的不算）由 `maapilot.flows.report.unseen_problems()` 给出，
-`doctor --brief` 的 `unseen_problems` 和 `lines` 里都会列出来，会话开头 agent 第一句就说。
+汇报的 Markdown：标题 `# 日常汇报：<时间>（定时 | 手动）`（按 `trigger`）；开头一句（按 `status`；还没收尾时另写一句"还没收尾"）、
+「做了什么」（每项一行；重跑过的旧行写"（后面重跑了）"；有目标时一行"见下面「目标部分」"或"留给 agent 接着做"；`award_pending` 一行）、
+「目标部分」（`daily done` 交的总结全文）、「仓库变化」（维护没跑时不写）、「目标变动」（有 `goals_change` 或 `goals_expired` 时）、
+「要注意」（告警）、「补充」（`report write`；和目标部分的总结几乎一样的不再重复写）。总结最后的「结果：…」一行不写进汇报。
+v0.1 的 `report seen`（记"告诉过用户没有"）去掉了：日常就在用户的会话里跑，跑完 agent 当场说。
 
 ## tools —— 项目里的 maa-cli 和 adb（不碰模拟器）
 
 maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的 `.tools/`（不进 git）：`.tools/maa-cli/maa`、`.tools/platform-tools/adb`（Windows 带 `.exe`），
 各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源仍由 maa-cli 下载到它自己的数据目录。
 
-找程序（`config.tool("maa")`、`config.adb_path()`，doctor、日常、定时任务都用它）：`config.yaml` 的 `tools.maa` / `emulator.adb` 写的是路径 → 照它；
+找程序（`config.tool("maa")`、`config.adb_path()`，doctor、日常都用它）：`config.yaml` 的 `tools.maa` / `emulator.adb` 写的是路径 → 照它；
 写的是程序名（模板默认的 `maa`、`adb`）或没写 → `.tools/` 里装了就用装好的，没装再在 PATH 上找。所以自己用 Homebrew 等装好、写了绝对路径的照样能用。
 
 `maapilot tools status`（只读）
@@ -987,19 +896,21 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 ```
 
 失败：`network`（下载不了，退出码 1）、`install_failed`（包里没有程序、旧的换不掉）、`maa_install_failed`（maa-cli 装好了但 `maa install` 没成）、`unsupported_platform`（5）。
-要联网、会换掉定时日常执行的程序：agent 先问过用户。`config.yaml` 写了别的路径时 `note` 提示怎么改用装好的（改不改问用户）。
+要联网、会换掉日常执行的程序：agent 先问过用户。`config.yaml` 写了别的路径时 `note` 提示怎么改用装好的（改不改问用户）。
 
 ## host —— agent 宿主（不碰模拟器）
 
-用户可以在 Claude Code 或 Codex 里用 MaaPilot；定时日常叫哪个由 `config.yaml` 的 `agent` 定（`maapilot/hosts.py`）。
+用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建会话内定时见 docs/harnesses.md）。程序的找法在 `maapilot/hosts.py`：
+写了 `tools.<宿主>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），
+Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`。
 
-`host status`（只读）：`{"agent": "codex", "session": {host, thread, at, ts} | null, "sessions": {"claude": {thread, at, ts}, "codex": {...}}, "hosts": {"claude": {path, trusted}, "codex": {path, trusted}}}`；`agent` 写了 `command` 时另有 `agent_command: {command, prompt, path}`（`path` 是找到的程序，找不到为 `null`），`agent` 写错时是 `agent_error`。
-`sessions` 是每个宿主记下的最近一个用户会话（启动检查记的，见「doctor」的 `session`；没记过的不列），`session` 是其中最近的那个；`agent` 写错时为 `null`，另给 `agent_error`。
+`host status`（只读）：`{"hosts": {"claude": {path, trusted}, "codex": {path, trusted}}}`：`trusted` 是这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`，
+Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时 Codex 不加载 `.codex/rules/`）。v0.1 的 `agent`、`session(s)` 去掉了。
 
 `host install <claude|codex> [--dry-run]`（权限放行：改的是用户的 Codex 设置，agent 先在对话里问过用户）：
 - `codex`：Codex 的用户设置（`$CODEX_HOME/config.toml`，默认 `~/.codex/config.toml`）里还没信任这个文件夹就在末尾追加
   `[projects."<仓库>"] trust_level = "trusted"`（别的不动；已有这一段但不是 trusted → `codex_untrusted`，请用户自己改），
-  再用 `codex execpolicy check` 核对 `.codex/rules/maapilot.rules`（`rules.ok`）。`next` 是还要做的事（`agent` 还不是 codex 时：`config.yaml` 改 `agent: codex`、`tools.codex`，再 `daily schedule`）。
+  再用 `codex execpolicy check` 核对 `.codex/rules/maapilot.rules`（`rules.ok`）。`next` 是还要做的事（`--dry-run` 时再不带它跑一次；规则核对没过时告诉开发者）。
   `{"host", "path", "config", "append", "changed", "trusted", "rules": {ok, results}, "next": [...]}`。
 - `claude`：Claude Code 的信任只能在交互里接受，只报告 `trusted` 和做法。
 
@@ -1012,12 +923,12 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 ## dev —— 开发用（不给用户的 agent）
 
 `maapilot dev review [--since 3d|12h|<日期>|<时间>] [--session <编号>]… [--exclude <编号>]… [--include-dev] [--transcripts <目录>] [--limit N]`：
-代替手动翻会话记录，看用户的 agent 和无头 agent 哪里出错、哪里用错了命令。只读，不碰模拟器，自己不写命令记录。默认看最近 3 天。
+代替手动翻会话记录，看用户的 agent（和 v0.1 定时日常叫起的无头 agent）哪里出错、哪里用错了命令。只读，不碰模拟器，自己不写命令记录。默认看最近 3 天。
 
 - 命令记录 `private/log/<日期>.jsonl`（`log`）：`failures` 按命令 + 错误码归类（次数、最后一次、原话、哪几次日常）；`misuse` 参数写错（退出码 2，带 `argv`）；
   `repeated` 同一条命令（参数也一样）失败两次以上；`shortcut_then_manual` 快捷操作（`op upgrade / mastery`、`craft`、`state op`）失败后 30 分钟内接着手动 `input …` 的。
 - 会话记录（`transcripts`）：目录按仓库路径推出（Claude Code 的规则：路径里非字母数字的字符换成 `-`，放在 `~/.claude/projects/` 下；在 git worktree 里跑时用主仓库的路径），`--transcripts` 可以改。
-  每个会话：`label`（定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
+  每个会话：`label`（v0.1 定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
   `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
   （管道、`&&`、`;`、`cat`、`grep`……；引号里的 `|` 不算）、`result` 最后的"结果：…"。
   不看：`--exclude` 的、当前会话（环境变量 `CLAUDE_CODE_SESSION_ID`）、开发会话（改过 `maapilot/`、`tests/`、`docs/`、skill、`CLAUDE*.md`，跑过 pytest、git commit，
@@ -1033,7 +944,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 `maapilot dev rules [--check] [--root <目录>]`：按 `maapilot/policy.py` 生成两个宿主的权限规则文件和本文件里抄的设置（见「Claude Code 权限设置」）。
 `data`：`{"files": [{"path", "changed"}], "written"}`；`--check` 只核对、不写，有不一样的退出码 1 `rules_out_of_date`（`data.files` 照样带上）。
 
-`dev` 下的命令都不加权限规则（用户的 agent 用会弹确认、无头时被拒），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
+`dev` 下的命令都不加权限规则（用户的 agent 用会弹确认），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
 
 ---
 
@@ -1049,11 +960,10 @@ private/
   goals-done.md      完成或放弃的目标
   state/             depot.json  box.json  sanity.json（最新快照）  live.json（现场练度）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
                      sources.json（外部数据源的格式健康：{来源: {last_ok, last_error, recent}}）
-                     agent-session.json（记下的用户会话，每个宿主一个；见「doctor」的 session）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   cache/copilot/     copilot strip 存的去掉练度要求的作业
-  log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  schedule.log（定时日常的输出，启动器写；旧版是 cron.log）
-                     daily-<run_id>.jsonl（一次日常的每一步）  agent-<run_id>-<序号>-<项>.jsonl（无头 agent 的输出；codex 另有 .last.txt：最后一句话）
+  log/               <YYYY-MM-DD>.jsonl（命令记录）  maa/（maa-cli 日志）  daily-<run_id>.jsonl（一次日常的每一步）
+                     （v0.1 留下的 schedule.log / cron.log、agent-*.jsonl 不再写）
   reports/           <YYYY-MM-DD-HHMM>.md / .json（每次日常的汇报）
   shots/             截图
   debug/             MaaFramework 调试输出、快捷操作失败时的截图
@@ -1061,7 +971,8 @@ private/
   memory/            用户偏好（MEMORY.md 是目录；.imported-from-claude 是从 Claude Code 自动记忆搬过一次的记号）
   maa-config/        本项目的 maa-cli 配置目录（MAA_CONFIG_DIR）：cli.toml  profiles/default.toml  tasks/maapilot-*.toml
   lock.json          模拟器锁
-  daily-run.json     正在跑的日常（run_id、pid、当前步骤）；跑完删掉
+  daily-run.json     正在跑的日常（run_id、pid、当前步骤）；daily run 进程结束就删
+  daily-open.json    没收尾的日常（run_id、trigger、started_at、第一份仓库和目标快照）；daily done 收尾时删
 ```
 
 ### config.yaml
@@ -1073,16 +984,14 @@ private/
 | `emulator.address` | adb 地址（setup 找出来填） | 无（必填） |
 | `emulator.adb` | adb 程序 | `adb` |
 | `server` | 客户端（MAA 的 client_type）：`Official` / `Bilibili` / `YoStarEN` / `YoStarJP` / `YoStarKR` / `txwy` | `Official` |
-| `agent` | 定时日常叫起的 agent：`claude` 或 `codex`（`maapilot/hosts.py`）；或者写成映射接别的 harness：`{name: <短名字>, command: [程序, 参数…], prompt: stdin \| arg}`（`name` 必填，小写字母开头、字母数字 `-` `_`，最多 32 个字；`command` 必填，非空的字符串列表，第一项是程序（绝对路径或 PATH 上的名字）；`prompt` 默认 `stdin`）。映射只写 `name: claude` / `codex`、不写 `command` 等于内置的；写了 `command` 就照它起，读输出时先按那个宿主的格式。别的值、缺字段、多出不认识的字段 → `invalid_config`（退出码 2）。见「daily」的「无头 agent」 | `claude` |
-| `tools.maa` / `tools.claude` / `tools.codex` | 定时任务里用的 maa、agent 程序（setup 写绝对路径；agent 只用 `agent` 选的那个；自定义的 agent 用 `agent.command`，不看这里） | `maa` / `claude` / `codex` |
-| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表） | `["04:40", "16:40"]` |
-| `schedule_options.run_if_missed` | 到点时电脑关着或睡着，开机 / 醒来后补跑这一次（只有 Windows 任务计划程序做得到；cron 不补跑）；不是 true / false → `invalid_config` | `true` |
-| `schedule_options.wake_computer` | 到点时把睡着的电脑叫醒来跑（只有 Windows；电源设置里要允许唤醒定时器）；不是 true / false → `invalid_config` | `false` |
+| `agent` | v0.1 的设置（定时日常叫起哪个无头 agent），v0.2.0 起不用：写了就忽略，`doctor` 的 `agent_config` 提示可以删 | 无 |
+| `tools.maa` / `tools.claude` / `tools.codex` | maa、claude、codex 程序（`maa` 写程序名时先用 `.tools/` 里装好的；claude / codex 给 `host status / install`、`doctor` 找程序用） | `maa` / `claude` / `codex` |
+| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建会话内定时（`maapilot-setup`、docs/harnesses.md） | `["04:40", "16:40"]` |
+| `schedule_options` | v0.1 的设置（Windows 任务计划程序的补跑、唤醒），不用了：写了就忽略（`agent_config` 提示可以删） | 无 |
 | `daily.tasks` | 按顺序跑的 MAA 日常项：`startup` `recruit` `infrast` `mall` `annihilation` `award` | 全部 |
 | `daily.default_stage` | 没有进行中的目标时刷哪关 | `"1-7"` |
 | `daily.params.<任务>` | 覆盖该项的 MAA 参数 | `{}` |
-| `daily.agent_timeout_min` | 做目标部分的无头 agent 最长跑多久（分钟） | `90` |
-| `daily.recovery_timeout_min` | 接管失败项的无头 agent 最长跑多久（分钟） | `30` |
+| `daily.agent_timeout_min` / `daily.recovery_timeout_min` | v0.1 给无头 agent 的时限，不用了：写了就忽略 | 无 |
 | `daily.task_timeout_min` | 一个 MAA 日常项最长跑多久（分钟） | `90` |
 | `game.accept_terms` | 游戏更新后弹出《用户协议》《隐私政策》更新时 agent 能不能直接点同意：`null` 还没问过（每次问用户）、`true` 直接点、`false` 每次问；别的值当 `null`（`game version` 的 `accept_terms`） | `null` |
 
@@ -1169,7 +1078,8 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ### reports/
 
 `<YYYY-MM-DD-HHMM>.md`：给人看的汇报（做了什么、花了什么、失败与处理、目标进展、要用户决定的事）；
-`.json`：`daily run` 的 `data`（加上无头 agent 追加的部分）。`seen.json`：`{run_id: 时间}`，哪几次的结果已经告诉过用户（`report seen`）。
+`.json`：`daily run` 的 `data`（加上 `report write` 追加的 `appendix`、`daily done` 写的 `goals_summary`、收尾的 `open` / `closed_at` / `closed_by`）。
+v0.1 留下的 `seen.json` 不再读写。
 
 ### guard/
 
@@ -1181,20 +1091,18 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ## Codex 命令规则
 
 `.codex/rules/maapilot.rules`（入库，Starlark 的 `prefix_rule`）和下面 Claude Code 的权限出自同一份规则 `maapilot/policy.py`，由 `maapilot dev rules` 生成（见「Claude Code 权限设置」；不要手改）：
-放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），拒绝 → `forbidden`：`prompt` 只有 `guard allow`，没有 `forbidden`（10-20 用户定：权限只留两条，另一条是森空岛凭据文件，只有 Claude Code 拦得住）。
+放行 → `allow`（在沙箱外跑），询问 → `prompt`，拒绝 → `forbidden`：`prompt` 只有 `guard allow`，没有 `forbidden`（10-20 用户定：权限只留两条，另一条是森空岛凭据文件，只有 Claude Code 拦得住）。
 规则按命令的第一个词认程序：maapilot 的几种写法（`maapilot`、`.venv/bin/maapilot`、`maapilot.exe`、`.venv\Scripts\maapilot.exe`、`.venv/Scripts/maapilot.exe`）
 放行 / 询问都一样。macOS 上 Codex 还会把绝对路径的程序按程序名认（`execpolicy check --resolve-host-executables` 实测），
 Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的写法还没核实。没列的命令在沙箱里跑（只能写仓库、没有网络，连不上模拟器）。
-只有 Codex 信任这个文件夹时才加载（`host install codex`；`agent` 是 codex 时 `doctor` 的 `codex` 项是必需项，`daily schedule` 拒绝 `codex_untrusted`）。
+只有 Codex 信任这个文件夹时才加载（`host install codex`；`host status` 的 `hosts.codex.trusted`）。
 
 **在 Codex 里防得住什么**：防得住 agent 的无心之失（用错命令、绕过 maapilot 直接点、记错同意），防不住一个被注入了指令、存心绕过的 agent：
 - 规则只管命令，管不了文件：沙箱里写得了 `private/guard/`、`private/lock.json`，读得了 `private/skland.json`（Claude Code 是拒绝编辑 / 读取）；只靠 AGENTS.md 硬规则；
 - 放行的 maapilot 命令在沙箱外跑，而仓库里的代码（`maapilot/`）沙箱里也写得了：改过的代码会以沙箱外的权限运行。
 真实货币的对账照样在每次日常前后跑，花掉的会被发现（但不是拦在花之前）。
 
-定时日常把锁交给无头 agent 用的环境变量 `MAAPILOT_LOCK_TOKEN` 名字里带 `TOKEN`；10-15 实测 codex-cli 0.162.1 按上面的命令行跑（用户配置里没设
-`shell_environment_policy`），它跑的命令拿得到这个变量和 `MAAPILOT_DAILY_RUN`。用户自己在 Codex 配置里收紧了环境变量策略（`inherit = "core"`、`include_only`……）时会丢，
-那时无头 codex 里 `maapilot lock status` 的 `inherited` 是 `false`，agent 按提示什么都不做、这一项交回给用户。
+`daily run` 把锁交给它起的子进程用的环境变量 `MAAPILOT_LOCK_TOKEN` 名字里带 `TOKEN`：子进程是 `daily run` 自己起的，不经过 Codex 的环境变量策略，不受影响。
 
 ## Claude Code 权限设置
 
@@ -1203,7 +1111,7 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
 **权限规则只写一份**：`maapilot/policy.py`（每个 maapilot 子命令前缀的放行 / 询问 / 拒绝、别的程序 maa / adb / sleep、只有 Claude Code 有的文件规则 Read / Edit / WebFetch）。
 `maapilot dev rules`（开发用）按它生成三处：`.claude/settings.json` 的 `permissions`（别的部分如 `hooks` 原样保留）、整份 `.codex/rules/maapilot.rules`、
 本节下面抄的 settings.json 全文；`--check` 只核对，不一样就退出码 1 `rules_out_of_date`（`tests/test_policy.py` 也核对，并检查两边的结论一致）。这三处都不要手改。
-两边的差别：Claude Code 的放行 / 询问只列本名 `maapilot`、拒绝的列全部写法，Codex 每条都列全部写法；`sleep 300` 在 Claude Code 里精确匹配、在 Codex 里是前缀；文件规则只有 Claude Code 有。无头运行（`claude -p`）用同一份设置，"询问"的操作（只有 `guard allow`）自动被拒。
+两边的差别：Claude Code 的放行 / 询问只列本名 `maapilot`、拒绝的列全部写法，Codex 每条都列全部写法；`sleep 300` 在 Claude Code 里精确匹配、在 Codex 里是前缀；文件规则只有 Claude Code 有。
 
 ```json
 {
@@ -1247,11 +1155,11 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
 ```
 
 - `maa why` 只读，在 `maapilot maa:*` 的放行里。`news …` 只联网、写自己的缓存；`game update` 要下载、覆盖安装游戏，
-  但只装官网的包（地址只认官方域名），无头运行里日常要靠它更新，所以都放行。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
+  但只装官网的包（地址只认官方域名），所以都放行。`sleep 300` 是会话里掉线时等用户回复的 5 分钟计时器（skill `maapilot-recovery`「掉线、被登出」，后台运行）。
 - 只有 `guard allow`（记下花合成玉 / 源石的同意）是 **ask**：真实货币是程序唯一死守的一道（见「命令总览」），再弹一次宿主的确认（远程也能点）；
-  无头运行里命令自己也拒绝，换了宿主也一样。
-- `daily schedule / unschedule`、`reset`、`host install`、`lock release`、改 `private/config.yaml` 都放行：agent 在对话里问过、用户同意了就做（AGENTS.md 硬规则），
-  程序不另设关卡。`daily schedule` 的输出带上定时日常要执行的程序（`exec`），agent 转告用户；`reset` 日常在跑、锁被占着时自己不做；`lock release` 只删残留的锁。
+  有日常在跑或没收尾时命令自己也拒绝，换了宿主也一样。
+- `daily unschedule`、`reset`、`host install`、`lock release`、改 `private/config.yaml` 都放行：agent 在对话里问过、用户同意了就做（AGENTS.md 硬规则），
+  程序不另设关卡。`reset` 日常在跑、锁被占着时自己不做；`lock release` 只删残留的锁。
 - `maapilot` 整个放行（`Bash(maapilot:*)`），只列本名（启动钩子把 `.venv` 的程序目录放进了 PATH），别的写法按默认弹确认。
   直接跑 `maa` / `adb`、改 `private/guard/` 和锁都没有规则：靠 AGENTS.md 硬规则、锁和对账（10-20 用户定，开发后期再收）。
 - 森空岛凭据：`private/skland.json` agent 读不了、改不了（拒绝；Codex 拦不住读文件，见「Codex 命令规则」）。

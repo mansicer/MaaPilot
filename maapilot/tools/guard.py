@@ -299,7 +299,7 @@ def cmd_check(args):
 
 def cmd_allow(args):
     from maapilot.tools import confirm
-    confirm.require("这笔花费")                                       # 定时日常里不记；会话里 agent 已在对话里问过用户
+    confirm.require("这笔花费的同意")                                 # 日常在跑或没收尾时不记；平时 agent 已在对话里问过用户
     return allow(args.item, args.amount, args.reason)
 
 

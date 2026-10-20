@@ -1,5 +1,5 @@
 """agent 宿主在 Windows 上的部分（在哪个系统上都能测：换掉 exe.WINDOWS、which、环境变量、fs 的路径规则）：
-优先原生的 .exe、常见安装位置、doctor 的提醒和 Codex 沙箱、规则里 Windows 的写法、信任的键写法不同。不跑真的 claude / codex。"""
+优先原生的 .exe、常见安装位置、规则里 Windows 的写法、信任的键写法不同。不跑真的 claude / codex。"""
 from __future__ import annotations
 
 import json
@@ -71,7 +71,7 @@ def test_native_claude_from_installer(win, tmp_path):
 
 
 def test_resolve_windows_fallbacks_prefer_native(win, tmp_path, monkeypatch):
-    """定时任务里 PATH 很短：到 %APPDATA%\\npm 找到 codex.cmd，再换成包里的 codex.exe。"""
+    """PATH 上没有：到 %APPDATA%\\npm 找到 codex.cmd，再换成包里的 codex.exe。"""
     appdata = tmp_path / "Roaming"
     shim = _touch(appdata / "npm" / "codex.cmd")
     native = _touch(appdata / "npm" / "node_modules" / "@openai" / "codex" / "vendor" / "x86_64-pc-windows-msvc"
@@ -89,7 +89,7 @@ def test_resolve_windows_fallbacks_prefer_native(win, tmp_path, monkeypatch):
 
 
 def test_configured_tool_is_not_swapped_silently(monkeypatch):
-    """tools.claude 写错了：无头 agent 报"起不来"，不悄悄换成 PATH 里的另一个；推消息用的 codex 可以往下找。"""
+    """tools.claude 写错了：报找不到，不悄悄换成 PATH 里的另一个；fallback=True 时可以往下找。"""
     found = {"claude": "/usr/bin/claude", "codex": "/usr/bin/codex"}
     which = found.get
     cfg = {"tools": {"claude": "/gone/claude", "codex": "/gone/codex"}}
@@ -104,90 +104,10 @@ def test_windows_fallbacks_listed():
     assert not [f for f in hosts.CODEX_FALLBACKS + hosts.CLAUDE_FALLBACKS if re.match(r"[A-Za-z]:\\", f)]  # 不写死盘符
 
 
-def test_agent_and_queue_use_the_same_codex(env, codex, monkeypatch):
+def test_binary_and_codex_path_use_the_same_codex(env, codex, monkeypatch):
     prog, _ = codex
-    cfg = {"agent": "codex", "tools": {"codex": str(prog)}}
-    assert hosts.binary(cfg) == hosts.codex_path(cfg) == str(prog)
-
-
-# --- doctor --------------------------------------------------------------------------------------------------------
-
-class _Probe(doctor.Probe):
-    def __init__(self, found=None, help_=None):
-        self.found, self.help, self.calls = found, help_ or {}, []
-
-    def which(self, prog):
-        return self.found
-
-    def run(self, argv, timeout=15, env=None):
-        self.calls.append(argv[1:])
-        key = " ".join(argv[1:])
-        if key not in self.help:
-            return doctor.Proc(1, b"", b"error: unrecognized subcommand")
-        return doctor.Proc(0, self.help[key].encode(), b"")
-
-
-def _check(probe, host="claude"):
-    ctx = doctor.Ctx(False, probe)
-    ctx.cfg = {"agent": host}
-    return doctor.check_agent(ctx)
-
-
-def test_doctor_warns_about_shim_and_msix(win, tmp_path, monkeypatch):
-    monkeypatch.setattr(doctor, "claude_trusted", lambda root: True)
-    shim = _touch(tmp_path / "npm" / "claude.cmd")
-    item = _check(_Probe(str(shim)))
-    assert item["ok"] is True and item["path"] == str(shim) and "npm 的包装" in item["warnings"][0]
-    msix = _touch(tmp_path / "Packages" / "Node_x" / "LocalCache" / "Roaming" / "npm" / "claude.exe")
-    item = _check(_Probe(str(msix)))
-    assert item["ok"] is True and "定时任务看不见" in item["detail"] and len(item["warnings"]) == 1
-    ps1 = _touch(tmp_path / "npm" / "claude.ps1")
-    item = _check(_Probe(str(ps1)))
-    assert item["ok"] is False and item["required"] is False and "PowerShell" in item["detail"]
-    native = _touch(tmp_path / "bin" / "claude.exe")
-    assert "warnings" not in _check(_Probe(str(native)))
-
-
-EXEC_HELP = "  -s, --sandbox <SANDBOX_MODE>\n          [possible values: read-only, workspace-write, danger-full-access]"
-SANDBOX_NEW = "Commands:\n  uninstall  Remove the legacy Windows sandbox's machine-wide accounts\n"
-SANDBOX_OLD = "Commands:\n  macos  Run a command under Seatbelt\n  linux  Run a command under Landlock\n"
-
-
-def test_codex_sandbox_probe(win, tmp_path, monkeypatch):
-    monkeypatch.setattr(doctor, "codex_trusted", lambda root: True)
-    prog = str(_touch(tmp_path / "bin" / "codex.exe"))
-    ok = _Probe(prog, {"--version": "codex-cli 0.162.1\n", "exec --help": EXEC_HELP, "sandbox --help": SANDBOX_NEW})
-    item = _check(ok, "codex")
-    assert item["ok"] is True and item["sandbox"]["supported"] is True and item["sandbox"]["version"] == "codex-cli 0.162.1"
-    assert all(c[0] in ("--version", "exec", "sandbox") and c[-1] in ("--version", "--help") for c in ok.calls)  # 只看帮助
-    old = _Probe(prog, {"--version": "codex-cli 0.20.0\n", "exec --help": EXEC_HELP, "sandbox --help": SANDBOX_OLD})
-    item = _check(old, "codex")
-    assert item["ok"] is False and item["required"] is True and item["sandbox"]["supported"] is False
-    assert "不要改成 danger-full-access" in item["fix"]
-    item = _check(_Probe(prog), "codex")                                            # 帮助跑不出来：只提醒
-    assert item["ok"] is True and item["sandbox"]["supported"] is None and item["warnings"]
-
-
-def test_codex_sandbox_not_probed_off_windows(tmp_path, monkeypatch):
-    monkeypatch.setattr(exe, "WINDOWS", False)
-    monkeypatch.setattr(doctor, "codex_trusted", lambda root: True)
-    probe = _Probe("/x/codex")
-    item = _check(probe, "codex")
-    assert item["ok"] is True and "sandbox" not in item and probe.calls == []
-
-
-def test_sandbox_supported_from_help():
-    assert doctor.sandbox_supported(EXEC_HELP, SANDBOX_NEW) is True
-    assert doctor.sandbox_supported(EXEC_HELP, SANDBOX_OLD) is False
-    assert doctor.sandbox_supported("--sandbox <MODE> [possible values: read-only]", SANDBOX_NEW) is False
-    assert doctor.sandbox_supported(None, SANDBOX_NEW) is None
-
-
-def test_codex_command_never_bypasses_sandbox(win, tmp_path):
-    for stdin in (False, True):
-        argv = hosts.command("codex", r"C:\x\codex.exe", "做事", tmp_path / "a.jsonl", stdin=stdin)
-        assert argv[argv.index("--sandbox") + 1] == "workspace-write"
-        assert "danger-full-access" not in argv and "--dangerously-bypass-approvals-and-sandbox" not in argv
+    cfg = {"tools": {"codex": str(prog)}}
+    assert hosts.binary(cfg, "codex") == hosts.codex_path(cfg) == str(prog)
 
 
 # --- 规则里 Windows 的写法 --------------------------------------------------------------------------------------------

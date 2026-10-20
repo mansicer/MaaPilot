@@ -10,20 +10,8 @@ emulator:
 # 游戏客户端（MAA 的 client_type）：Official 官服 / Bilibili B 服 / YoStarEN 国际服 / YoStarJP 日服 / YoStarKR 韩服 / txwy 繁中服
 server: Official
 
-# 定时日常叫起的 agent：claude（Claude Code）或 codex（Codex）。用户平时在哪个里面跟助手说话就用哪个。
-# 改成 codex 前先 `maapilot host install codex`；改完要重新 `maapilot daily schedule`。
-agent: claude
-# 别的 agent（harness）写成映射：name 是短名字，command 是程序和参数（程序写绝对路径），prompt 是提示怎么给
-# （stdin：写进标准输入，默认；arg：放在最后一个参数）。它要能无头跑完一轮、结束前跑 maapilot daily done 交代结果
-# （没交代就取它 stdout 的最后一段当总结）。它的权限设置要自己配好：只放行 maapilot，不直接跑 adb / maa。
-# 下面是示例，没实测过：
-# agent:
-#   name: dsh
-#   command: [/usr/local/bin/dsh, --profile, headless]
-#   prompt: stdin
-
-# 定时任务里用到的程序。定时任务的 PATH 很短，setup 时写成绝对路径（macOS / Linux：`command -v maa`；
-# Windows：`where.exe maa`，写成单引号的 'C:\...\maa.exe'）。只用到 agent 选的那一个（claude 或 codex）。
+# 用到的程序。maa 写程序名时先用项目 .tools/ 里装好的（maapilot tools install maa-cli）；装在别处就写绝对路径
+# （Windows 写成单引号的 'C:\...\maa.exe'）。claude / codex 只给 maapilot host status / install、doctor 找程序用。
 tools:
   maa: maa
   claude: claude
@@ -35,17 +23,12 @@ game:
   #   留空（null）= 还没问过，每次都问你；true = 可以直接点同意；false = 每次都问你
   accept_terms: null
 
-# 每天定时跑日常的时间（本机时间，24 小时制）。改完要重新 `maapilot daily schedule` 才生效。
+# 每天定时跑日常的时间（本机时间，24 小时制）。程序不按它定时：agent 按它在你用的 harness 里建会话内定时
+# （Claude Code 的定时、Codex 桌面版的定时任务），到点在会话里叫醒 agent 跑日常；改了要请 agent 重新定好。
 # 游戏每天 04:00 换日，别把时间点放在 04:00 前后几分钟。
 schedule:
   - "04:40"
   - "16:40"
-
-# 定时日常的两个开关（只在 Windows 上起作用，设定时时问用户；改完要重新 `maapilot daily schedule`）。
-# macOS / Linux 用 cron：到点时电脑睡着或关着就跳过这一次，不补跑，也不会叫醒电脑。
-schedule_options:
-  run_if_missed: true     # 到点时电脑关着或睡着：开机 / 醒来后补跑这一次
-  wake_computer: false    # 到点时把睡着的电脑叫醒来跑（电源设置里要允许唤醒定时器）
 
 daily:
   # 按顺序跑的 MAA 日常项（去掉不想做的即可）：
@@ -60,9 +43,7 @@ daily:
   #   recruit: { times: 4, refresh: true }
   #   mall: { buy_first: ["招聘许可"], blacklist: ["家具零件"] }
   params: {}
-  # 定时日常里叫起来的 agent 最长跑多久：做目标部分的、接管失败项的；一个 MAA 日常项最长跑多久（分钟）
-  agent_timeout_min: 90
-  recovery_timeout_min: 30
+  # 一个 MAA 日常项最长跑多久（分钟）
   task_timeout_min: 90
   # 刷理智（没有目标时刷 default_stage）的时限按理智算：能打几次 = 理智 ÷ 一次的理智（向上取整），
   # 时限 = 次数 × farm_min_per_fight + farm_timeout_margin_min（分钟）。读不到理智时用上面的 task_timeout_min。

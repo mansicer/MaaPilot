@@ -1,6 +1,7 @@
 """`maapilot report`：日常汇报 private/reports/<YYYY-MM-DD-HHMM>.md / .json。契约见 docs/cli.md。
 
-.json 是 `daily run` 的 data（加上 `report write` 追加的 appendix）；.md 每次都由 .json 重新生成，给人看。
+.json 是 `daily run` 的 data（加上 `report write` 追加的 appendix、`daily done` 收尾时写的 goals_summary）；
+.md 每次都由 .json 重新生成，给人看。
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ def md_path(run_id: str):
 
 
 def save(data: dict) -> str:
-    """写 .json 与 .md；保留磁盘上已有的 appendix（无头 agent 在运行中途追加的）。返回 .md 的路径（相对仓库）。"""
+    """写 .json 与 .md；保留磁盘上已有的 appendix（agent 在运行中途 report write 追加的）。返回 .md 的路径（相对仓库）。"""
     rid = data["run_id"]
     try:
         old = json.loads(fs.read_text_utf8(json_path(rid)))
@@ -90,42 +91,8 @@ def latest() -> dict | None:
         except CliError:
             continue
         return {"run_id": rid, "at": d.get("started_at"), "ok": d.get("ok"), "status": d.get("status"),
-                "trigger": d.get("trigger"), "report": d.get("report")}
+                "trigger": d.get("trigger"), "open": bool(d.get("open")), "report": d.get("report")}
     return None
-
-
-# --- 告诉过用户没有（report seen） ----------------------------------------------------------------------------------
-
-UNSEEN_DAYS = 7          # 只看最近几天的汇报
-UNSEEN_MAX = 5
-
-
-def seen_file():
-    return paths.REPORTS / "seen.json"
-
-
-def seen_runs() -> dict:
-    """{run_id: 什么时候告诉用户的}。"""
-    try:
-        d = json.loads(fs.read_text_utf8(seen_file()))
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def mark_seen(run_id: str | None) -> dict:
-    from maapilot.tools import confirm
-    if confirm._unattended():                          # 无头 agent 标了，用户就再也看不到这次的问题
-        raise CliError("not_allowed", "定时日常叫起的 agent 不能把汇报标成已读（用户还没看到）", exit=BAD_REQUEST,
-                       hint="写进你的总结；用户会话里的 agent 说完才标")
-    rid = run_id or (runs() or [None])[0]
-    if rid is None:
-        raise CliError("no_report", "还没有日常汇报", exit=BAD_REQUEST)
-    load(rid)                                           # 不存在 → unknown_run
-    d = seen_runs()
-    d[rid] = now().isoformat(timespec="seconds")
-    fs.atomic_write_text(seen_file(), json.dumps(d, ensure_ascii=False, indent=1))
-    return {"run_id": rid, "seen_at": d[rid]}
 
 
 def has_problem(d: dict) -> bool:
@@ -147,7 +114,7 @@ def source_alerts(d: dict) -> list[str]:
 
 
 def problem_brief(d: dict) -> dict:
-    """一次有问题的运行的要点（doctor --brief、daily watch 用）。"""
+    """一次运行的要点（summary_lines 用）。"""
     tasks = {t.get("task"): t for t in d.get("tasks") or []}
     failed = [{"task": t, "label": label(t), "error": (tasks.get(t) or {}).get("error"),
                "code": (tasks.get(t) or {}).get("code")} for t in d.get("failed") or []]
@@ -177,7 +144,7 @@ def summary_lines(d: dict) -> list[str]:
     if d.get("maintenance"):
         lines.append(maintenance_line(d["maintenance"]))
     lines += [f"目标{x}" for x in goals_change_lines(d)]       # 不算问题，但要告诉用户
-    if d.get("goals_expired") and d.get("trigger") != "schedule":  # 定时运行里 agent 已经看过、写进总结了
+    if d.get("goals_expired"):
         lines.append("有限时目标到期被挪走了：看看还有没有没做完的（例如活动商店没换完），告诉用户")
     b = problem_brief(d)
     for f in b["failed"]:
@@ -192,32 +159,10 @@ def summary_lines(d: dict) -> list[str]:
     if b.get("handoff"):
         lines.append(f"停在：{label(b['handoff'].get('task') or '?')}（{b['handoff'].get('error')}）")
     lines += [f"告警：{a}" for a in b["alerts"]]
+    due = (d.get("news") or {}).get("due") or []
+    if due:
+        lines.append(f"官方日程有 {len(due)} 条消息还没跟用户说（新公告 / 维护结束 / 活动开始，maapilot-events；说完 news told）")
     return lines
-
-
-def unseen_problems(days: int = UNSEEN_DAYS, limit: int = UNSEEN_MAX) -> list[dict]:
-    """最近 days 天里有问题、还没告诉过用户（report seen）的运行，新的在前。"""
-    seen = seen_runs()
-    cutoff = now().timestamp() - days * 86400
-    out = []
-    for rid in runs()[:30]:
-        if rid in seen:
-            continue
-        try:
-            d = load(rid)
-        except CliError:
-            continue
-        t = d.get("started_at")
-        try:
-            if t and datetime.fromisoformat(t).timestamp() < cutoff:
-                break
-        except ValueError:
-            pass
-        if has_problem(d):
-            out.append({**problem_brief(d), "lines": summary_lines(d)})
-            if len(out) >= limit:
-                break
-    return out
 
 
 # --- 渲染 ------------------------------------------------------------------------------------------------------------
@@ -269,27 +214,6 @@ def _item(head: str, text: str, indent: str = "  ", sep: str = "——") -> list
     if not ls:
         return [head]
     return [f"{head}{sep}{ls[0]}"] + [indent + ln if ln else "" for ln in ls[1:]]
-
-
-def _how(a: dict, done: str = "处理好了", undone: str = "没处理好") -> str:
-    if a.get("timed_out"):
-        return "超时被停下"
-    return {True: done, False: undone}.get(a.get("recovered"), "结果不明")
-
-
-def _agent_lines(a: dict, indent: str = "  ") -> list[str]:
-    """MAA 项失败、agent 接手：挂在这一项下面的一条。"""
-    if not a:
-        return []
-    if a.get("error"):
-        return [f"{indent}- 叫 agent 处理没叫起来：{a['error']}"]
-    return _item(f"{indent}- agent 接手（{_how(a)}）", agent_text(a) or "（没有留下总结）",
-                 indent=indent + "  ", sep="：")
-
-
-def _agent_dur(a: dict) -> str:
-    d = _dur(a.get("duration_s"))
-    return f"（{d}）" if d else ""
 
 
 def _gtitle(g) -> str:
@@ -373,10 +297,10 @@ def render(d: dict) -> str:
     elif status == "update_failed":
         out.append("游戏客户端要更新，没更新成，后面的都没跑（旧版本进不了游戏）。")
     elif status == "handed_off" and (d.get("handoff") or {}).get("task") == "game_update":
-        out.append(f"{(d.get('handoff') or {}).get('error') or '游戏客户端要更新'}：停下交给在场的 agent 更新，更新完接着跑后面的。")
+        out.append(f"{(d.get('handoff') or {}).get('error') or '游戏客户端要更新'}：停下交给 agent 更新，更新完接着跑后面的。")
     elif status == "handed_off":
         h = d.get("handoff") or {}
-        out.append(f"停在{label(h.get('task', ''))}：没做成，交给在场的 agent 处理，处理完接着跑后面的。")
+        out.append(f"停在{label(h.get('task', ''))}：没做成，交给 agent 处理，处理完接着跑后面的。")
     elif status == "refused":
         out.append("**开头就被拦下，没开始：" + ((d.get("error") or {}).get("message") or "原因不明") + "。**")
     elif status == "stopped":
@@ -391,14 +315,14 @@ def render(d: dict) -> str:
             out[-1] += f"用时 {_dur(secs)}。"
         except ValueError:
             pass
+    if d.get("open") and status != "running":
+        out.append("（这次日常还没收尾：agent 做完后用 daily done 收尾。）")
     out += ["", "## 做了什么", ""]
-    goal_texts: list[str] = []
     for t in d.get("tasks") or []:
         name = label(t.get("task", "?"))
         if t.get("skipped"):
             out.append(f"- {name}：没做（{t['skipped']}）")
-            continue
-        if t.get("task") == "farm" and t.get("ok"):
+        elif t.get("task") == "farm" and t.get("ok"):
             f = t.get("result") or {}
             bits = [f"{f.get('stage', '?')} 打了 {f.get('times_done', '?')} 次"]
             if f.get("sanity_used") is not None:
@@ -408,44 +332,19 @@ def render(d: dict) -> str:
             if f.get("medicine_used"):
                 bits.append(f"用了 {f['medicine_used']} 瓶理智液")
             out.append(f"- 刷理智：{'，'.join(bits)}")
-        elif t.get("task") == "goals":
-            a = t.get("agent") or {}
-            if a.get("error"):
-                out.append(f"- 目标部分：叫 agent 没叫起来（{a['error']}）")
-            else:
-                out.append(f"- 目标部分：{_how(a, '做完了', '没做完')}{_agent_dur(a)}，见下面「目标部分」")
-                goal_texts.append(agent_text(a) or "（agent 没有留下总结）")
-            continue
-        elif t.get("task") == "maintenance":
-            a = t.get("agent") or {}
-            if a.get("error"):
-                out.append(f"- {name}：叫 agent 没叫起来（{a['error']}）")
-            else:
-                out += _item(f"- {name}：agent 看过了{_agent_dur(a)}", agent_text(a) or t.get("note", ""))
-            continue
-        elif t.get("task") == "game_update":
-            a = t.get("agent") or {}
-            head = (f"- {name}：完成（{_dur(t.get('duration_s'))}）" if t.get("ok")
-                    else f"- {name}：没做成（{t.get('error') or '原因不明'}）")
-            if a.get("error"):
-                out += [head, f"  - 叫 agent 更新没叫起来：{a['error']}"]
-            else:
-                out += _item(head, agent_text(a))
-            continue
         elif t.get("ok"):
             out.append(f"- {name}：完成（{_dur(t.get('duration_s'))}）")
         else:
-            out.append(f"- {name}：没做成——{t.get('error') or '原因不明'}")
-        if t.get("agent"):
-            out += _agent_lines(t["agent"])
+            out.append(f"- {name}：没做成——{t.get('error') or '原因不明'}" + ("（后面重跑了）" if t.get("retried") else ""))
+    gs = d.get("goals_summary") or {}
     if d.get("goals_pending"):
-        out.append(f"- 目标：有 {d.get('goals_active', '?')} 个进行中的目标，留给会话里的 agent 接着做")
+        out.append(f"- 目标：有 {d.get('goals_active', '?')} 个进行中的目标，"
+                   + ("见下面「目标部分」" if gs.get("text") else "留给 agent 接着做"))
     if d.get("award_pending"):
-        out.append("- 领奖励：等目标部分刷完理智再领（会话里的 agent 做）")
-    if goal_texts:
-        out += ["", "## 目标部分", ""]
-        for i, gt in enumerate(goal_texts):
-            out += ([""] if i else []) + _lines(gt)
+        out.append("- 领奖励：等目标部分刷完理智再领（agent 做）")
+    text = agent_text({"summary": gs.get("text")})
+    if text:
+        out += ["", "## 目标部分", ""] + _lines(text)
     change = d.get("depot_change")
     if status != "maintenance":                         # 维护没跑：不写仓库变化
         out += ["", "## 仓库变化", ""]
@@ -476,12 +375,12 @@ def render(d: dict) -> str:
         alerts.append("这次没能核对合成玉、源石（对账没做成）。")
     if alerts:
         out += ["", "## 要注意", ""] + [f"- {a}" for a in alerts]
-    summaries = [agent_text(t.get("agent")) for t in d.get("tasks") or [] if t.get("agent")]
+    summaries = [text] if text else []
     for a in d.get("appendix") or []:
-        text = (a.get("text") or "").strip()
-        if any(same_text(text, s_) for s_ in summaries if s_):   # agent 又追加了一遍自己的总结：只留一份
+        extra = (a.get("text") or "").strip()
+        if any(same_text(extra, s_) for s_ in summaries):        # agent 又追加了一遍自己的总结：只留一份
             continue
-        out += ["", f"## 补充（{_when(a.get('at'))}）", ""] + _lines(text)
+        out += ["", f"## 补充（{_when(a.get('at'))}）", ""] + _lines(extra)
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -538,11 +437,7 @@ def register(sub) -> None:
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=lambda a: list_reports(a.limit), command="report list")
 
-    p = gs.add_parser("seen", help="记下这次运行的结果已经告诉过用户（默认最近一次）")
-    p.add_argument("run_id", nargs="?")
-    p.set_defaults(func=lambda a: mark_seen(a.run_id), command="report seen")
-
-    p = gs.add_parser("write", help="在一次运行的汇报后面追加一段")
+    p = gs.add_parser("write", help="在一次运行的汇报后面追加一段「补充」")
     p.add_argument("run_id")
     p.add_argument("--append", required=True)
     p.set_defaults(func=lambda a: write(a.run_id, a.append), command="report write")

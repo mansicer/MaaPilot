@@ -1,4 +1,4 @@
-"""官方公告（`news`）：解析时间段、分类、日程时间点、`news told`、`daily watch` 在日程到点时结束。不联网。"""
+"""官方公告（`news`）：解析时间段、分类、日程时间点、`news told`（日常进行中也能记）、非国服不看国服日程。不联网。"""
 from __future__ import annotations
 
 import json
@@ -6,8 +6,8 @@ from datetime import datetime
 
 import pytest
 
-from maapilot import cli
-from maapilot.flows import daily, watch
+from maapilot import cli, config
+from maapilot.flows import daily
 from maapilot.knowledge import news
 from maapilot.knowledge.calendar import GAME_TZ
 
@@ -72,17 +72,6 @@ def test_told_rejects_unknown_key(capsys):
     assert code == 2 and json.loads(capsys.readouterr().out)["error"]["code"] == "unknown_event"
 
 
-def test_watch_ends_on_due_schedule(monkeypatch):
-    monkeypatch.setattr(daily, "running", lambda: None)
-    monkeypatch.setattr(daily, "schedule_info", lambda: {"installed": True, "times": ["04:40"], "old_entries": []})
-    cache(EVENT, MAINT)
-    monkeypatch.setattr(news, "stale", lambda d=None, now=None: False)
-    real_due = news.due
-    monkeypatch.setattr(news, "due", lambda d=None, now=None: real_due(d, at(10, 9, 12, 30)))
-    out = watch.watch(timeout_min=1, sleep=lambda s: pytest.fail("不该等"))
-    assert out["kind"] == "news" and {e["what"] for e in out["due"]} == {"维护结束", "开始"}
-
-
 def test_new_announcements_are_due_before_they_start():
     d = cache(EVENT, MAINT)
     due = news.due(d, at(10, 8, 9))
@@ -106,3 +95,65 @@ def test_announcement_skipped_once_its_event_was_told():
     d["told"] = {"6774:2026-10-09T12:00:00+08:00": "x"}
     news.save(d)
     assert news.due(None, at(10, 8, 9)) == []
+
+
+def _server(monkeypatch, srv):
+    real = config.load_or_defaults
+    monkeypatch.setattr(config, "load_or_defaults", lambda: {**real(), "server": srv})
+
+
+def test_refresh_keeps_told_written_while_fetching(monkeypatch):
+    cache(EVENT)
+
+    def slow_fetch(now, get):                                            # 拉公告期间，用户那边 news told 了
+        news.mark_told(["6774:公告"])
+        return news.load()["items"]
+    monkeypatch.setattr(news, "fetch", slow_fetch)
+    news.refresh(at(10, 9, 6))
+    d = news.load()
+    assert "6774:公告" in d["told"] and d["at"] == at(10, 9, 6).isoformat()
+
+
+@pytest.mark.parametrize("srv,applies", [("Official", True), ("Bilibili", True), ("YoStarEN", False),
+                                         ("YoStarJP", False), ("txwy", False)])
+def test_applies(monkeypatch, srv, applies):
+    _server(monkeypatch, srv)
+    assert news.applies() is applies
+
+
+def test_non_cn_server_skips_maintenance_and_news(monkeypatch, capsys):
+    _server(monkeypatch, "YoStarEN")
+    cache(EVENT, MAINT)
+    monkeypatch.setattr(news, "refresh", lambda: pytest.fail("不该拉"))
+    monkeypatch.setattr(news, "stale", lambda d=None, now=None: True)
+    monkeypatch.setattr(news, "maintenance_now", lambda d=None, now=None: {"cid": "5699"})
+    assert daily.refresh_news() is False and daily.maintenance_now() is None
+    code = cli.main(["news", "list"])
+    assert code == 2 and json.loads(capsys.readouterr().out)["error"]["code"] == "unsupported_server"
+
+
+def test_bilibili_uses_cn_schedule(monkeypatch):
+    _server(monkeypatch, "Bilibili")
+    monkeypatch.setattr(news, "maintenance_now", lambda d=None, now=None: {"cid": "5699"})
+    assert daily.maintenance_now() == {"cid": "5699"}
+
+
+def test_news_told_allowed_during_open_daily(monkeypatch, capsys):
+    """agent 在会话里说了就是说过了：日常在跑、没收尾时也能 news told（v0.2.0 去掉了定时日常里的限制）。"""
+    cache(EVENT)
+    monkeypatch.setattr(daily, "running", lambda: {"run_id": "20261004-1640", "pid": 1})
+    monkeypatch.setattr(daily, "open_daily", lambda: {"run_id": "20261004-1640", "stale": False})
+    monkeypatch.setenv("MAAPILOT_DAILY_RUN", "20261004-1640")              # 旧版的环境变量也不再看
+    assert cli.main(["news", "told", "6774:公告"]) == 0
+    assert "6774:公告" in news.load()["told"]
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("server,shown", [("Official", True), ("Bilibili", True), ("YoStarEN", False)])
+def test_news_brief_for_cn_servers(monkeypatch, server, shown):
+    from maapilot.tools import doctor
+    monkeypatch.setattr(config, "load_or_defaults", lambda: {"server": server})
+    monkeypatch.setattr(news, "load", lambda: {"at": "t", "items": [{"key": "k"}]})
+    monkeypatch.setattr(news, "lines", lambda d: ["x"])
+    monkeypatch.setattr(news, "due", lambda d: [])
+    assert (doctor.news_brief() is not None) is shown

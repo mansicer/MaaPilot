@@ -14,15 +14,16 @@ from maapilot.oscompat import fs
 DEFAULTS = {
     "emulator": {"address": None, "adb": "adb"},
     "server": "Official",
-    "agent": "claude",
     "tools": {"maa": "maa", "claude": "claude", "codex": "codex"},
     "schedule": ["04:40", "16:40"],
-    "schedule_options": {"run_if_missed": True, "wake_computer": False},
     "daily": {"tasks": ["startup", "recruit", "infrast", "mall", "annihilation", "award"],
-              "default_stage": "1-7", "params": {}, "agent_timeout_min": 90, "recovery_timeout_min": 30,
-              "task_timeout_min": 90},
+              "default_stage": "1-7", "params": {}, "task_timeout_min": 90},
     "game": {"accept_terms": None},
 }
+
+# v0.1 的设置（定时叫起无头 agent、系统定时的开关）：写了就忽略，doctor 的 agent_config 提示可以删
+LEGACY_KEYS = ("agent", "schedule_options")
+LEGACY_DAILY_KEYS = ("agent_timeout_min", "recovery_timeout_min")
 
 
 def exists() -> bool:
@@ -44,6 +45,16 @@ def load(path: Path | None = None) -> dict:
     if not isinstance(raw, dict):
         raise CliError("invalid_config", "config.yaml 顶层应是映射", exit=BAD_REQUEST)
     return _merge(DEFAULTS, raw)
+
+
+def raw(path: Path | None = None) -> dict | None:
+    """config.yaml 原样的内容（不合并默认值）；没有、读不了 → None。"""
+    p = path or paths.CONFIG
+    try:
+        d = yaml.safe_load(fs.read_text_utf8(p)) or {}
+    except (OSError, fs.BadEncoding, yaml.YAMLError):
+        return None
+    return d if isinstance(d, dict) else None
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -114,24 +125,6 @@ def adb_path(cfg: dict | None = None) -> str:
     from maapilot import toolchain
     cfg = cfg if cfg is not None else load_or_defaults()
     return toolchain.resolve((cfg.get("emulator") or {}).get("adb"), "adb")
-
-
-def schedule_options(cfg: dict | None = None) -> dict:
-    """schedule_options：到点时电脑关着或睡着，开机 / 醒来后补跑（run_if_missed，默认是）；把睡着的电脑叫醒来跑
-    （wake_computer，默认否）。只有 Windows 的任务计划程序用得上，cron 不补跑也不唤醒。不是 true / false → invalid_config。"""
-    cfg = cfg if cfg is not None else load_or_defaults()
-    raw = cfg.get("schedule_options")
-    raw = raw if isinstance(raw, dict) else {}
-    out = {}
-    for k, default in DEFAULTS["schedule_options"].items():
-        v = raw.get(k, default)
-        if v is None:
-            v = default
-        if not isinstance(v, bool):
-            raise CliError("invalid_config", f"config.yaml 的 schedule_options.{k} 要写 true 或 false，现在是 {v!r}",
-                           exit=BAD_REQUEST)
-        out[k] = v
-    return out
 
 
 def accept_terms(cfg: dict | None = None) -> bool | None:

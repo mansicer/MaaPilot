@@ -1,4 +1,4 @@
-"""测试里跨系统的小工具：假程序（claude / codex / maa / crontab）、只在有 cron 的系统上跑的标记。"""
+"""测试里跨系统的小工具：假程序（codex / maa / crontab / schtasks）、只在有 cron 的系统上跑的标记。"""
 from __future__ import annotations
 
 import stat
@@ -27,18 +27,3 @@ def fake_program(path: Path, body: str) -> Path:
     cmd = path.with_name(path.name + ".cmd")
     cmd.write_text(f'@"{sys.executable}" "%~dp0{py.name}" %*\r\n', encoding="utf-8")
     return cmd
-
-
-@pytest.fixture
-def sched_ready(tmp_path, monkeypatch):
-    """定时日常要执行的程序都找得到（daily schedule 装之前要查）：假的 maa / claude / codex / adb 放进 PATH，
-    .venv 的 python 指到跑测试的这个解释器（worktree 里可能没有自己的 .venv）。返回假程序的目录。"""
-    import os
-    from maapilot.oscompat import venv
-    d = tmp_path / "sched-bin"
-    d.mkdir(exist_ok=True)
-    for n in ("maa", "claude", "codex", "adb"):
-        fake_program(d / n, "pass\n")
-    monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.setattr(venv, "venv_bin", lambda: Path(sys.executable).parent)
-    return d

@@ -1,10 +1,11 @@
 """`maapilot doctor [--brief] [--offline] [--fix]`：逐项检查环境，给修复建议。契约见 docs/cli.md「doctor」。
 
 只读：只调 adb 的查询命令（version / devices / connect / get-state / exec-out screencap / shell）、maa-cli 的
-version / dir 和 `crontab -l`（Windows：`schtasks /Query`）；不点击、不拿锁、不 import MaaFramework。所有外部访问都经 `Probe`，测试换成假的。
-每项 `{name, ok, detail, fix}`；`required: false` 的项（游戏在不在前台、定时任务、setup）不影响 ok_all。
+version / dir 和 `crontab -l`（Windows：`schtasks /Query`，看 v0.1 留下的系统定时）；不点击、不拿锁、不 import MaaFramework。
+所有外部访问都经 `Probe`，测试换成假的。
+每项 `{name, ok, detail, fix}`；`required: false` 的项（游戏在不在前台、旧的定时、setup）不影响 ok_all。
 
-`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和定时（crontab / 任务计划程序）。
+`--brief` 给启动钩子：不碰模拟器、不联网、不跑子进程以外的慢操作，只读 private/ 下的几个文件和旧的系统定时（crontab / 任务计划程序）。
 """
 from __future__ import annotations
 
@@ -296,126 +297,18 @@ def check_maa_cli(ctx: Ctx) -> dict:
                  path=path, tested=list(MAA_CLI_TESTED), **extra)
 
 
-def check_agent(ctx: Ctx) -> dict:
-    """定时日常要叫的无头 agent（config.yaml 的 agent：claude / codex，项名就是它）：找得到它、给出绝对路径
-    （setup 写进 tools.<宿主>）、信任过这个文件夹（没信任时项目的放行 / 禁止规则不生效）。一般只是提示，不影响 ok_all；
-    agent 是 codex 而 Codex 没信任这个文件夹、或者这个 Codex 在 Windows 上没有沙箱时是必须项：
-    规则不加载、或者 workspace-write 起不来，叫起的 codex 拦不住直接跑 adb / maa（也不会改用不设防的模式顶上）。
-    Windows 上找到的还是 npm 的 .cmd / .ps1 包装、或者在 MSIX 的隔离目录里时，在 warnings 里提醒（不算没通过）。"""
-    from maapilot import config, hosts
-    from maapilot.oscompat import exe
-    try:
-        sp = hosts.spec(ctx.cfg or {})
-    except CliError as e:
-        return _item("agent", False, e.message, "把 config.yaml 的 agent 改成 claude 或 codex（或者照 docs/cli.md 写自定义的映射）",
-                     required=False)
-    host = sp["name"]
-    if sp["command"]:
-        return check_custom_agent(ctx, sp)
-    prog = config.tool(host, ctx.cfg)
-    path = hosts.resolve(ctx.cfg or {}, host, which=ctx.probe.which)
-    if path is None:
-        return _item(host, False, f"找不到 {host}（{prog}）", f"在 config.yaml 的 tools.{host} 写 {host} 的绝对路径",
-                     required=False)
-    warnings = agent_path_warnings(host, path)
-    extra = {"path": path, **({"warnings": warnings} if warnings else {})}
-    detail = path + "".join(f"；{w}" for w in warnings)
-    if exe.is_shim(path) and path.lower().endswith(".ps1"):
-        return _item(host, False, f"{path} 是 PowerShell 脚本，定时日常起不了它", f"在 config.yaml 的 tools.{host} 写 "
-                     f"{host}.exe（或 {host}.cmd）的绝对路径", required=False, **extra)
-    if host == "codex":
-        trusted = codex_trusted(paths.ROOT)
-        if trusted is False:
-            return _item(host, False, f"{detail}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
-                         "maapilot host install codex", required=True, trusted=False, **extra)
-        sandbox = codex_sandbox(ctx, path)
-        if sandbox and sandbox["supported"] is False:
-            return _item(host, False, f"{detail}；{sandbox['detail']}", CODEX_SANDBOX_FIX, required=True, trusted=trusted,
-                         sandbox=sandbox, **extra)
-        if sandbox and sandbox["supported"] is None:
-            extra["warnings"] = [*warnings, sandbox["detail"]]
-            detail += f"；{sandbox['detail']}"
-        return _item(host, True, detail, required=False, trusted=trusted, **extra,
-                     **({"sandbox": sandbox} if sandbox else {}))
-    trusted = claude_trusted(paths.ROOT)
-    if trusted is False:
-        return _item(host, False, f"{detail}；这个文件夹还没被 Claude Code 信任，定时日常叫起的 agent 用不了放行的命令",
-                     "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示", required=False,
-                     trusted=False, **extra)
-    return _item(host, True, detail, required=False, trusted=trusted, **extra)
-
-
-def check_custom_agent(ctx: Ctx, sp: dict) -> dict:
-    """config.yaml 的 agent 写了 command（自定义的 harness，没实测过）：command 的第一项找得到、不是 PowerShell 脚本；
-    Windows 上提醒包装、隔离目录，prompt: arg 而程序是 .cmd / .bat 时提示改走 stdin。不检查它的权限规则（MaaPilot 管不到）。
-    名字是 codex 时照样要 Codex 信任这个文件夹（项目的命令规则才生效）。"""
-    from maapilot import hosts
-    from maapilot.oscompat import exe, procs
-    host = sp["name"]
-    written, path = hosts.agent_program(ctx.cfg or {}, which=ctx.probe.which)
-    extra = {"custom": True, "command": sp["command"], "prompt": sp["prompt"]}
-    if path is None:
-        return _item(host, False, f"找不到 {host} 的程序（{written}）", "在 config.yaml 的 agent.command 第一项写它的绝对路径",
-                     required=False, **extra)
-    warnings = []
-    if exe.is_shim(path):
-        warnings.append(f"这是 {Path(path).name}（包装脚本，不是程序本体）：能用的话最好写程序本体（.exe）的绝对路径")
-        if sp["prompt"] == "arg" and procs.is_batch(path):
-            warnings.append("它经 cmd.exe 转，多行的提示放在参数里会被截断：提示改从 stdin 给（它要能从 stdin 读）")
-    if exe.in_msix_cache(path):
-        warnings.append("它在应用商店程序的隔离目录（…\\Packages\\…\\LocalCache\\）里，定时任务看不见它：换个安装位置")
-    extra.update(path=path, **({"warnings": warnings} if warnings else {}))
-    detail = f"{path}（自定义的 agent，没实测过）" + "".join(f"；{w}" for w in warnings)
-    if exe.is_shim(path) and path.lower().endswith(".ps1"):
-        return _item(host, False, f"{path} 是 PowerShell 脚本，定时日常起不了它", "在 config.yaml 的 agent.command 第一项写程序本体的绝对路径",
-                     required=False, **extra)
-    if host == "codex" and codex_trusted(paths.ROOT) is False:
-        return _item(host, False, f"{detail}；这个文件夹还没被 Codex 信任，项目的命令规则（.codex/rules/）不生效",
-                     "maapilot host install codex", required=True, trusted=False, **extra)
-    return _item(host, True, detail, required=False, **extra)
-
-
-def agent_path_warnings(host: str, path: str) -> list[str]:
-    """宿主程序的路径要提醒的事（Windows）：是 npm 的包装、在 MSIX 的隔离目录里。"""
-    from maapilot.oscompat import exe
-    out = []
-    if exe.is_shim(path):
-        out.append(f"这是 npm 的包装（{Path(path).name}），不是 {host} 本体：能用，但最好在 config.yaml 的 tools.{host} "
-                   f"写 {host}.exe 的绝对路径")
-    if exe.in_msix_cache(path):
-        out.append("它在应用商店程序的隔离目录（…\\Packages\\…\\LocalCache\\）里，定时任务看不见它：换成正常安装的 "
-                   f"{host}，或者在 tools.{host} 写别处的路径")
-    return out
-
-
-CODEX_SANDBOX_FIX = ("升级 Codex（npm i -g @openai/codex@latest）后再 maapilot doctor；还不行就问用户要不要改在 WSL 里用 Codex，"
-                     "或者定时日常改用 claude。不要改成 danger-full-access")
-
-
-def codex_sandbox(ctx: Ctx, path: str) -> dict | None:
-    """Windows 上这个 codex 能不能用 `exec --sandbox workspace-write`（定时日常就这么叫它）。只看帮助文字，不真的起沙箱
-    （第一次起 Windows 沙箱可能要管理员权限、建系统账户），也不调模型：exec 的 --sandbox 认 workspace-write、
-    `codex sandbox` 认得 Windows（新版有 Windows 沙箱，旧版只有 macOS / Linux 的）。
-    → {supported: True / False / None（看不出来）, detail, version}；不是 Windows → None（macOS / Linux 一直有沙箱）。"""
-    from maapilot.oscompat import exe
-    if not exe.WINDOWS:
-        return None
-    version = ctx.probe.run([path, "--version"], timeout=20)
-    ver = version.text.strip().splitlines()[0] if version.returncode == 0 and version.text.strip() else None
-    eh = ctx.probe.run([path, "exec", "--help"], timeout=20)
-    sh = ctx.probe.run([path, "sandbox", "--help"], timeout=20)
-    supported = sandbox_supported(eh.text if eh.returncode == 0 else None, sh.text if sh.returncode == 0 else None)
-    detail = {True: "Codex 在 Windows 上有沙箱（只看了帮助，没实际起过）",
-              False: f"这个 Codex（{ver or '版本不明'}）在 Windows 上没有 workspace-write 沙箱，定时日常叫不起它",
-              None: f"看不出这个 Codex（{ver or '版本不明'}）在 Windows 上有没有沙箱（帮助跑不出来）"}[supported]
-    return {"supported": supported, "detail": detail, "version": ver}
-
-
-def sandbox_supported(exec_help: str | None, sandbox_help: str | None) -> bool | None:
-    """帮助文字 → 有没有 Windows 上的 workspace-write 沙箱。帮助跑不出来 → None。"""
-    if exec_help is None or sandbox_help is None:
-        return None
-    return "workspace-write" in exec_help and "windows" in sandbox_help.lower()
+def check_agent_config(ctx: Ctx) -> dict:
+    """config.yaml 里还写着 v0.1 的 `agent`（定时日常叫哪个无头 agent）：已经不用了，写了也忽略，提示可以删。"""
+    from maapilot import config
+    raw = config.raw()
+    if raw is None:
+        return _item("agent_config", True, "没有旧的设置", required=False)
+    old = [k for k in config.LEGACY_KEYS if k in raw] + [f"daily.{k}" for k in config.LEGACY_DAILY_KEYS
+                                                          if k in (raw.get("daily") or {})]
+    if old:
+        return _item("agent_config", False, f"config.yaml 里的 {'、'.join(old)} 是旧版（定时叫起无头 agent）用的，现在不用了",
+                     "可以从 config.yaml 里删掉（用户同意后），不删也不影响", required=False, legacy=old)
+    return _item("agent_config", True, "没有旧的设置", required=False)
 
 
 def codex_trusted(root: Path) -> bool | None:
@@ -427,7 +320,7 @@ def codex_trusted(root: Path) -> bool | None:
 
 def claude_trusted(root: Path) -> bool | None:
     """Claude Code 是否信任过这个文件夹（~/.claude.json 的 projects.<路径>.hasTrustDialogAccepted；上级目录信任也算）。
-    没信任时无头 `claude -p` 会忽略项目的放行规则。读不到 → None。只读。"""
+    读不到 → None。只读。"""
     import json
     import os
     cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -489,56 +382,35 @@ def check_game_data(ctx: Ctx) -> dict:
     return _item("game_data", True, "齐全")
 
 
-def schedule_info(probe: Probe | None = None) -> dict:
-    """本项目的定时（flows/daily/cron.py 的 schedule_info，经 Probe 跑 crontab / schtasks）：{installed, times, old_entries, backend}，
-    可能带 error（读不了）、unavailable（这台电脑上设不了定时）、enabled: false（任务被停用了）。"""
+def legacy_schedule(probe: Probe | None = None) -> dict:
+    """v0.1 留下的系统定时（flows/daily/cron.py 的 legacy_schedule，经 Probe 跑 crontab / schtasks）：
+    {installed, times, entries, old_entries, backend}，可能带 error（读不了）、unavailable（这台电脑上没有调度）。"""
     from maapilot.flows.daily import cron
     probe = probe or PROBE
 
     def run(argv, input, timeout):
         r = probe.run(list(argv), timeout=min(timeout, 10))
         return r.returncode, r.stdout, r.stderr
-    return cron.schedule_info(run)
+    return cron.legacy_schedule(run)
 
 
-def check_schedule(ctx: Ctx) -> dict:
-    info = schedule_info(ctx.probe)
-    win = info.get("backend") == "schtasks"
-    others = "别的文件夹的 MaaPilot 的定时任务" if win else "旧版 MaaPilot 的定时任务"
+def check_legacy_schedule(ctx: Ctx) -> dict:
+    """系统里还留着 v0.1 的定时日常（crontab 行 / 任务计划程序的任务）：现在定时由 harness 在会话里叫醒 agent，
+    旧的留着会到点自己跑 daily run，要删掉。"""
+    info = legacy_schedule(ctx.probe)
     extra = {"old_entries": info["old_entries"]} if info["old_entries"] else {}
     if info.get("unavailable"):
-        return _item("schedule", False, f"定时日常：{info['unavailable']}", "先在对话里手动跑日常", required=False,
-                     unavailable=True)
+        return _item("legacy_schedule", True, "这台电脑上没有系统定时", required=False)
     if info["installed"] is None:
-        return _item("schedule", False, info.get("error") or "读不了定时任务",
-                     "打开「任务计划程序」看看 MaaPilot 文件夹" if win else "看看 crontab 能不能用（crontab -l）",
-                     required=False)
-    if not info["installed"]:
-        detail = "还没设定时日常" + (f"；有{others}" if info["old_entries"] else "")
-        return _item("schedule", False, detail, "maapilot daily schedule", required=False, **extra)
-    if info.get("enabled") is False:
-        return _item("schedule", False, f"定时日常（{'、'.join(info['times'])}）的任务被停用了", "maapilot daily schedule",
-                     required=False, enabled=False, **extra)
-    problems = _schedule_problems(ctx)
-    if problems:
-        from maapilot.flows.daily import cron
-        e = cron.preflight_error(problems)
-        return _item("schedule", False, f"定时日常（{'、'.join(info['times'])}）到点会跑不成：{e.message}", e.hint,
-                     required=False, problems=problems, **extra)
-    note = "；电脑要保持登录（锁屏可以），不然不会跑" if win else ""
-    return _item("schedule", True, f"定时日常：{'、'.join(info['times'])}{note}" +
-                 (f"；还有{others}" if info["old_entries"] else ""), required=False, **extra)
-
-
-def _schedule_problems(ctx: Ctx) -> list[dict]:
-    """定时日常要执行的程序找不到、装在 Codex 的隔离目录里（同 daily schedule 装之前查的）。配置读不了就不查。"""
-    from maapilot.flows.daily import cron
-    if not ctx.cfg:
-        return []
-    try:
-        return cron.preflight(ctx.cfg, cron.command(ctx.cfg), which=ctx.probe.which)
-    except CliError:
-        return []
+        return _item("legacy_schedule", False, f"看不了有没有旧的定时：{info.get('error') or '读不了'}",
+                     "打开「任务计划程序」看看 MaaPilot 文件夹" if info.get("backend") == "schtasks"
+                     else "看看 crontab 能不能用（crontab -l）", required=False)
+    if info["installed"]:
+        return _item("legacy_schedule", False, f"系统里还留着旧版的定时日常（{'、'.join(info['times']) or '时间不明'}），"
+                     "到点会自己跑", "用户同意后 maapilot daily unschedule，再用 harness 的定时在会话里定好", required=False,
+                     times=info["times"], entries=info["entries"], **extra)
+    return _item("legacy_schedule", True, "没有旧版的定时日常" + ("；还有更旧的 MaaPilot 的定时（没动）" if extra else ""),
+                 required=False, **extra)
 
 
 def skills_link(root: Path | None = None) -> str:
@@ -575,9 +447,9 @@ def check_setup(ctx: Ctx) -> dict:
 
 DEVICE_CHECKS = ("emulator", "screen", "input", "game")
 CHECKS = [("config", check_config), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
-          ("input", check_input), ("maa_cli", check_maa_cli), ("agent", check_agent), ("maa_config", check_maa_config),
+          ("input", check_input), ("maa_cli", check_maa_cli), ("agent_config", check_agent_config), ("maa_config", check_maa_config),
           ("maa_core", check_maa_core), ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
-          ("schedule", check_schedule), ("skills_link", check_skills_link), ("setup", check_setup)]
+          ("legacy_schedule", check_legacy_schedule), ("skills_link", check_skills_link), ("setup", check_setup)]
 
 
 def run_checks(offline: bool = False, probe: Probe | None = None) -> list[dict]:
@@ -669,7 +541,7 @@ def goals_active() -> int | None:
 
 def last_daily() -> dict | None:
     try:
-        reports = sorted(r for r in paths.REPORTS.glob("*.json")       # 只看运行的汇报（seen.json 不是）
+        reports = sorted(r for r in paths.REPORTS.glob("*.json")       # 只看运行的汇报（<YYYY-MM-DD-HHMM>.json）
                          if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", r.stem))
     except OSError:
         return None
@@ -686,30 +558,41 @@ def brief(probe: Probe | None = None) -> dict:
     from maapilot.tools import guard
     setup_done = paths.SETUP.exists()
     stop = guard.stopped()
-    sched = schedule_info(probe or PROBE)
     data = {"setup_done": setup_done, "goals_active": goals_active(), "guard_stop": stop,
-            "last_daily": last_daily(), "schedule": {"installed": sched["installed"], "times": sched["times"]},
+            "last_daily": last_daily(), "daily_open": daily_open_brief(),
+            "legacy_schedule": legacy_schedule_brief(probe or PROBE),
             "next": "setup" if not setup_done else ("guard" if stop else None)}
-    if sched.get("unavailable"):                        # 这台电脑上设不了定时（Windows 上找不到 schtasks.exe）
-        data["schedule"]["unavailable"] = sched["unavailable"]
-    if sched.get("enabled") is False:                   # 任务计划程序里被停用了
-        data["schedule"]["enabled"] = False
-    try:
-        from maapilot.flows import report
-        data["unseen_problems"] = [{k: p.get(k) for k in ("run_id", "started_at", "status", "lines", "report")}
-                                   for p in report.unseen_problems()]
-    except Exception:                                   # noqa: BLE001 - 汇报读不了不影响启动检查
-        data["unseen_problems"] = []
     from maapilot import version
     data["version"] = version.info()
     data["memory"] = memory_brief() if setup_done else None
-    data["session"] = session_brief()
     data["goals"] = goals_brief()
     data["news"] = news_brief()
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
     data["lines"] = brief_lines(data)
     return data
+
+
+def daily_open_brief() -> dict | None:
+    """没收尾的日常：{run_id, trigger, started_at, age_h, stale}（在跑时另有 running、step）；没有 → None。"""
+    try:
+        from maapilot.flows import daily
+        st = daily.status()
+        op = st.get("open")
+        if op:
+            op["running"] = bool(st.get("running"))
+        return op
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return None
+
+
+def legacy_schedule_brief(probe: Probe) -> dict | None:
+    """还留着 v0.1 的系统定时：{times, backend}；没有（或看不了）→ None。"""
+    try:
+        info = legacy_schedule(probe)
+    except Exception:                                   # noqa: BLE001
+        return None
+    return {"times": info["times"], "backend": info["backend"]} if info.get("installed") else None
 
 
 def memory_brief() -> dict | None:
@@ -719,16 +602,6 @@ def memory_brief() -> dict | None:
         imported = memory.import_claude()
         return {"dir": "private/memory", "index": memory.index_lines(), "imported": imported or None}
     except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
-        return None
-
-
-def session_brief() -> dict | None:
-    """记下这是哪个宿主的会话（Codex 的会话编号用来推送定时日常的结果，见 maapilot.hosts）。→ {host, thread} 或 None。"""
-    try:
-        from maapilot import hosts
-        rec = hosts.record_session()
-        return {k: rec.get(k) for k in ("host", "thread")} if rec else None
-    except Exception:                                   # noqa: BLE001 - 记不下不影响启动检查
         return None
 
 
@@ -794,13 +667,20 @@ def brief_lines(d: dict) -> list[str]:
         lines.append(f"上次日常：{ld.get('at') or '时间不明'}，{'成功' if ld.get('ok') else '有失败'}。")
     else:
         lines.append("还没跑过日常。")
-    s = d["schedule"]
-    if s.get("unavailable"):
-        lines.append(f"定时日常这台电脑上设不了：{s['unavailable']}；日常要在对话里手动跑。")
-    elif s["installed"] and s.get("enabled") is False:
-        lines.append(f"定时日常（{'、'.join(s['times'])}）的任务被停用了，到点不会跑；用户同意后 daily schedule 重新设。")
-    else:
-        lines.append(f"定时日常：{'、'.join(s['times'])}。" if s["installed"] else "定时日常没设。")
+    o = d.get("daily_open")
+    if o:
+        when = str(o.get("started_at") or "")[5:16].replace("T", " ")
+        if o.get("running"):
+            lines.append(f"日常 {o['run_id']}（{when} 开始）正在跑" + (f"（{o['step']}）" if o.get("step") else "") + "。")
+        elif o.get("stale"):
+            lines.append(f"日常 {o['run_id']}（{when} 开始）超过 6 小时没收尾：下次 daily run 会自动收尾；"
+                         "要补上就先 maapilot daily done --summary … 收尾，再告诉用户。")
+        else:
+            lines.append(f"日常 {o['run_id']}（{when} 开始）还没收尾：做完目标部分、领奖励、对账后 maapilot daily done 收尾。")
+    ls = d.get("legacy_schedule")
+    if ls:
+        lines.append(f"系统里还留着旧版的定时日常（{'、'.join(ls.get('times') or []) or '时间不明'}），到点会自己跑："
+                     "告诉用户，同意后 maapilot daily unschedule 删掉，再用 harness 的定时在会话里定好（maapilot-setup）。")
     n = d.get("news") or {}
     for l in n.get("lines") or []:
         lines.append(f"官方日程：{l}")
@@ -812,9 +692,6 @@ def brief_lines(d: dict) -> list[str]:
     for x in d.get("live_suspects") or []:
         lines.append(f"练度可能读错了：{x['name']} 在 {str(x.get('at') or '')[5:16].replace('T', ' ')} 由 {x.get('source')} 读到的练度，"
                      "一天后森空岛还比它低，已经不再采用；在游戏里看一眼是哪边对，告诉用户（要开发者查的话也说）")
-    for p in d.get("unseen_problems") or []:
-        lines.append("还没告诉用户的问题：" + " ".join(p.get("lines") or [p.get("run_id") or "?"])
-                     + f"（运行 {p.get('run_id')}；告诉用户后 report seen {p.get('run_id')}）")
     return lines
 
 
@@ -860,7 +737,7 @@ def cmd(args):
 
 def register(sub) -> None:
     p = sub.add_parser("doctor", help="检查环境并给修复建议")
-    p.add_argument("--brief", action="store_true", help="给启动钩子：只看 setup、目标、对账、上次日常（不碰模拟器）")
+    p.add_argument("--brief", action="store_true", help="给启动钩子：只看 setup、目标、对账、上次日常、没收尾的日常（不碰模拟器）")
     p.add_argument("--offline", action="store_true", help="不碰模拟器、不联网")
     p.add_argument("--fix", action="store_true", help="顺手做不用问用户的本地修复")
     p.add_argument("--hook", action="store_true", help="给启动钩子：同 --brief，但按 Claude Code 钩子的格式输出（不是信封）")

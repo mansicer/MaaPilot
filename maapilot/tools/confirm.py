@@ -1,33 +1,29 @@
-"""定时日常里不做的事：只有记下花合成玉 / 源石的同意（`guard allow`）。
+"""日常期间不做的事：只有记下花合成玉 / 源石的同意（`guard allow`）。
 
 其他操作都以用户在对话里的同意为准，程序不另设关卡（AGENTS.md、docs/design.md「审批与权限」）。
-花费的同意必须是用户亲口说的：定时日常叫起的无头 agent 里用户不在场，一律拒绝（退出码 3），什么都不做。
-判断"是不是定时日常叫起的"：环境里有 MAAPILOT_DAILY_RUN（有就算，空的也算），或者这条命令是正在跑的日常进程的子孙
-（agent 把环境变量清掉也认得出来）。
+花费的同意必须是用户在对话里亲口说的。日常在跑、或者跑完还没收尾（`daily done` 之前）时一律拒绝（退出码 3），什么都不做：
+定时日常多半是用户不在的时候跑的（04:40 在睡觉），这时记下的"同意"一定是假的；手动跑的也一样拦，日常里本来就不该临时决定花真实货币。
 """
 from __future__ import annotations
 
-import os
-
 from maapilot.cliutil import NEEDS_USER, CliError
-from maapilot.oscompat import procs
 
 
-def _unattended() -> str | None:
-    """定时日常的运行编号（看不出编号时给 "?"）；不是 → None。"""
-    from maapilot.flows.daily.base import DAILY_ENV
-    if DAILY_ENV in os.environ:
-        return os.environ[DAILY_ENV] or "?"
+def daily_in_progress() -> str | None:
+    """在跑或没收尾的日常的运行编号（看不出编号时给 "?"）；都没有 → None。"""
     from maapilot.flows import daily
     run = daily.running()
-    if run and run.get("pid") and int(run["pid"]) in procs.ancestors():
-        return run.get("run_id") or "?"
+    if run:
+        return str(run.get("run_id") or "?")
+    op = daily.open_daily()
+    if op:
+        return str(op.get("run_id") or "?")
     return None
 
 
 def require(what: str) -> None:
-    """定时日常里（用户不在场）→ 抛 CliError（退出码 3），什么都没做；会话里 → 放行（agent 已在对话里问过用户）。"""
-    run = _unattended()
+    """有日常在跑或没收尾 → 抛 CliError（退出码 3），什么都没做；没有 → 放行（agent 已在对话里问过用户）。"""
+    run = daily_in_progress()
     if run:
-        raise CliError("needs_user", f"{what}要用户在会话里同意，定时日常（{run}）里用户不在场，没做",
-                       exit=NEEDS_USER, hint="写进汇报「要你决定的事」，等用户回来在会话里再做")
+        raise CliError("needs_user", f"日常 {run} 还在进行（在跑或没收尾），{what}现在不能记",
+                       exit=NEEDS_USER, hint="等这次日常 daily done 收尾后，用户在对话里同意了再记")
