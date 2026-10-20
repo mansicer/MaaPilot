@@ -54,10 +54,10 @@ MaaPilot 只做和游戏相关的部分（说明文档、skills、`maapilot` 工
 | 权限 | `.codex/rules/maapilot.rules`，同样由 `maapilot/policy.py` 生成。Codex 只在**信任这个文件夹**后才加载项目规则：setup 时征得同意后 `maapilot host install codex`（写进 Codex 的用户设置），`maapilot host status` 看 `trusted` |
 | PATH | 没有钩子放 `.venv/bin`：`maapilot` 找不到时整个会话写 `.venv/bin/maapilot`（Windows 是 `.venv\Scripts\maapilot.exe`），规则里都列了 |
 | 定时 | 会话内的定时任务，结果回到同一个会话；应用要开着 |
-| 长命令 | 待实测：后台命令结束能不能叫醒 agent；叫不醒就前台跑、等它结束 |
+| 长命令 | 能跑长任务（10-21 用户实测） |
 
-实测（10-20，用户在 Windows 上）：会话内定时任务可用。
-待实测：有没有一次性的定时任务（有就照上面接力，没有就用重复的，并查清会不会过期）；醒来后跑长命令、守住项目规则；真跑一次完整的定时日常。
+实测（用户在 Windows 上）：会话内定时任务可用（10-20）；长任务可以（10-21）。
+待实测：有没有一次性的定时任务（有就照上面接力，没有就用重复的，并查清会不会过期）；守住项目规则；真跑一次完整的定时日常。
 
 ## Codex 命令行
 
