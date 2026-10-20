@@ -123,6 +123,20 @@ def test_input_home_not_home(device, capsys):
     assert set(g.calls) <= {("tap", 270, 38), ("back",)}
 
 
+def test_input_home_screenshot_failure_is_an_error(device, capsys, monkeypatch):
+    """截图是 agent 看活动入口的唯一依据：截不了就退出码 1（input_failed），不能当成做成了；路上关了什么照样在 data 里。"""
+    from maapilot.tools import screen
+
+    def broken(game, name):
+        raise OSError("screencap failed")
+    monkeypatch.setattr(screen, "capture", broken)
+    device("login")
+    code, env = run(capsys, "input", "home")
+    assert code == 1 and env["error"]["code"] == "input_failed"
+    assert env["data"]["home"] is True and env["data"]["shot"] is None and env["data"]["seen"] == ["login_event", "sign_in"]
+    assert lock.current() is None
+
+
 def test_startup_reports_closed_sign_in_pages(cfg, capsys, monkeypatch):  # noqa: F811
     """maa startup 成功后回首页：路上关掉的签到页写进 data.overlays / seen（假的 maa，假的游戏）。"""
     monkeypatch.setattr(nav.time, "sleep", lambda s: None)

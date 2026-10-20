@@ -66,13 +66,14 @@ def go_home(game) -> dict:
     names = overlays.closed_since(pos)
     out: dict = {"home": home, "shot": None, "overlays": list(dict.fromkeys(names)),
                  "seen": overlays.notable(names)}
-    try:
-        out["shot"] = screen.capture(game, "home")[1]["path"]
-    except Exception:                                    # noqa: BLE001 - 截不了图也照样交代路上关了什么
-        pass
     if out["seen"]:
         out["hint"] = ("路上关掉了" + "、".join(overlays.NOTABLE[n] for n in out["seen"])
                        + "（程序只关不领）：看首页截图上的活动入口，按用户偏好进去领签到奖励")
+    try:
+        out["shot"] = screen.capture(game, "home")[1]["path"]
+    except Exception as e:                               # noqa: BLE001 - 截图是这条命令要交的东西：截不了就算没做成
+        raise CliError("input_failed", f"回首页后截不了图：{type(e).__name__}: {e}", exit=FAILED, data=out,
+                       hint="maapilot screen shot 再截一次，看首页的活动入口") from None
     return out
 
 
