@@ -699,6 +699,48 @@ def test_box_falls_back_to_maa_when_skland_fails(capsys, env):
     assert out["data"]["failed"] == []
 
 
+# --- 回首页时关掉的活动签到页 / 月签到 ---------------------------------------------------------------------------------
+
+def test_closed_sign_in_pages_surface_in_report(capsys, env, monkeypatch):
+    """子命令（startup 回首页、guard snapshot 读仓库）关掉的活动签到页 / 月签到：程序只关不领，按运行编号记下，
+    daily run 写进 seen_overlays、「要注意」、lines 和 next，交给 agent 去领；接着跑的几段合成一条。"""
+    from maapilot.crew import overlays
+    from maapilot.flows.daily import steps
+    real = daily.maapilot_call
+
+    def fake(args, env_, timeout_s=None):
+        if args[:2] in (["maa", "startup"], ["guard", "snapshot"]):     # 子进程里关掉了签到页（带运行编号）
+            monkeypatch.setenv("MAAPILOT_RUN_ID", env_["MAAPILOT_RUN_ID"])
+            overlays._record("login_event" if args[0] == "maa" else "sign_in")
+            overlays._record("login_event")
+            monkeypatch.delenv("MAAPILOT_RUN_ID")
+        return real(args, env_, timeout_s)
+    monkeypatch.setattr(daily, "maapilot_call", fake)
+    overlays._record("login_event")                                      # 日常之外（agent 自己的命令）关的：不算
+    env["behavior"]["fail"] = {"infrast"}
+    code, out = run(capsys, "daily", "run")
+    d = out["data"]
+    assert code == 1 and d["seen_overlays"] == ["login_event", "sign_in"]
+    alert = steps.seen_alert(["login_event", "sign_in"])
+    assert alert.startswith("回首页时看到了活动签到页、月签到，被程序关掉了，奖励没领")
+    assert [a for a in d["alerts"] if a.startswith("回首页时看到了")] == [alert]
+    assert f"告警：{alert}" in d["lines"]
+    md = read_report(d)
+    assert "## 要注意" in md and alert in md
+    assert "input home" in d["next"]
+    env["behavior"]["fail"] = set()
+    code, out = run(capsys, "daily", "run", "--only", ",".join(d["handoff"]["rest"]))
+    d = out["data"]
+    assert code == 0 and d["seen_overlays"] == ["login_event", "sign_in"]
+    assert [a for a in d["alerts"] if a.startswith("回首页时看到了")] == [alert]
+
+
+def test_no_sign_in_pages_no_alert(capsys, env):
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and "seen_overlays" not in out["data"] and out["data"]["alerts"] == []
+    assert "input home" not in out["data"]["next"]
+
+
 # --- 开始前：公告、维护、游戏版本、限时目标 ----------------------------------------------------------------------------
 
 MAINT = {"cid": "9001", "title": "10月9日闪断更新公告", "start": "2026-10-09T06:00:00+08:00",

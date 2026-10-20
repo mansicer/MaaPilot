@@ -360,7 +360,8 @@ def _copilot_argv(opts: dict, fetch=fetch_plan) -> tuple[list[str], dict]:
 
 def go_home() -> bool | None:
     """StartUp 成功后游戏已经开着时，MAA 不管停在哪一页（真机：留在终端页）。用 MaaFramework 回首页
-    （关弹窗、左上菜单"首页"、返回键；只导航，不点会花东西的按钮）。→ 到首页了 True / 没回去 False / 连不上 None。"""
+    （关弹窗、左上菜单"首页"、返回键；只导航，不点会花东西的按钮）。→ 到首页了 True / 没回去 False / 连不上 None。
+    路上关掉的弹窗记在 maapilot.crew.overlays（startup 的结果写进 data.overlays / seen）。"""
     try:
         from maapilot.crew import nav
         return bool(nav.ensure_home(common.connect(ocr=True)))
@@ -430,7 +431,13 @@ def run(task: str, **opts) -> dict:
     _note_output(task, mrun, data)
     if mrun.ok:
         if task == "startup":
+            from maapilot.crew import overlays
+            pos = overlays.mark()
             data["home"] = go_home()
+            closed = overlays.closed_since(pos)            # 回首页路上关掉的弹窗：写明，活动签到页 / 月签到交给 agent
+            if closed:
+                data["overlays"] = list(dict.fromkeys(closed))
+                data["seen"] = overlays.notable(closed)
         return data
     data["evidence"] = collect_evidence(task, started, common.now())
     if data["evidence"].get("shot_now"):

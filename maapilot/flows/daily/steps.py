@@ -120,6 +120,7 @@ def _run(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | None,
             ch = depot_change(op["depot_before"], _depot_snapshot())
             if ch is not None:
                 r.data["depot_change"] = ch
+        _seen_overlays(r)
         r.data["news"] = _news()
         r.data["lines"] = reportmod.summary_lines(r.data)   # 给 agent 转述：维护时段、到期和变动的目标……
         if r.data.get("open"):
@@ -130,6 +131,28 @@ def _run(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | None,
                 code, time.monotonic() - t0, run_id=run_id, depot_change=r.data.get("depot_change"))
         _drop_marker()
     return _finish(r)
+
+
+def seen_alert(names: list[str]) -> str:
+    from maapilot.crew.overlays import NOTABLE
+    return ("回首页时看到了" + "、".join(NOTABLE.get(n, n) for n in names)
+            + "，被程序关掉了，奖励没领：领奖励交给 agent（回首页看活动入口）")
+
+
+def _seen_overlays(r: _Run) -> None:
+    """这次日常的子命令回首页时关掉的活动签到页 / 月签到（maapilot.crew.overlays 按运行编号记的）：
+    写进 seen_overlays 和「要注意」，交给 agent 去领（程序只关不领，不悄悄处理掉）。接着跑的几段合在一起算。"""
+    try:
+        from maapilot.crew import overlays
+        seen = overlays.seen_in_run(r.data["run_id"])
+    except Exception:                                    # noqa: BLE001 - 读不了不影响日常
+        return
+    if not seen:
+        return
+    r.data["seen_overlays"] = seen
+    alerts = r.data["alerts"]
+    alerts[:] = [a for a in alerts if not a.startswith("回首页时看到了")]   # 接着跑时换成合起来的那条
+    alerts.append(seen_alert(seen))
 
 
 def _news() -> dict | None:
@@ -144,6 +167,8 @@ def _news() -> dict | None:
 def next_hint(d: dict) -> str:
     """还没收尾时给 agent 的下一步（只是程序的提示，做不做由 agent 判断）。"""
     tail = "最后 maapilot daily done --summary \"<做了什么、目标进度、花了什么、要用户决定的事>\" 收尾，再告诉用户"
+    if d.get("seen_overlays"):                           # 活动签到页被关掉了：收尾前回首页看、按用户偏好去领
+        tail = "收尾前 maapilot input home 回首页看活动签到、按用户偏好去领；" + tail
     h = d.get("handoff")
     if d.get("status") == "stopped":
         return "合成玉 / 源石对账停下了：先告诉用户（maapilot-recovery「货币对账停机」）；" + tail
