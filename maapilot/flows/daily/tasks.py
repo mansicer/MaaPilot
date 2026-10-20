@@ -1,15 +1,14 @@
-"""日常项：对账（guard）、仓库差、识别干员练度（森空岛 / MAA）、跑一个 MAA 项（定时运行里失败叫 agent 接管）、剿灭。"""
+"""日常项：对账（guard）、仓库差、识别干员练度（森空岛 / MAA）、跑一个 MAA 项、剿灭。"""
 from __future__ import annotations
 
 import json
 import time
 
-from maapilot import cliutil, hosts, paths
-from maapilot.cliutil import BUSY, NEEDS_USER
+from maapilot import cliutil, paths
+from maapilot.cliutil import NEEDS_USER
 from maapilot.flows import report as reportmod
-from maapilot.flows.daily.agent import _after_agent, _stop_leftover_maa
+from maapilot.flows.daily.calls import _stop_leftover_maa
 from maapilot.flows.daily.base import BOX, FARM, TASK_TIMEOUT_MIN, _Run, _Stop
-from maapilot.flows.daily.prompts import recovery_prompt
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
 
 # --- 仓库差 ----------------------------------------------------------------------------------------------------------
@@ -116,7 +115,7 @@ def _box_from_skland(r: _Run, env: dict) -> bool:
 
 # --- 跑一个日常项 ----------------------------------------------------------------------------------------------------
 
-def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, env: dict, lk,
+def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], env: dict, lk,
               timeout_s: float | None = None, cli: list[str] | None = None) -> dict:
     """跑一个日常项：默认 `maapilot maa <args>`；cli 给了就跑那条 maapilot 命令（识别干员练度：state box）。"""
     cli = cli or ["maa", *args]
@@ -145,23 +144,7 @@ def _maa_task(r: _Run, cfg: dict, task: str, args: list[str], headless: bool, en
         _stop_leftover_maa(r, daily.TIMEOUT_LEFTOVER_WAIT_S, f"{reportmod.label(task)}超时停下后")
     if code != 0:
         cliutil.log(f"[daily] {reportmod.label(task)} 没做成：{row['error']}")
-        if code == BUSY:
-            pass                                         # 被占用：叫 agent 也没用
-        elif headless:
-            r.data["agents"] += 1
-            daily._set_step(f"{task}:agent")
-            info = daily.run_agent(cfg, recovery_prompt(r.data["run_id"], task, err, data, args, cli=cli,
-                                                               host=hosts.name(cfg)), env,
-                                   paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{task}.jsonl",
-                                   recovery=True)
-            _after_agent(r, env, lk)
-            row["agent"] = info
-            row["recovered"] = bool(info.get("recovered"))
-            r.event("agent", task=task, **{k: info.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
-            r.save()
-            _guard(r, "check", env, f"agent 处理{reportmod.label(task)}")
-        if not row.get("recovered"):
-            r.data["failed"].append(task)
+        r.data["failed"].append(task)
     r.save()
     return row
 

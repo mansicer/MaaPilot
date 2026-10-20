@@ -589,8 +589,16 @@ def test_doctor_checks_with_fake_probe(cfg, monkeypatch):
     assert checks["emulator"]["ok"] and checks["screen"]["ok"] and checks["input"]["ok"] and checks["game"]["ok"]
     assert checks["screen"]["resolution"] == [1920, 1080]
     assert checks["game"]["package"] == "com.hypergryph.arknights"
-    assert checks["claude"]["path"] == os.path.abspath("/usr/bin/claude") and checks["maa_cli"]["ok"] is False  # 资源目录没造
-    assert checks["claude"]["trusted"] is False and not checks["claude"]["ok"] and checks["claude"]["required"] is False
+    assert checks["maa_cli"]["ok"] is False                                          # 资源目录没造
+    assert "claude" not in checks and "codex" not in checks and "schedule" not in checks   # 不再查无头 agent、不再设定时
+    assert checks["agent_config"]["ok"] and checks["legacy_schedule"]["ok"]
+    paths.CONFIG.write_text(paths.CONFIG.read_text(encoding="utf-8") + "agent: codex\nschedule_options: {wake_computer: true}\n"
+                            "daily: {agent_timeout_min: 90}\n", encoding="utf-8")
+    item = doctor.check_agent_config(doctor.Ctx(True, probe))
+    assert not item["ok"] and item["required"] is False and item["legacy"] == ["agent", "schedule_options",
+                                                                               "daily.agent_timeout_min"]
+    from maapilot import config
+    assert "agent" not in config.DEFAULTS and config.load()["agent"] == "codex"    # 写了也不报错，只是不用
     probe.table["dumpsys window"] = (0, b"  mCurrentFocus=Window{1 u0 com.hypergryph.arknights.bilibili/x}\n", b"")
     game = {c["name"]: c for c in doctor.run_checks(probe=probe)}["game"]
     assert not game["ok"] and game["package"].endswith(".bilibili") and "Bilibili" in game["fix"]
@@ -630,11 +638,29 @@ def test_doctor_brief(capsys, monkeypatch):
     code, env = run(capsys, "doctor", "--brief")
     d = env["data"]
     assert d["next"] is None and d["goals_active"] == 1
-    if WINDOWS:                                                            # 测试里 schtasks 指到不存在的程序：当作设不了定时
-        assert d["schedule"]["installed"] is False and d["schedule"]["unavailable"]
+    for gone in ("schedule", "unseen_problems", "session"):
+        assert gone not in d
+    if WINDOWS:                                                            # 测试里 schtasks 指到不存在的程序：当作没有旧的定时
+        assert d["legacy_schedule"] is None
     else:
-        assert d["schedule"] == {"installed": True, "times": ["04:40", "16:40"]}
+        assert d["legacy_schedule"] == {"times": ["04:40", "16:40"], "backend": "cron"}
+        assert any("daily unschedule" in l for l in d["lines"])
+    assert d["daily_open"] is None
     assert any("目标" in l for l in d["lines"])
+    # 没收尾的日常
+    from datetime import timedelta
+    from maapilot.flows import daily
+    from maapilot.tools import common
+    daily._write_open({"run_id": "20261020-0440", "trigger": "schedule", "started_at": common.iso(),
+                       "depot_before": {"items": {"4001": 1}}})
+    code, env = run(capsys, "doctor", "--brief")
+    o = env["data"]["daily_open"]
+    assert o["run_id"] == "20261020-0440" and o["trigger"] == "schedule" and o["stale"] is False and o["running"] is False
+    assert "depot_before" not in o and any("还没收尾" in l and "daily done" in l for l in env["data"]["lines"])
+    daily._write_open({"run_id": "20261020-0440", "trigger": "schedule",
+                       "started_at": (common.now() - timedelta(hours=7)).isoformat(timespec="seconds")})
+    code, env = run(capsys, "doctor", "--brief")
+    assert env["data"]["daily_open"]["stale"] is True and any("超过 6 小时" in l for l in env["data"]["lines"])
 
 
 def test_doctor_fix_copies_ocr_and_config(cfg, tmp_path, monkeypatch):

@@ -1,12 +1,10 @@
-"""定时日常的调度后端：macOS / Linux 用 cron，Windows 用任务计划程序（schtasks.exe）。
+"""v0.1 的系统定时（v0.2.0 起不再装）：只读、只删本项目留下的条目。macOS / Linux 是 cron，Windows 是任务计划程序（schtasks.exe）。
 
-后端只管"本项目的定时条目"：装、读、删。什么时间、执行什么（`Command`）由 flows/daily/cron.py 决定；
-执行的一律是启动器 `python -m maapilot.oscompat.launch …`（环境变量、日志都在它的参数里，见 launch.py）。
-- cron：crontab 里本项目的行带标记 `# maapilot-v2 <仓库路径>`，只增删这些行；旧版 MaaPilot 的行（`maapilot job tick`、
-  `bin/daily.sh`）列为 old，带 replace_old 才删。测试用 MAAPILOT_CRONTAB 换掉 crontab 程序。cron 不补跑（到点时电脑睡着就跳过这次）。
-- schtasks：一个仓库一个任务 `\\MaaPilot\\daily-<仓库路径的 sha1 前 8 位>`，每个时间点一个每天的触发器；
-  描述 `maapilot-daily <仓库路径>` 是"本项目的"标记。`\\MaaPilot\\` 下别的任务（别的目录的 MaaPilot）列为 old，带 replace_old 才删。
-  只读 schtasks 的 CSV 里的任务名和 /XML 的内容，不解析本地化的表格文字。测试用 MAAPILOT_SCHTASKS 换掉 schtasks 程序。
+- cron：crontab 里本项目的行带标记 `# maapilot-v2 <仓库路径>`，只删这些行，别的行一个字节都不动；更旧的 MaaPilot 的行
+  （`maapilot job tick`、`bin/daily.sh`）列为 old，不删。测试用 MAAPILOT_CRONTAB 换掉 crontab 程序。
+- schtasks：一个仓库一个任务 `\\MaaPilot\\daily-<仓库路径的 sha1 前 8 位>`，描述 `maapilot-daily <仓库路径>` 是"本项目的"标记。
+  `\\MaaPilot\\` 下别的任务（别的目录的 MaaPilot）列为 old，不删。只读 schtasks 的 CSV 里的任务名和 /XML 的内容，
+  不解析本地化的表格文字。测试用 MAAPILOT_SCHTASKS 换掉 schtasks 程序。
 - fake：MAAPILOT_SCHEDULER=fake:<json 路径>，条目存在一个 JSON 文件里（测试用，各系统一样）。
 """
 from __future__ import annotations
@@ -19,14 +17,11 @@ import json
 import locale
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -45,17 +40,6 @@ Runner = Callable[[list, "bytes | None", float], "tuple[int, bytes, bytes]"]
 
 
 @dataclass
-class Command:
-    """定时要执行的命令。argv：完整的启动器命令（项目 .venv 的 python … -m maapilot.oscompat.launch … -- daily run …）；
-    log：启动器追加输出的日志（装之前先建好目录）；run_if_missed / wake：到点时电脑关着或睡着，开机后补跑 / 叫醒电脑来跑
-    （只有任务计划程序做得到，cron 不管）。"""
-    argv: list[str]
-    log: Path | None = None
-    run_if_missed: bool = True
-    wake: bool = False
-
-
-@dataclass
 class Entry:
     times: list[str]          # 排好序的 "HH:MM"
     command: str              # 执行什么（给人看）
@@ -71,13 +55,7 @@ class Backend(Protocol):
 
     def available(self) -> tuple[bool, str | None]: ...
     def read(self) -> list[Entry]: ...
-    def install(self, times: list[tuple[int, int]], command: Command, *, replace_old: bool = False,
-                dry_run: bool = False) -> dict: ...
     def remove(self, *, dry_run: bool = False) -> dict: ...
-
-
-def _hm(times: list[tuple[int, int]]) -> list[str]:
-    return [f"{h:02d}:{m:02d}" for h, m in times]
 
 
 def _default_run(argv: list, input: bytes | None, timeout: float) -> tuple[int, bytes, bytes]:
@@ -155,14 +133,6 @@ class CronBackend:
                 out += [f"{int(h):02d}:{int(m.group(1)):02d}" for h in m.group(2).split(",")]
         return sorted(out)
 
-    @staticmethod
-    def render(times: list[tuple[int, int]], command: Command) -> list[str]:
-        """每个时间点一行：`M H * * * <启动器命令> # maapilot-v2 <仓库>`。环境变量和日志都在启动器的参数里。"""
-        def q(s) -> str:
-            return shlex.quote(str(s)).replace("%", r"\%")    # crontab 里 % 是换行
-        cmd = " ".join(q(a) for a in command.argv)
-        return [f"{m} {h} * * * {cmd} {TAG} {paths.ROOT}" for h, m in times]
-
     # crontab 程序
     def read_text(self) -> str:
         try:
@@ -194,20 +164,6 @@ class CronBackend:
         return ([Entry(self.times_of([ln]), ln, True, ln) for ln in mine]
                 + [Entry(self.times_of([ln]), ln, False, ln, old=True) for ln in old])
 
-    def install(self, times, command, *, replace_old=False, dry_run=False) -> dict:
-        cur = self.read_text()
-        mine, old = self.split(cur)
-        keep = [ln for ln in cur.splitlines() if not self.mine(ln) and not (replace_old and self.old(ln))]
-        new_lines = self.render(times, command)
-        text = "\n".join(keep + new_lines) + "\n"
-        changed = text != (cur if cur.endswith("\n") or not cur else cur + "\n")
-        if not dry_run and changed:
-            if command.log is not None:
-                Path(command.log).parent.mkdir(parents=True, exist_ok=True)
-            self.write_text(text)
-        return {"installed": new_lines, "replaced": mine, "old_entries": old,
-                "removed_old": old if replace_old else [], "changed": changed, "preview": text}
-
     def remove(self, *, dry_run=False) -> dict:
         cur = self.read_text()
         mine, old = self.split(cur)
@@ -228,75 +184,6 @@ _BOUNDARY_HM = re.compile(r"T(\d{2}):(\d{2})")
 
 def _q(tag: str) -> str:
     return f"{{{NS}}}{tag}"
-
-
-def _sub(parent: ET.Element, tag: str, text: str | None = None, **attrib) -> ET.Element:
-    e = ET.SubElement(parent, _q(tag), attrib)
-    if text is not None:
-        e.text = text
-    return e
-
-
-def _bool(b: bool) -> str:
-    return "true" if b else "false"
-
-
-def _boundaries(times: list[tuple[int, int]], now: datetime) -> list[str]:
-    """每个时间点下一次到点的本地时间（不带时区：按电脑当时的时区算）。不用过去的日期：
-    "错过了就补跑"开着时，起点在过去的新任务可能一装好就当成错过了、马上跑一次。"""
-    out = []
-    for h, m in times:
-        t = now.replace(hour=h, minute=m, second=0, microsecond=0, tzinfo=None)
-        if t <= now.replace(tzinfo=None):
-            t += timedelta(days=1)
-        out.append(t.strftime("%Y-%m-%dT%H:%M:%S"))
-    return out
-
-
-def build_xml(times: list[tuple[int, int]], argv: list[str], opts: dict) -> str:
-    """任务计划程序的任务定义（纯函数）。argv[0] 是执行的程序，其余是参数（按 Windows 的规则加引号）。
-    opts：description、workdir、run_if_missed、wake、user（可选，DOMAIN\\用户名）、now（可选，算起点用）。
-    只在用户登录时运行（InteractiveToken，不存密码、不要管理员）：模拟器要开在用户的桌面里；锁屏也照常运行。"""
-    ET.register_namespace("", NS)
-    task = ET.Element(_q("Task"), {"version": "1.2"})
-    reg = _sub(task, "RegistrationInfo")
-    _sub(reg, "Description", opts["description"])
-    trig = _sub(task, "Triggers")
-    for boundary in _boundaries(times, opts.get("now") or datetime.now()):
-        ct = _sub(trig, "CalendarTrigger")
-        _sub(ct, "StartBoundary", boundary)
-        _sub(ct, "Enabled", "true")
-        _sub(_sub(ct, "ScheduleByDay"), "DaysInterval", "1")
-    pr = _sub(_sub(task, "Principals"), "Principal", id="Author")
-    if opts.get("user"):
-        _sub(pr, "UserId", opts["user"])
-    _sub(pr, "LogonType", "InteractiveToken")
-    _sub(pr, "RunLevel", "LeastPrivilege")
-    st = _sub(task, "Settings")
-    _sub(st, "MultipleInstancesPolicy", "IgnoreNew")
-    _sub(st, "DisallowStartIfOnBatteries", "false")
-    _sub(st, "StopIfGoingOnBatteries", "false")
-    _sub(st, "AllowHardTerminate", "true")
-    _sub(st, "StartWhenAvailable", _bool(opts.get("run_if_missed", True)))
-    _sub(st, "RunOnlyIfNetworkAvailable", "false")
-    idle = _sub(st, "IdleSettings")
-    _sub(idle, "StopOnIdleEnd", "false")
-    _sub(idle, "RestartOnIdle", "false")
-    _sub(st, "AllowStartOnDemand", "true")
-    _sub(st, "Enabled", "true")
-    _sub(st, "Hidden", "false")
-    _sub(st, "RunOnlyIfIdle", "false")
-    _sub(st, "WakeToRun", _bool(opts.get("wake", False)))
-    _sub(st, "ExecutionTimeLimit", "PT6H")
-    _sub(st, "Priority", "7")
-    ex = _sub(_sub(task, "Actions", Context="Author"), "Exec")
-    _sub(ex, "Command", str(argv[0]))
-    if len(argv) > 1:
-        _sub(ex, "Arguments", subprocess.list2cmdline([str(a) for a in argv[1:]]))
-    if opts.get("workdir"):
-        _sub(ex, "WorkingDirectory", str(opts["workdir"]))
-    ET.indent(task)
-    return '<?xml version="1.0" encoding="UTF-16"?>\n' + ET.tostring(task, encoding="unicode") + "\n"
 
 
 def parse_xml(data: bytes | str) -> dict:
@@ -410,60 +297,6 @@ class SchTasksBackend:
     def read(self) -> list[Entry]:
         return [self._entry(n, info) for n, info in self._read()]
 
-    @staticmethod
-    def gui_python(exe: str) -> str:
-        """python.exe 旁边有 pythonw.exe 就用它（不开控制台窗口）。"""
-        p = Path(exe)
-        if p.name.lower() == "python.exe":
-            w = p.with_name("pythonw.exe")
-            if w.is_file():
-                return str(w)
-        return exe
-
-    def xml(self, times, command: Command) -> str:
-        user = os.environ.get("USERNAME")
-        dom = os.environ.get("USERDOMAIN")
-        return build_xml(times, [self.gui_python(command.argv[0]), *command.argv[1:]],
-                         {"description": self.description(), "workdir": str(self._root),
-                          "run_if_missed": command.run_if_missed, "wake": command.wake,
-                          "user": f"{dom}\\{user}" if user and dom else user})
-
-    _COMPARE = ("description", "times", "command", "arguments", "workdir", "enabled", "run_if_missed", "wake")
-
-    def install(self, times, command, *, replace_old=False, dry_run=False) -> dict:
-        cur = self._read()
-        name = self.task()
-        mine = [(n, i) for n, i in cur if self._mine(i["description"])]
-        old = [n for n, i in cur if not self._mine(i["description"])]
-        xml = self.xml(times, command)
-        want = parse_xml(xml)
-        same = (len(mine) == 1 and mine[0][0].lower() == name.lower()
-                and all(mine[0][1][k] == want[k] for k in self._COMPARE))
-        changed = not same or bool(replace_old and old)
-        if not dry_run and changed:
-            if command.log is not None:
-                Path(command.log).parent.mkdir(parents=True, exist_ok=True)
-            for n, _ in mine:
-                if n.lower() != name.lower():                        # 名字的算法变过：旧名字的删掉
-                    self._schtasks("/Delete", "/TN", n, "/F", what="删任务")
-            if not same:
-                self._create(name, xml)
-            if replace_old:
-                for n in old:
-                    self._schtasks("/Delete", "/TN", n, "/F", what="删任务")
-        return {"installed": [name], "replaced": [n for n, _ in mine], "old_entries": old,
-                "removed_old": old if replace_old else [], "changed": changed, "preview": xml}
-
-    def _create(self, name: str, xml: str) -> None:
-        """任务定义写成 UTF-16（带 BOM）的临时文件交给 schtasks /Create /XML（/TR 最长 261 个字、设不了工作目录），用完删掉。"""
-        fd, tmp = tempfile.mkstemp(prefix="maapilot-task-", suffix=".xml")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(codecs.BOM_UTF16_LE + xml.encode("utf-16-le"))
-            self._schtasks("/Create", "/TN", name, "/XML", tmp, "/F", what="建任务")
-        finally:
-            fs.safe_unlink(tmp)
-
     def remove(self, *, dry_run=False) -> dict:
         cur = self._read()
         mine = [n for n, i in cur if self._mine(i["description"])]
@@ -502,20 +335,6 @@ class FakeBackend:
     def read(self) -> list[Entry]:
         return [e for e in self._load() if e.ident == self._ident() or e.old]
 
-    def install(self, times, command, *, replace_old=False, dry_run=False) -> dict:
-        cur = self._load()
-        mine = [e for e in cur if e.ident == self._ident()]
-        old = [e for e in cur if e.old]
-        keep = [e for e in cur if e.ident != self._ident() and not (replace_old and e.old)]
-        new = Entry(_hm(times), " ".join(command.argv), True, self._ident(), enabled=True,
-                    settings={"run_if_missed": command.run_if_missed, "wake": command.wake})
-        changed = keep + [new] != cur
-        if not dry_run and changed:
-            self._save(keep + [new])
-        return {"installed": [new.ident], "replaced": [e.ident for e in mine], "old_entries": [e.ident for e in old],
-                "removed_old": [e.ident for e in old] if replace_old else [], "changed": changed,
-                "preview": json.dumps([asdict(e) for e in keep + [new]], ensure_ascii=False)}
-
     def remove(self, *, dry_run=False) -> dict:
         cur = self._load()
         mine = [e for e in cur if e.ident == self._ident()]
@@ -529,7 +348,7 @@ class FakeBackend:
 # --- 没有可用的调度（Windows 上找不到 schtasks.exe） -------------------------------------------------------------------
 
 class Unavailable:
-    """读出来什么都没有；要装 / 删时报环境错误。"""
+    """读出来什么都没有，也没什么可删的。"""
     name = "none"
 
     def __init__(self, hint: str):
@@ -541,15 +360,8 @@ class Unavailable:
     def read(self) -> list[Entry]:
         return []
 
-    def _refuse(self):
-        raise CliError("no_scheduler", f"这台电脑上设不了定时日常：{self.hint}", exit=ENVIRONMENT,
-                       hint="先在对话里手动跑日常（maapilot daily run）")
-
-    def install(self, times, command, *, replace_old=False, dry_run=False) -> dict:
-        self._refuse()
-
     def remove(self, *, dry_run=False) -> dict:
-        self._refuse()
+        return {"removed": [], "old_entries": [], "preview": ""}
 
 
 def backend(run: Runner | None = None) -> Backend:

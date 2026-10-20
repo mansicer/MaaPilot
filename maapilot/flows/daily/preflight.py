@@ -1,15 +1,10 @@
-"""开始前：目标到期与目标快照、官方公告与停机维护、游戏版本（旧了叫 agent 更新或交给在场的 agent）。"""
+"""开始前：目标到期与目标快照、官方公告与停机维护、游戏版本（旧了交给在场的 agent 更新）。"""
 from __future__ import annotations
 
-import time
-
-from maapilot import cliutil, hosts, paths
+from maapilot import cliutil
 from maapilot.flows import goals as goalsmod
 from maapilot.flows import report as reportmod
-from maapilot.flows.daily.agent import _after_agent
-from maapilot.flows.daily.base import EXPIRED_AGENT_MIN, MAINTENANCE_AGENT_MIN, UPDATE, _err, _Run, _Stop
-from maapilot.flows.daily.prompts import _ver, expired_prompt, maintenance_prompt, update_prompt
-from maapilot.flows.daily.tasks import _guard
+from maapilot.flows.daily.base import UPDATE, _err, _Run, _Stop
 from maapilot.flows import daily          # 测试替换的名字经包取（daily.X），替换才生效
 
 # --- 开始前：目标到期、官方公告、游戏版本（都是尽力而为：出错记一条告警，日常照跑） ---------------------------------------
@@ -72,8 +67,8 @@ def _preflight(r: _Run) -> bool:
     """目标到期、公告、维护。→ True：正在维护，这次什么都不跑。"""
     try:
         moved = expire_goals()
-        if moved:
-            r.data["goals_expired"] = moved
+        if moved:                                        # 接着跑（--only）时并进前几段挪走的
+            r.data["goals_expired"] = [*(r.data.get("goals_expired") or []), *moved]
             r.event("goals_expired", goals=moved)
     except Exception as e:                               # noqa: BLE001
         r.data["alerts"].append(f"没能检查限时目标到期（{_err(e)}）")
@@ -97,45 +92,12 @@ def _preflight(r: _Run) -> bool:
     return False
 
 
-def _maintenance_agent(r: _Run, cfg: dict, env: dict, lk) -> None:
-    """停机维护中叫一个短的无头 agent（不碰模拟器）：它的总结写进汇报。起不来只记告警。"""
-    daily._set_step("maintenance:agent")
-    lk.heartbeat(step="maintenance")
-    r.data["agents"] += 1
-    try:
-        info = daily.run_agent(cfg, maintenance_prompt(r.data["run_id"], r.data["maintenance"],
-                                                       expired=r.data.get("goals_expired")), env,
-                               paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-maintenance.jsonl",
-                               timeout_min=MAINTENANCE_AGENT_MIN)
-        _after_agent(r, env, lk)
-    except Exception as e:                               # noqa: BLE001
-        r.data["alerts"].append(f"维护期间叫 agent 没叫起来（{_err(e)}）")
-        return
-    r.data["tasks"].append({"task": "maintenance", "ok": bool(info.get("ok")), "agent": info})
-    r.event("agent", task="maintenance", **{k: info.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
-    if info.get("error"):
-        r.data["alerts"].append(f"维护期间叫 agent 没叫起来：{info['error']}")
+def _ver(v: dict | None) -> str:
+    return str((v or {}).get("version") or "?")
 
 
-def _expired_agent(r: _Run, cfg: dict, env: dict, lk, expired: list) -> None:
-    """开头有限时目标到期、又没有目标部分的 agent：叫一个短的 agent 看一眼还有没有没做完的，总结写进汇报。"""
-    daily._set_step("goals_expired:agent")
-    lk.heartbeat(step="goals_expired")
-    r.data["agents"] += 1
-    info = daily.run_agent(cfg, expired_prompt(r.data["run_id"], expired, r.data["tasks"]), env,
-                           paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-goals.jsonl",
-                           timeout_min=EXPIRED_AGENT_MIN)
-    _after_agent(r, env, lk)
-    r.data["tasks"].append({"task": "goals", "ok": bool(info.get("ok")), "agent": info, "expired_only": True})
-    r.event("agent", task="goals_expired", **{k: info.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
-    if info.get("error"):
-        r.data["alerts"].append(f"叫 agent 看到期的目标没叫起来：{info['error']}")
-    r.save()
-    _guard(r, "check", env, "看到期的目标")
-
-
-def _game_version(r: _Run, cfg: dict, headless: bool, env: dict, lk, order: list[str]) -> None:
-    """游戏客户端旧了：定时运行当场叫 agent 更新（没更新成整个日常停下）；会话里交给在场的 agent。"""
+def _game_version(r: _Run, order: list[str]) -> None:
+    """游戏客户端旧了：停下交给在场的 agent 更新（handoff.task 是 game_update），更新好它再 --only 接着跑。"""
     try:
         info = daily.version_info()
     except Exception as e:                               # noqa: BLE001
@@ -149,37 +111,7 @@ def _game_version(r: _Run, cfg: dict, headless: bool, env: dict, lk, order: list
         return
     msg = f"游戏客户端要更新（{_ver(info.get('installed'))} → {_ver(info.get('latest'))}）"
     cliutil.log(f"[daily] {msg}")
-    if not headless:
-        r.data["handoff"] = {"task": UPDATE, "error": msg, "log": None, "evidence": None, "rest": list(order),
-                             "version": r.data["game_version"]}
-        r.data["status"] = "handed_off"
-        raise _Stop()
-    daily._set_step(f"{UPDATE}:agent")
-    lk.heartbeat(step=UPDATE)
-    r.data["agents"] += 1
-    t0 = time.monotonic()
-    agent = daily.run_agent(cfg, update_prompt(r.data["run_id"], info, host=hosts.name(cfg)), env,
-                            paths.LOGS / f"agent-{r.data['run_id']}-{r.data['agents']}-{UPDATE}.jsonl", recovery=True)
-    _after_agent(r, env, lk)
-    ok = bool(agent.get("recovered"))
-    if ok:                                               # 它说更新好了：再查一次版本核实（查不了就信它）
-        try:
-            again = daily.version_info() or {}
-            if again.get("update_needed") is True:
-                ok = False
-                r.data["alerts"].append("agent 说更新好了，但再查版本还是旧的")
-            r.data["game_version"] = {k: again.get(k) for k in ("installed", "latest", "update_needed")}
-        except Exception as e:                           # noqa: BLE001
-            r.event("version_failed", error=_err(e), after=UPDATE)
-    row = {"task": UPDATE, "ok": ok, "duration_s": round(time.monotonic() - t0, 1), "agent": agent,
-           "version": {"from": _ver(info.get("installed")), "to": _ver(info.get("latest"))}}
-    if not ok:
-        row["error"] = msg + "，没更新成"
-    r.data["tasks"].append(row)
-    r.event("agent", task=UPDATE, **{k: agent.get(k) for k in ("ok", "recovered", "timed_out", "summary")})
-    r.save()
-    _guard(r, "check", env, "agent 更新游戏")
-    if not ok:                                           # 旧客户端上什么都跑不了
-        r.data["failed"].append(UPDATE)
-        r.data["status"] = "update_failed"
-        raise _Stop()
+    r.data["handoff"] = {"task": UPDATE, "error": msg, "log": None, "evidence": None, "rest": list(order),
+                         "version": r.data["game_version"]}
+    r.data["status"] = "handed_off"
+    raise _Stop()

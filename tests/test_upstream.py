@@ -353,7 +353,7 @@ def test_doctor_brief_lists_only_unhealthy(monkeypatch):
     sources.bad("skland", UpstreamFormat("skland", "status.ap"), effect="理智改用首页识别")
     paths.SETUP.parent.mkdir(parents=True, exist_ok=True)
     paths.SETUP.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(doctor, "schedule_info", lambda probe: {"installed": True, "times": ["04:40"]})
+    monkeypatch.setattr(doctor, "legacy_schedule_brief", lambda probe: None)
     b = doctor.brief()
     assert [s["source"] for s in b["sources"]] == ["skland"]
     assert any("森空岛的数据格式变了（缺 status.ap），理智改用首页识别" in l for l in b["lines"])

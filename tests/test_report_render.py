@@ -1,5 +1,5 @@
-"""汇报的 Markdown：agent 那几行怎么写、补充去重；无头 agent 提示的共同要求。"""
-from maapilot.flows import daily, report
+"""汇报的 Markdown：标题写定时 / 手动、「目标部分」来自 daily done、补充（report write）去重、没收尾时的提示、重跑过的项。"""
+from maapilot.flows import report
 
 GOALS_SUMMARY = """这次日常的目标部分做完了。
 
@@ -20,50 +20,45 @@ def base(**kw):
     return d
 
 
-def test_goals_row_is_its_own_section():
-    md = report.render(base(tasks=[
+def test_title_says_schedule_or_manual():
+    assert report.render(base()).startswith("# 日常汇报：10 月 11 日 16:40（定时）")
+    assert report.render(base(trigger="manual")).startswith("# 日常汇报：10 月 11 日 16:40（手动）")
+
+
+def test_goals_summary_is_its_own_section():
+    md = report.render(base(goals_pending=True, goals_active=2, tasks=[
         {"task": "recruit", "ok": True, "duration_s": 52},
-        {"task": "goals", "ok": True, "agent": {"ok": True, "recovered": True, "duration_s": 344,
-                                                "summary": GOALS_SUMMARY}},
-        {"task": "award", "ok": True, "duration_s": 30}]))
+        {"task": "award", "ok": True, "duration_s": 30}],
+        goals_summary={"at": "2026-10-11T17:30:00+08:00", "text": GOALS_SUMMARY, "by": "agent"}))
     lst = md.split("## 做了什么")[1].split("## 目标部分")[0]
-    assert "- 目标部分：做完了（5 分 44 秒），见下面「目标部分」" in lst
+    assert "- 目标：有 2 个进行中的目标，见下面「目标部分」" in lst
     assert "理智" not in lst and "- 领任务奖励与邮件：完成（30 秒）" in lst      # 总结不混进任务列表
     sec = md.split("## 目标部分")[1].split("## 仓库变化")[0]
     assert "- **训练室**：丰川祥子技能 2 专 1 还在练。\n  - 专 2 的材料留好了。" in sec
-    assert "结果：" not in md and "agent 接手" not in md and md.count("120 理智全打") == 1
+    assert "结果：" not in md and md.count("120 理智全打") == 1
 
 
-def test_takeover_summary_indented_under_its_task():
+def test_no_goals_summary_section_until_done():
+    md = report.render(base(goals_pending=True, goals_active=1, award_pending=True, open=True))
+    assert "## 目标部分" not in md and "留给 agent 接着做" in md and "还没收尾" in md
+    assert "还没收尾" not in report.render(base())
+
+
+def test_retried_task_marked():
     md = report.render(base(tasks=[
-        {"task": "infrast", "ok": True, "recovered": True, "duration_s": 600, "error": "基建卡住了",
-         "agent": {"recovered": True, "summary": "关掉了弹窗。\n\n- 重跑了基建\n- 回到首页\n结果：完成"}},
-        {"task": "award", "ok": True, "duration_s": 30}]))
-    assert ("- 基建：完成（10 分 0 秒）\n  - agent 接手（处理好了）：关掉了弹窗。\n\n    - 重跑了基建\n"
-            "    - 回到首页\n- 领任务奖励与邮件") in md
-    assert "结果：" not in md
+        {"task": "infrast", "ok": False, "error": "基建卡住了", "retried": True},
+        {"task": "infrast", "ok": True, "duration_s": 600}]))
+    assert "- 基建：没做成——基建卡住了（后面重跑了）\n- 基建：完成（10 分 0 秒）" in md
 
 
-def test_game_update_and_maintenance_rows():
-    md = report.render(base(tasks=[
-        {"task": "game_update", "ok": True, "duration_s": 717,
-         "agent": {"recovered": True, "summary": "游戏已经更新好了。\n\n- 2.7.71 → 2.7.81\n\n结果：完成"}}]))
-    assert "- 更新游戏：完成（11 分 57 秒）——游戏已经更新好了。\n\n  - 2.7.71 → 2.7.81" in md
-    assert "agent 接手" not in md and "结果：" not in md
-    md = report.render(base(status="maintenance", maintenance={}, tasks=[
-        {"task": "maintenance", "ok": True, "agent": {"recovered": True, "duration_s": 40,
-                                                       "summary": "维护到 12:00，理智会溢出约 30。\n结果：完成"}}]))
-    assert "- 停机维护：agent 看过了（40 秒）——维护到 12:00，理智会溢出约 30。" in md and "结果：" not in md
-
-
-def test_appendix_same_as_agent_summary_shown_once():
+def test_appendix_same_as_goals_summary_shown_once():
     appendix = [{"at": "2026-10-11T17:01:00+08:00",
                  "text": "目标部分：120 理智全打在 YW-3 上，3 星。训练室：丰川祥子技能 2 专 1 还在练，专 2 的材料留好了。"
                          "要你决定：要不要分理智刷研磨石？"},
                 {"at": "2026-10-11T18:00:00+08:00", "text": "用户说先不刷研磨石。"}]
-    md = report.render(base(appendix=appendix, tasks=[
-        {"task": "goals", "ok": True, "agent": {"recovered": True, "summary": GOALS_SUMMARY}}]))
+    md = report.render(base(appendix=appendix, goals_summary={"text": GOALS_SUMMARY}))
     assert md.count("## 补充") == 1 and "用户说先不刷研磨石。" in md
+    assert md.index("## 目标部分") < md.index("## 补充")
 
 
 def test_same_text():
@@ -72,16 +67,6 @@ def test_same_text():
     assert not report.same_text("", GOALS_SUMMARY)
 
 
-def test_every_headless_prompt_has_report_rules():
-    w = {"start": "2026-10-09T06:00:00+08:00", "end": "2026-10-09T12:00:00+08:00", "title": "维护"}
-    prompts = [
-        daily.recovery_prompt("r", "infrast", {"message": "x"}, None, ["infrast"]),
-        daily.goals_prompt("r", [{"title": "遥 精2", "object": "干员 遥"}], []),
-        daily.expired_prompt("r", ["活动"], []),
-        daily.maintenance_prompt("r", w),
-        daily.update_prompt("r", {"installed": {"version": "1"}, "latest": {"version": "2"}}),
-    ]
-    for p in prompts:
-        assert "全程用中文（包括中间的说明），总结写给用户看" in p
-        assert "不要用 maapilot report write" in p
-        assert p.rstrip().splitlines()[-1].startswith(("结束时", "最后一行"))   # 「结果：」那句还在最后
+def test_news_due_line():
+    lines = report.summary_lines(base(news={"due": ["6774:公告"], "lines": []}))
+    assert any("官方日程有 1 条消息" in x for x in lines)

@@ -1,4 +1,4 @@
-"""`maapilot reset`：private/ 整个挪成备份、只删本项目的定时行、--memory 挪自动记忆、--dry-run 不动、忙时拒绝。
+"""`maapilot reset`：private/ 整个挪成备份、不动系统定时（v0.1 留下的只在结果里提示）、--memory 挪自动记忆、--dry-run 不动、忙时拒绝。
 
 全部在临时目录里：private/ 是 conftest 的临时目录，crontab 用假的（MAAPILOT_CRONTAB），Claude Code 的 projects 目录用
 MAAPILOT_CLAUDE_PROJECTS_DIR 指到临时目录。不碰真的 crontab、真的 ~/.claude。
@@ -13,7 +13,7 @@ import pytest
 
 from maapilot import cli, paths
 from maapilot.crew import lock
-from maapilot.flows import daily, reset
+from maapilot.flows import reset
 from maapilot.tools import common
 from tests.portable import needs_cron
 from tests.test_daily import OTHER, fake_crontab
@@ -32,7 +32,6 @@ FOREIGN_V2 = "40 5 * * * /other/maapilot daily run --trigger schedule # maapilot
 def world(tmp_path, monkeypatch):
     """装好、设置过的样子：private/ 下有配置、目标、日志、对账、maa-cli 配置；crontab 里有本项目的行和别人的行；有自动记忆。"""
     monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
-    monkeypatch.delenv(daily.DAILY_ENV, raising=False)
     p = paths.PRIVATE
     for rel, text in {"config.yaml": "emulator: {address: 'emu:1'}\n", "setup.json": "{}", "goals.md": "# 目标\n",
                       "log/2026-10-02.jsonl": "{}\n", "guard/snapshot.json": "{}", "shots/a.png": "png",
@@ -63,7 +62,8 @@ def test_dry_run_changes_nothing(capsys, world):
     code, env = run(capsys, "reset", "--dry-run", "--memory")
     assert code == 0, env
     d = env["data"]
-    assert d["dry_run"] is True and d["schedule"]["remove"] == [MINE.strip()]
+    assert d["dry_run"] is True and d["legacy_schedule"]["entries"] == [MINE.strip()]
+    assert "daily unschedule" in d["legacy_schedule"]["hint"]
     assert d["private"]["move"] == str(paths.PRIVATE) and ".bak-" in d["private"]["to"]
     assert {"config.yaml", "setup.json", "goals.md", "log", "guard", "shots", "maa-config"} <= set(d["private"]["entries"])
     assert d["memory"]["move"] == str(world["memory"]) and d["memory"]["entries"] == ["MEMORY.md"]
@@ -73,7 +73,7 @@ def test_dry_run_changes_nothing(capsys, world):
 
 
 @needs_cron
-def test_reset_moves_private_and_removes_only_our_cron_lines(capsys, world):
+def test_reset_moves_private_and_leaves_cron_alone(capsys, world):
     code, env = run(capsys, "reset")
     assert code == 0, env
     d = env["data"]
@@ -85,9 +85,9 @@ def test_reset_moves_private_and_removes_only_our_cron_lines(capsys, world):
     assert sorted(p.name for p in paths.PRIVATE.iterdir()) == ["maa-config"]
     assert (paths.PRIVATE / "maa-config" / "tasks" / "maapilot-fight.toml").exists()
     assert (bak / "maa-config" / "cli.toml").exists()
-    # crontab：只少了本项目那一行，别的（包括别的 checkout 的 v2 行）一个字节不动
-    assert world["crontab"].read_text(encoding="utf-8") == OTHER + FOREIGN_V2
-    assert d["schedule"]["removed"] == [MINE.strip()]
+    # crontab 一个字节不动：v0.1 的行只在结果里提示（用户同意后 daily unschedule）
+    assert world["crontab"].read_text(encoding="utf-8") == OTHER + MINE + FOREIGN_V2
+    assert d["legacy_schedule"]["entries"] == [MINE.strip()] and "schedule" not in d
     # 自动记忆默认不动
     assert (world["memory"] / "MEMORY.md").exists() and d["memory"]["move"] is None
     assert d["next"] == "setup"
@@ -140,13 +140,12 @@ def test_reset_memory_drops_preferences(capsys, world):
 
 
 def test_reset_without_scheduler(capsys, world, monkeypatch):
-    """这台电脑上设不了定时（Windows 上找不到 schtasks.exe）：当没有定时，照常重置。"""
+    """这台电脑上没有系统定时（Windows 上找不到 schtasks.exe）：没什么要提示的，照常重置。"""
     from maapilot.oscompat import sched
     monkeypatch.setattr(sched, "WINDOWS", True)
     code, env = run(capsys, "reset")
     assert code == 0, env
-    s = env["data"]["schedule"]
-    assert s["remove"] == [] and "removed" not in s and "任务计划程序" in s["unavailable"]
+    assert env["data"]["legacy_schedule"] is None
     assert MINE in world["crontab"].read_text(encoding="utf-8")         # 没碰 crontab
     assert Path(env["data"]["private"]["to"], "config.yaml").exists()
 
@@ -163,17 +162,3 @@ def test_reset_private_in_use(capsys, world, monkeypatch):
     code, env = run(capsys, "reset")
     assert code == 4 and env["error"]["code"] == "in_use" and env["error"]["hint"]
     assert (paths.PRIVATE / "config.yaml").exists() and MINE in world["crontab"].read_text(encoding="utf-8")
-
-
-@needs_cron
-def test_reset_unschedule_failure_puts_private_back(capsys, world, monkeypatch):
-    from maapilot.cliutil import ENVIRONMENT, CliError
-
-    def fail(dry_run):
-        if dry_run:
-            return {"removed": [MINE.strip()], "old_entries": []}
-        raise CliError("crontab_failed", "写不了 crontab", exit=ENVIRONMENT)
-    monkeypatch.setattr(daily, "unschedule", fail)
-    code, env = run(capsys, "reset")
-    assert code == 5 and env["error"]["code"] == "crontab_failed"
-    assert (paths.PRIVATE / "config.yaml").exists() and not list(paths.PRIVATE.parent.glob("private.bak-*"))

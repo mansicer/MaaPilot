@@ -59,10 +59,6 @@ def show(cid: str) -> dict:
 
 def told(keys: list[str]) -> dict:
     from maapilot.knowledge import news
-    from maapilot.tools import confirm
-    if confirm._unattended():                        # 用户不在场：标成已告知，会话里就不会再提了
-        raise CliError("not_allowed", "定时日常叫起的 agent 不能把日程标成已告知（用户还没看到）", exit=BAD_REQUEST,
-                       hint="写进你的总结")
     known = {e["key"] for e in news.events()}
     bad = [k for k in keys if k not in known]
     if bad:
@@ -98,6 +94,6 @@ def register(sub) -> None:
     p = gs.add_parser("show", help="一条公告的全文")
     p.add_argument("cid", help="公告编号（list 的 items[].cid）")
     p.set_defaults(func=cmd_show, command="news show")
-    p = gs.add_parser("told", help="这些时间点已经告诉过用户了（daily watch 不再因为它们结束）")
+    p = gs.add_parser("told", help="这些时间点已经告诉过用户了（启动检查、日常不再提）")
     p.add_argument("keys", nargs="+", metavar="key", help="list 的 due[].key")
     p.set_defaults(func=cmd_told, command="news told")

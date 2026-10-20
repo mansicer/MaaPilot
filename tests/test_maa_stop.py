@@ -95,6 +95,6 @@ def test_daily_sweeps_leftover_maa_after_a_task_timeout(monkeypatch):
             pass
     r = daily._Run("20261005-0440", "schedule")
     monkeypatch.setattr(r, "save", lambda: None)
-    row = daily._maa_task(r, {}, "farm", ["fight", "1-7"], False, {}, Lk())
+    row = daily._maa_task(r, {}, "farm", ["fight", "1-7"], {}, Lk())
     assert row["code"] == "timeout" and killed == [4242]
     assert any("maa 进程" in a for a in r.data["alerts"])

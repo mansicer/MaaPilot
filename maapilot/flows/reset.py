@@ -1,13 +1,12 @@
-"""`maapilot reset [--dry-run] [--memory]`：从头设置 —— 把 private/ 整个挪成备份、删掉本项目的定时任务。
+"""`maapilot reset [--dry-run] [--memory]`：从头设置 —— 把 private/ 整个挪成备份。
 
 什么都不删：private/ 改名成同目录下的 `private.bak-<YYYYmmdd-HHMMSS>`（配置、setup.json、目标、快照、日志、汇报、截图、对账都在里面），
 恢复就是把它改回来。之后 `doctor --brief` 的 `next` 是 `setup`，下次会话重新设置。
 留着：.venv、data/、resource/、maa-cli 本身，以及 maa-cli 配置目录里装好的配置与任务模板（从备份复制回新的 private/maa-config/）。
-定时任务只删本项目的（复用 daily unschedule：crontab 里以 `# maapilot-v2 <本仓库>` 结尾的行，或任务计划程序里本仓库的任务），别的不动；
-这台电脑上设不了定时（Windows 上找不到任务计划程序）就当没有，照常重置。
+不动系统定时：还留着 v0.1 的定时（crontab 行 / 任务计划程序的任务）就在结果的 legacy_schedule 里列出来，提示 `daily unschedule`。
 `--memory`：用户偏好不留：private/memory/ 不复制回来，Claude Code 给这个项目目录记的自动记忆（`<claude 配置目录>/projects/<路径里非字母数字换成 ->/memory/`）也挪成旁边的备份。
 
-日常在跑、模拟器锁被占着（包括日常叫起来的 agent 继承着锁）→ 不做。契约见 docs/cli.md「reset」。
+日常在跑、模拟器锁被占着 → 不做。契约见 docs/cli.md「reset」。
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from pathlib import Path
 
 from maapilot import paths
 from maapilot.cliutil import BUSY, CliError
-from maapilot.oscompat import sched
 from maapilot.tools import common
 
 PROJECTS_ENV = "MAAPILOT_CLAUDE_PROJECTS_DIR"     # 测试用：Claude Code 的 projects 目录
@@ -52,7 +50,7 @@ def _refuse_if_busy() -> None:
                        hint="maapilot daily status", exit=BUSY, data={"running": run})
     holder = lock.holder()
     if holder:
-        raise CliError("busy", "模拟器正被占用（有程序或接管的 agent 在操作），先等它结束",
+        raise CliError("busy", "模拟器正被占用（有程序在操作），先等它结束",
                        hint="maapilot lock status", exit=BUSY, data={"holder": common.public_lock(holder)})
 
 
@@ -71,7 +69,7 @@ def _move(src: Path, dst: Path) -> None:
         os.rename(src, dst)
     except PermissionError as e:
         raise CliError("in_use", f"{src} 里有文件正被别的程序打开，挪不走（{e}）", exit=BUSY,
-                       hint=f"关掉打开着 {src.name} 里文件的程序（编辑器、停在这个文件夹里的终端、daily watch 等）后再试") from None
+                       hint=f"关掉打开着 {src.name} 里文件的程序（编辑器、停在这个文件夹里的终端等）后再试") from None
 
 
 def reset(dry_run: bool, memory: bool) -> dict:
@@ -81,12 +79,14 @@ def reset(dry_run: bool, memory: bool) -> dict:
     priv = paths.PRIVATE
     out: dict = {"dry_run": dry_run}
 
-    # 1. 定时任务：只算本项目的（先读：读不了定时就什么都没动）
-    ok, hint = sched.backend().available()
-    cron = daily.unschedule(dry_run=True) if ok else {"removed": []}
-    out["schedule"] = {"remove": cron["removed"], "other_lines_kept": True}
-    if not ok:
-        out["schedule"]["unavailable"] = hint
+    # 1. v0.1 留下的系统定时：不动，只提示（用户同意后 daily unschedule）
+    try:
+        legacy = daily.legacy_schedule()
+    except Exception:                                    # noqa: BLE001 - 看不了不影响重置
+        legacy = {}
+    out["legacy_schedule"] = ({"times": legacy.get("times") or [], "entries": legacy.get("entries") or [],
+                               "hint": "系统里还留着旧版的定时日常：用户同意后 maapilot daily unschedule"}
+                              if legacy.get("installed") else None)
 
     # 2. private/ → 备份
     if priv.exists():
@@ -120,13 +120,6 @@ def reset(dry_run: bool, memory: bool) -> dict:
 
     if bak is not None:
         _move(priv, bak)
-    if cron["removed"]:
-        try:
-            out["schedule"]["removed"] = daily.unschedule(dry_run=False)["removed"]
-        except CliError:
-            if bak is not None:                              # 删不了定时：private/ 挪回去，什么都没动
-                os.rename(bak, priv)
-            raise
     if bak is not None:
         src = bak / MAA_CONFIG
         if src.is_dir():
@@ -146,7 +139,7 @@ def cmd(args):
 
 
 def register(sub) -> None:
-    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份、删本项目的定时任务（用户在对话里同意后再跑）")
-    p.add_argument("--dry-run", action="store_true", help="只列出会挪走、删掉什么，不动")
+    p = sub.add_parser("reset", help="从头设置：private/ 挪成备份（用户在对话里同意后再跑）")
+    p.add_argument("--dry-run", action="store_true", help="只列出会挪走什么，不动")
     p.add_argument("--memory", action="store_true", help="用户偏好也不留（private/memory/ 随备份走，Claude Code 的自动记忆也挪成备份）")
     p.set_defaults(func=cmd, command="reset")

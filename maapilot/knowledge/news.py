@@ -3,8 +3,7 @@
 接口就是游戏里"公告"那一栏（不用登录）：列表 `bulletinList`，全文 `bulletin/<cid>`（HTML）。
 程序只做可靠的事：拉下来、去掉 HTML、按固定写法抽出时间段（"10月09日 12:00 - 10月30日 03:59"、"维护时间：2026年10月09日06:00 ~ 12:00"），
 分成 活动 / 维护 / 其他 三类。正文原样给 agent 读，抽不出的时间由 agent 自己看。
-缓存在 private/state/news.json：`{at, items: [...], told: {<事件键>: 时间}, handed: {<事件键>: 时间}}`。
-told：告诉过用户了（`news told`）；handed：`daily watch` 已经因为它结束过一次（交给了 agent，不再因为它结束；启动检查照样列到 told 为止）。
+缓存在 private/state/news.json：`{at, items: [...], told: {<事件键>: 时间}}`。told：告诉过用户了（`news told`）。
 """
 from __future__ import annotations
 
@@ -208,11 +207,11 @@ def save(d: dict) -> None:
     tmp.replace(p)
 
 
-_MARKS = ("told", "handed")
+_MARKS = ("told",)
 
 
 def _save_marks(d: dict) -> None:
-    """存之前再读一次盘上的 told / handed 合进来：拉公告要几秒，期间别的进程（`news told`、`daily watch`）记下的不能丢。"""
+    """存之前再读一次盘上的 told 合进来：拉公告要几秒，期间别的进程（`news told`）记下的不能丢。"""
     cur = load()
     for k in _MARKS:
         if cur.get(k) or d.get(k):
@@ -335,18 +334,6 @@ def _mark(field: str, keys: list[str], now: datetime | None) -> dict:
 
 def mark_told(keys: list[str], now: datetime | None = None) -> dict:
     return _mark("told", keys, now)
-
-
-def mark_handed(keys: list[str], now: datetime | None = None) -> dict:
-    """`daily watch` 因为这些时间点结束过一次了：之后的 watch 不再因为它们结束（agent 没 told 就重挂也不会立刻又醒）。"""
-    return _mark("handed", keys, now)
-
-
-def unhanded_due(d: dict | None = None, now: datetime | None = None) -> list[dict]:
-    """due 里还没交给过 `daily watch` 的（watch 只为这些结束）。"""
-    d = load() if d is None else d
-    handed = d.get("handed") or {}
-    return [e for e in due(d, now) if e["key"] not in handed]
 
 
 def lines(d: dict | None = None, now: datetime | None = None, days: float = 3) -> list[str]:

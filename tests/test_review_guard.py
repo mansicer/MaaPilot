@@ -1,4 +1,4 @@
-"""对账的几处漏洞：几百几百的小花费累计、读不到仓库时悄悄算通过、无头 agent 把汇报标成已读。
+"""对账的几处漏洞：几百几百的小花费累计、读不到仓库时悄悄算通过；report seen 已经去掉。
 
 不碰模拟器：guard.read_now 换成假的数，daily.maapilot_call 换成假的返回。
 """
@@ -130,26 +130,15 @@ def test_guard_unreadable_is_a_problem_and_has_a_line():
     d = _report(guard={"ok": None, "error": "仓库识别什么都没认出"}, guard_unreadable=True)
     assert reportmod.has_problem(d)
     assert "没能核对合成玉 / 源石（读不到仓库），这次的花费没有对账" in reportmod.summary_lines(d)
-    assert [p["run_id"] for p in reportmod.unseen_problems()] == ["20261015-0440"]
     ok = dict(d, guard={"ok": True}, guard_unreadable=False)
     assert not reportmod.has_problem(ok)
 
 
-# --- 3. 无头 agent 不能 report seen -------------------------------------------------------------------------------------
+# --- 3. report seen 去掉了 -------------------------------------------------------------------------------------------
 
-def test_report_seen_refused_in_scheduled_daily(capsys, monkeypatch):
+def test_report_seen_is_gone(capsys):
     _report()
-    monkeypatch.setenv(daily.DAILY_ENV, "20261015-0440")
-    code, out = run(capsys, "report", "seen", "20261015-0440")
-    assert code == 2 and out["error"]["code"] == "not_allowed"
-    assert reportmod.seen_runs() == {}
+    code, out = run(capsys, "report", "seen", "20261015-0440")           # 不认识的子命令
+    assert code == 2 and out["error"]["code"] == "bad_arguments"
     code, out = run(capsys, "report", "show", "20261015-0440")          # 别的子命令照常
-    assert code == 0
-
-
-def test_report_seen_in_session(capsys, monkeypatch):
-    _report()
-    monkeypatch.delenv(daily.DAILY_ENV, raising=False)
-    monkeypatch.setattr(daily, "running", lambda: None)
-    code, out = run(capsys, "report", "seen", "20261015-0440")
-    assert code == 0 and "20261015-0440" in reportmod.seen_runs()
+    assert code == 0 and "seen" not in out["data"]

@@ -1,7 +1,10 @@
-"""daily run / schedule：不碰模拟器、不起真的 claude、不改真的 crontab。
-maapilot 子命令换成进程内的假实现；无头 agent 是一个假的 claude 脚本（真的子进程）；crontab 是一个假脚本。"""
+"""daily run / done / status：不碰模拟器、不改真的 crontab。maapilot 子命令换成进程内的假实现；crontab 是一个假脚本。
+agent 一直在场：要判断的事都停下交回它；没收尾的日常（open daily）由 `daily done` 收尾，`--only` 接着写同一份汇报。"""
 import json
 import os
+import signal
+import sys
+import time
 from datetime import timedelta
 
 import pytest
@@ -10,8 +13,11 @@ import yaml
 from maapilot import cli, paths
 from maapilot.crew import lock
 from maapilot.flows import daily
+from maapilot.flows import report as reportmod
 from maapilot.flows._common import now
-from tests.portable import fake_program, needs_cron, sched_ready  # noqa: F401 - fixture
+from tests.portable import fake_program
+
+script = fake_program
 
 
 def run(capsys, *argv):
@@ -19,29 +25,11 @@ def run(capsys, *argv):
     return code, json.loads(capsys.readouterr().out)
 
 
-script = fake_program
-
-
-# 提示没跟在 -p 后面就是从 stdin 给的（Windows 上 claude.cmd 那样）：记下来时放回 -p 后面，测试照样看 argv[1]
-FAKE_CLAUDE = """
-import json, os, sys, time
-rec = os.environ["FAKE_CLAUDE_LOG"]
-a = sys.argv[1:]
-i = a.index("-p")
-via_stdin = i + 1 >= len(a) or a[i + 1].startswith("--")
-if via_stdin:
-    a.insert(i + 1, sys.stdin.read())
-with open(rec, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"argv": a, "stdin": via_stdin, "cwd": os.getcwd(),
-                        "token": os.environ.get("MAAPILOT_LOCK_TOKEN"),
-                        "daily": os.environ.get("MAAPILOT_DAILY_RUN")}, ensure_ascii=False) + "\\n")
-if os.environ.get("FAKE_CLAUDE_SLEEP"):
-    time.sleep(float(os.environ["FAKE_CLAUDE_SLEEP"]))
-print(json.dumps({"type": "system", "subtype": "init"}))
-text = os.environ.get("FAKE_CLAUDE_RESULT", "关掉了一个公告弹窗，重跑后做完了。\\n结果：完成")
-print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": text,
-                  "total_cost_usd": 0.12, "num_turns": 5}, ensure_ascii=False))
-"""
+def close(capsys, summary="日常做完了。"):
+    """agent 收尾（daily done）。"""
+    code, out = run(capsys, "daily", "done", "--summary", summary)
+    assert code == 0, out
+    return out
 
 
 @pytest.fixture(autouse=True)
@@ -59,12 +47,9 @@ def test_maapilot_call_runs_real_cli(tmp_path):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """配置、假 claude、假的 maapilot 子命令。返回 calls 列表与可调的行为表。"""
+    """配置、假的 maapilot 子命令。返回 calls 列表与可调的行为表。"""
     monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
-    claude = script(tmp_path / "claude", FAKE_CLAUDE)
-    log = tmp_path / "claude-calls.jsonl"
-    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
-    cfg = {"emulator": {"address": "emu:1"}, "tools": {"claude": str(claude)},
+    cfg = {"emulator": {"address": "emu:1"}, "tools": {},
            "daily": {"tasks": ["startup", "recruit", "infrast", "award"], "default_stage": "1-7"}}
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
@@ -73,7 +58,7 @@ def env(tmp_path, monkeypatch):
                                                                       {"4001": 88000, "30012": 19}]}
 
     def fake(args, env_, timeout_s=None):
-        calls.append({"args": args, "token": env_.get(lock.TOKEN_ENV), "daily": env_.get(daily.DAILY_ENV)})
+        calls.append({"args": args, "token": env_.get(lock.TOKEN_ENV)})
         # 子进程里的命令拿得到嵌套锁
         assert env_.get(lock.TOKEN_ENV) == lock.current()["token"]
         if args[0] == "guard":
@@ -119,12 +104,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(daily, "refresh_news", fake_refresh)
     monkeypatch.setattr(daily, "maintenance_now", lambda: behavior["maintenance"])
     monkeypatch.setattr(daily, "version_info", fake_version)
-    return {"calls": calls, "behavior": behavior, "claude_log": log, "news_calls": news_calls}
-
-
-def claude_calls(env):
-    p = env["claude_log"]
-    return [json.loads(ln) for ln in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
+    return {"calls": calls, "behavior": behavior, "news_calls": news_calls}
 
 
 def read_report(d):
@@ -135,65 +115,57 @@ def maa_tasks(env):
     return [" ".join(c["args"][1:]) for c in env["calls"] if c["args"][0] == "maa"]
 
 
+GOAL = "## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n- 原话：x\n- 同意：y\n- 花合成玉/源石：否\n"
+
+
 def test_all_ok_no_goals_fights_default_stage(capsys, env):
     code, out = run(capsys, "daily", "run")
     assert code == 0, out
     d = out["data"]
     assert maa_tasks(env) == ["startup", "recruit", "infrast", "fight 1-7", "award"]
     assert [c["args"] for c in env["calls"] if c["args"][0] == "guard"] == [["guard", "snapshot"], ["guard", "check"]]
-    assert d["ok"] is True and d["failed"] == [] and d["guard"] == {"ok": True}
+    assert d["ok"] is True and d["failed"] == [] and d["guard"] == {"ok": True} and d["trigger"] == "manual"
     assert d["farm"]["stage"] == "1-7" and d["farm"]["times_done"] == 12
     assert {"id": "30012", "name": d["depot_change"][1]["name"], "delta": 14} in d["depot_change"]
-    assert claude_calls(env) == []
     md = read_report(d)
-    assert "全部做完" in md and "1-7 打了 12 次" in md and "花掉：" in md
+    assert "全部做完" in md and "1-7 打了 12 次" in md and "花掉：" in md and "（手动）" in md
     assert not (paths.PRIVATE / "daily-run.json").exists() and lock.current() is None
     assert (paths.LOGS / f"daily-{d['run_id']}.jsonl").exists()
+    # 进程结束了，这次日常还没收尾：等 agent daily done
+    assert d["open"] is True and "daily done" in d["next"]
+    assert daily.open_daily()["run_id"] == d["run_id"]
 
 
-def test_schedule_failure_wakes_recovery_agent_and_continues(capsys, env):
+def test_schedule_trigger_is_only_a_label(capsys, env):
+    """--trigger schedule：做法和手动一样（失败照样停下交回 agent），只写进汇报。"""
     env["behavior"]["fail"] = {"infrast"}
     code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
+    assert code == 1 and out["error"]["code"] == "handoff"
     d = out["data"]
-    assert maa_tasks(env) == ["startup", "recruit", "infrast", "fight 1-7", "award"]   # 接管后接着跑
-    (call,) = claude_calls(env)
-    argv = call["argv"]
-    assert argv[0] == "-p" and "maapilot-recovery" in argv[1] and "基建" in argv[1] and "infrast" in argv[1]
-    assert argv[2:] == ["--output-format", "stream-json", "--verbose",
-                        "--settings", str(paths.ROOT / ".claude" / "settings.json"),
-                        "--permission-mode", "default", "--permission-prompts", "none"]
-    assert "maapilot maa infrast" in argv[1]
-    assert call["cwd"] == str(paths.ROOT) and call["token"] and call["daily"] == d["run_id"]
-    infra = next(t for t in d["tasks"] if t["task"] == "infrast")
-    assert infra["ok"] is False and infra["recovered"] is True
-    assert infra["agent"]["summary"].startswith("关掉了一个公告弹窗") and infra["agent"]["cost_usd"] == 0.12
-    assert d["failed"] == []
-    # 接管之后对了一次账，最后又对一次
-    assert [c["args"][1] for c in env["calls"] if c["args"][0] == "guard"] == ["snapshot", "check", "check"]
-    md = read_report(d)
-    assert "agent 接手（处理好了）" in md
+    assert d["trigger"] == "schedule" and d["status"] == "handed_off" and "award" not in maa_tasks(env)
+    assert read_report(d).startswith("# 日常汇报：") and "（定时）" in read_report(d).splitlines()[0]
+    assert "定时日常" in d["lines"][0]
 
 
-def test_schedule_agent_not_recovered_is_failed(capsys, env, monkeypatch):
-    env["behavior"]["fail"] = {"recruit"}
-    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "公招页面一直转圈。\n结果：没做成")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 1 and out["error"]["code"] == "daily_incomplete"
-    assert out["data"]["failed"] == ["recruit"] and out["data"]["status"] == "done"
+def test_removed_flags(capsys, env):
+    for flag in ("--interactive", "--no-agent"):
+        code, out = run(capsys, "daily", "run", flag)
+        assert code == 2 and out["error"]["code"] == "bad_arguments"
+    assert env["calls"] == []
 
 
 def test_manual_failure_stops_and_hands_over(capsys, env):
-    """会话里跑：第一项失败就停下交给在场的 agent，后面的不跑；hint 里是接着跑的命令。"""
+    """第一项失败就停下交给在场的 agent，后面的不跑；hint 里是接着跑的命令。"""
     env["behavior"]["fail"] = {"infrast"}
-    code, out = run(capsys, "daily", "run", "--interactive")
+    code, out = run(capsys, "daily", "run")
     assert code == 1 and out["error"]["code"] == "handoff"
     d = out["data"]
-    assert d["status"] == "handed_off" and claude_calls(env) == []
+    assert d["status"] == "handed_off"
     assert d["handoff"]["task"] == "infrast" and d["handoff"]["rest"][0] == "infrast"
     assert "award" not in maa_tasks(env) and "award" in d["handoff"]["rest"]
     assert "--only " + ",".join(d["handoff"]["rest"]) in out["error"]["hint"]
-    assert "交给在场的 agent" in read_report(d)
+    assert "--only " + ",".join(d["handoff"]["rest"]) in d["next"] and "maapilot-recovery" in d["next"]
+    assert "交给 agent 处理" in read_report(d)
 
 
 EVIDENCE = {"shot_now": "/p/private/shots/20261002-160918-fail-infrast.png",
@@ -212,69 +184,35 @@ def test_manual_handoff_carries_evidence(capsys, env):
     assert "evidence" in out["error"]["hint"] and "maa why" in out["error"]["hint"]
 
 
-def test_recovery_prompt_lists_evidence(capsys, env):
-    env["behavior"]["fail"] = {"infrast"}
-    env["behavior"]["evidence"] = {**EVIDENCE, "missing": ["MAA 的截图：找不到 MAA 的日志目录"]}
-    run(capsys, "daily", "run", "--trigger", "schedule")
-    (call,) = claude_calls(env)
-    prompt = call["argv"][1]
-    assert EVIDENCE["shot_now"] in prompt and EVIDENCE["maa_shots"][0]["path"] in prompt
-    assert "maapilot maa why --task infrast" in prompt and "找不到 MAA 的日志目录" in prompt
-    assert "maapilot maa startup" in prompt                     # 被登出就直接重新登录
-
-
-def test_schedule_offline_also_wakes_agent(capsys, env, monkeypatch):
+def test_offline_also_hands_over(capsys, env):
     env["behavior"]["fail"] = {"recruit"}
     env["behavior"]["fail_code"] = "offline"
-    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "重新登录了。\n结果：处理好了")
-    run(capsys, "daily", "run", "--trigger", "schedule")
-    assert claude_calls(env)
-
-
-def test_no_agent_flag(capsys, env):
-    env["behavior"]["fail"] = {"startup"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule", "--no-agent")
-    assert code == 1 and claude_calls(env) == []
-
-
-def test_active_goals_go_to_goal_agent(capsys, env):
-    paths.GOALS.write_text("## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n- 原话：x\n- 同意：y\n- 花合成玉/源石：否\n",
-                           encoding="utf-8")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    assert "fight 1-7" not in maa_tasks(env) and maa_tasks(env)[-1] == "award"
-    (call,) = claude_calls(env)
-    assert "maapilot-daily" in call["argv"][1] and "遥 精2" in call["argv"][1]
-    goals_row = next(t for t in out["data"]["tasks"] if t["task"] == "goals")
-    assert goals_row["ok"] is True
-    assert "全程用中文" in call["argv"][1] and "不要用 maapilot report write" in call["argv"][1]
-    md = read_report(out["data"])                     # 目标部分单独一节，不写成"agent 接手"，不带「结果：」那行
-    assert "- 目标部分：做完了" in md and "## 目标部分" in md and "关掉了一个公告弹窗" in md
-    assert "agent 接手" not in md and "结果：完成" not in md
-    assert [c["args"][1] for c in env["calls"] if c["args"][0] == "guard"] == ["snapshot", "check", "check"]
-
-
-def test_active_goals_manual_are_pending(capsys, env):
-    paths.GOALS.write_text("## 甲\n- 状态：进行中\n- 对象：其他 x\n## 乙\n- 状态：暂停\n", encoding="utf-8")
     code, out = run(capsys, "daily", "run")
-    assert code == 0
-    assert out["data"]["goals_pending"] is True and out["data"]["goals_active"] == 1
-    assert "fight 1-7" not in maa_tasks(env) and claude_calls(env) == []
-    # award 要在刷理智之后：交给在场的 agent
-    assert "award" not in maa_tasks(env) and out["data"]["award_pending"] is True
-    assert "领奖励：等目标部分" in read_report(out["data"])
+    assert code == 1 and out["data"]["handoff"]["task"] == "recruit"
 
 
-def test_guard_failure_after_agent_stops_run(capsys, env):
-    env["behavior"]["fail"] = {"recruit"}
-    env["behavior"]["guard_check"] = [3]
+def test_active_goals_are_pending(capsys, env):
+    paths.GOALS.write_text("## 甲\n- 状态：进行中\n- 对象：其他 x\n## 乙\n- 状态：暂停\n", encoding="utf-8")
     code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    assert code == 0
+    d = out["data"]
+    assert d["goals_pending"] is True and d["goals_active"] == 1
+    assert "fight 1-7" not in maa_tasks(env)
+    # award 要在刷理智之后：交给在场的 agent
+    assert "award" not in maa_tasks(env) and d["award_pending"] is True
+    assert "领奖励：等目标部分" in read_report(d)
+    assert "maapilot-daily" in d["next"] and "maa award" in d["next"] and "guard check" in d["next"]
+
+
+def test_guard_failure_stops_run(capsys, env):
+    env["behavior"]["guard_check"] = [3]
+    code, out = run(capsys, "daily", "run")
     assert code == 3 and out["error"]["code"] == "currency_decreased"
-    assert maa_tasks(env) == ["startup", "recruit"]                     # 停下，后面的不跑
     d = out["data"]
     assert d["status"] == "stopped" and d["guard"]["ok"] is False and d["guard"]["unexplained"] == {"orundum": -600}
     md = read_report(d)
     assert "停下了" in md and "没经同意的减少" in md
+    assert "货币对账停机" in d["next"] and d["open"] is True
 
 
 def test_guard_stop_refuses_to_start(capsys, env):
@@ -282,6 +220,7 @@ def test_guard_stop_refuses_to_start(capsys, env):
     (paths.GUARD / "stop.json").write_text("{}", encoding="utf-8")
     code, out = run(capsys, "daily", "run")
     assert code == 3 and out["error"]["code"] == "guard_stop" and env["calls"] == []
+    assert daily.open_daily() is None
 
 
 def test_only(capsys, env):
@@ -291,54 +230,22 @@ def test_only(capsys, env):
     assert code == 2
 
 
-def test_agent_timeout_kills_it(capsys, env, monkeypatch):
-    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
-    cfg["daily"]["recovery_timeout_min"] = 0.02                          # 1.2 秒（接管失败项的 agent）
-    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    monkeypatch.setenv("FAKE_CLAUDE_SLEEP", "30")
-    env["behavior"]["fail"] = {"startup"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule", "--only", "startup")
-    assert code == 1
-    agent = out["data"]["tasks"][0]["agent"]
-    assert agent["timed_out"] is True and agent["recovered"] is False and agent["duration_s"] < 25
-
-
-
-def test_prompt_on_stdin_for_cmd_shim(capsys, env, monkeypatch):
-    """Windows 上 npm 装的 claude.cmd 经 cmd.exe 转，参数里换行后面的会丢：多行提示改从 stdin 给。"""
-    from maapilot import hosts
-    monkeypatch.setattr(hosts, "prompt_on_stdin", lambda binary_: True)
-    env["behavior"]["fail"] = {"infrast"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    (call,) = claude_calls(env)
-    assert call["stdin"] is True and "\n" in call["argv"][1] and "maapilot maa infrast" in call["argv"][1]
-
-
-def test_missing_claude_is_reported(capsys, env):
-    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
-    cfg["tools"]["claude"] = "/nonexistent/claude"
-    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    env["behavior"]["fail"] = {"startup"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule", "--only", "startup")
-    assert code == 1 and "起不来 claude" in out["data"]["tasks"][0]["agent"]["error"]
-
-
-def test_overlap_and_nested(capsys, env, monkeypatch):
+def test_overlap(capsys, env, monkeypatch):
     (paths.PRIVATE / "daily-run.json").write_text(json.dumps({"run_id": "x", "pid": os.getpid(),
                                                               "host": __import__("socket").gethostname()}), encoding="utf-8")
     code, out = run(capsys, "daily", "run")
-    assert code == 4 and out["error"]["code"] == "daily_running"
+    assert code == 4 and out["error"]["code"] == "daily_running" and daily.open_daily() is None
     (paths.PRIVATE / "daily-run.json").write_text(json.dumps({"run_id": "x", "pid": 99999999,
                                                               "host": __import__("socket").gethostname()}), encoding="utf-8")
     code, out = run(capsys, "daily", "run")                             # 残留的标记不挡
     assert code == 0
-    monkeypatch.setenv(daily.DAILY_ENV, "20260930-0440")
+    monkeypatch.setenv("MAAPILOT_DAILY_RUN", "20260930-0440")         # 旧版的环境变量不再看
+    close(capsys)
     code, out = run(capsys, "daily", "run")
-    assert code == 2 and out["error"]["code"] == "nested_daily"
+    assert code == 0
 
 
-def test_busy_emulator_writes_aborted_report(capsys, env, monkeypatch):
+def test_busy_emulator_writes_aborted_report_and_leaves_nothing_open(capsys, env, monkeypatch):
     held = lock.acquire("someone")
     try:
         monkeypatch.setattr(lock.os, "getpid", lambda: 4242)             # 别的进程
@@ -350,128 +257,144 @@ def test_busy_emulator_writes_aborted_report(capsys, env, monkeypatch):
     assert code == 4
     code, out = run(capsys, "report", "show")
     assert out["data"]["summary"]["status"] == "aborted" and "没跑完" in out["data"]["markdown"]
+    assert out["data"]["summary"]["open"] is False and daily.open_daily() is None   # 什么都没做：不留"没收尾"
 
 
-def test_status_and_report_write(capsys, env, tmp_path, monkeypatch):
-    monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, "")))
+def test_status_and_report_write(capsys, env):
     run(capsys, "daily", "run")
     code, out = run(capsys, "daily", "status")
-    assert code == 0 and out["data"]["running"] is None and out["data"]["last"]["ok"] is True
-    assert out["data"]["schedule"]["installed"] is False
-    rid = out["data"]["last"]["run_id"]
+    d = out["data"]
+    assert code == 0 and d["running"] is None and d["last"]["ok"] is True and d["last"]["open"] is True
+    assert d["open"]["run_id"] == d["last"]["run_id"] and d["open"]["stale"] is False and d["open"]["trigger"] == "manual"
+    assert "schedule" not in d and "next_at" not in d
+    rid = d["last"]["run_id"]
     code, out = run(capsys, "report", "write", rid, "--append", "遥练到了精2 30 级。")
     assert code == 0
     code, out = run(capsys, "report", "show", rid)
     assert "遥练到了精2 30 级。" in out["data"]["markdown"] and out["data"]["summary"]["appendix"]
+    assert "## 补充" in out["data"]["markdown"] and "## 目标部分" not in out["data"]["markdown"]
     code, out = run(capsys, "report", "list")
     assert [r["run_id"] for r in out["data"]["reports"]] == [rid]
 
 
-def test_parse_transcript(tmp_path):
-    p = tmp_path / "t.jsonl"
-    p.write_text('noise\n{"type":"assistant"}\n{"type":"result","is_error":true,"result":"结果：没做成"}\n', encoding="utf-8")
-    info = daily.parse_transcript(p)
-    assert info["is_error"] is True and info["recovered"] is False
-    assert daily.parse_transcript(tmp_path / "missing")["summary"] is None
+# --- 没收尾的日常：--only 接着跑、拒绝、6 小时自动收尾、daily done ------------------------------------------------------
 
-
-# --- crontab -----------------------------------------------------------------------------------------------------
-
-FAKE_CRONTAB = """
-import os, sys
-store = os.environ["FAKE_CRONTAB_FILE"]
-if sys.argv[1] == "-l":
-    if not os.path.exists(store):
-        sys.stderr.write("crontab: no crontab for tester\\n"); sys.exit(1)
-    sys.stdout.write(open(store, encoding="utf-8").read())
-elif sys.argv[1] == "-":
-    open(store, "w", encoding="utf-8").write(sys.stdin.read())
-"""
-
-OTHER = ("SHELL=/bin/sh\n"
-         "*/15 * * * * cd /Users/x/Developer/MAA && .venv/maapilot job tick >> private/log/tick.log 2>&1\n"
-         "0 3 * * * /usr/local/bin/backup.sh  # 别人的\n")
-
-
-def fake_crontab(tmp_path, monkeypatch, initial: str | None):
-    store = tmp_path / "crontab.txt"
-    if initial is not None:
-        store.write_text(initial, encoding="utf-8")
-    monkeypatch.setenv("FAKE_CRONTAB_FILE", str(store))
-    return script(tmp_path / "crontab", FAKE_CRONTAB)
-
-
-@pytest.fixture
-def cron(tmp_path, monkeypatch, sched_ready):
-    paths.PRIVATE.mkdir(parents=True, exist_ok=True)
-    paths.CONFIG.write_text("emulator: {address: 'emu:1'}\nschedule: ['04:40', '16:40']\n", encoding="utf-8")
-    monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, OTHER)))
-    return tmp_path / "crontab.txt"
-
-
-@needs_cron
-def test_schedule_keeps_other_lines(capsys, cron):
-    code, out = run(capsys, "daily", "schedule")
+def test_only_continues_the_open_daily(capsys, env):
+    """handoff 后 --only <rest> 接着写同一个运行编号、同一份汇报；重跑成了的项从 failed 里拿掉。"""
+    env["behavior"]["fail"] = {"infrast"}
+    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    first = out["data"]
+    assert code == 1 and first["failed"] == ["infrast"]
+    rest = first["handoff"]["rest"]
+    env["behavior"]["fail"] = set()
+    env["behavior"]["depot"] = [{"4001": 90000, "30012": 7}, {"4001": 80000, "30012": 30}]
+    code, out = run(capsys, "daily", "run", "--only", ",".join(rest))
     assert code == 0, out
-    text = cron.read_text(encoding="utf-8")
-    assert text.startswith(OTHER)                                        # 别的行一个字节都不动
-    mine = text[len(OTHER):].splitlines()
-    assert len(mine) == 2 and mine[0].startswith("40 4 * * * ") and mine[1].startswith("40 16 * * * ")
-    assert all(ln.endswith(f"# maapilot-v2 {paths.ROOT}") and "daily run --trigger schedule" in ln for ln in mine)
-    assert " -X utf8 -m maapilot.oscompat.launch " in mine[0] and "--env PYTHONUTF8=1" in mine[0]
-    assert f"--log {paths.LOGS / 'schedule.log'} -- daily run --trigger schedule" in mine[0]
-    assert out["data"]["schedule"]["times"] == ["04:40", "16:40"] and out["data"]["next_at"]   # 读回来核对过
-    assert out["data"]["old_entries"] == [OTHER.splitlines()[1]] and out["data"]["removed_old"] == []
-    # 重复执行结果相同
-    code, out = run(capsys, "daily", "schedule")
-    assert cron.read_text(encoding="utf-8") == text and out["data"]["changed"] is False
-    # 换时间：只换自己的行
-    code, out = run(capsys, "daily", "schedule", "--times", "05:10")
-    text2 = cron.read_text(encoding="utf-8")
-    assert text2.startswith(OTHER) and text2[len(OTHER):].startswith("10 5 * * * ") and text2.count("maapilot-v2") == 1
-    code, out = run(capsys, "daily", "status")
-    assert out["data"]["schedule"] == {"installed": True, "times": ["05:10"], "old_entries": [OTHER.splitlines()[1]],
-                                       "backend": "cron"}
-    assert out["data"]["next_at"]
+    d = out["data"]
+    assert d["run_id"] == first["run_id"] and d["report"] == first["report"] and d["segments"] == 2
+    assert d["trigger"] == "schedule" and d["started_at"] == first["started_at"]       # 还是那次定时日常
+    assert d["failed"] == [] and d["ok"] is True and d["status"] == "done" and "handoff" not in d
+    assert [t["task"] for t in d["tasks"]] == ["startup", "recruit", "infrast", "infrast", "box", "farm", "award"]
+    assert d["tasks"][2]["retried"] is True and d["tasks"][3]["ok"] is True
+    assert maa_tasks(env)[-3:] == ["infrast", "fight 1-7", "award"]
+    # 仓库差按这次日常的第一份算（第一段开头的快照 → 第二段结尾）
+    assert {"id": "30012", "name": next(c["name"] for c in d["depot_change"] if c["id"] == "30012"), "delta": 25} \
+        in d["depot_change"]
+    assert len(reportmod.runs()) == 1
+    md = read_report(d)
+    assert "没做成——infrast 卡住了（后面重跑了）" in md and "全部做完" in md
 
 
-@needs_cron
-def test_schedule_dry_run_and_replace_old(capsys, cron):
-    code, out = run(capsys, "daily", "schedule", "--dry-run", "--replace-old")
-    assert code == 0 and cron.read_text(encoding="utf-8") == OTHER      # 没写
-    assert "job tick" not in out["data"]["preview"] and "backup.sh" in out["data"]["preview"]
-    code, out = run(capsys, "daily", "schedule", "--replace-old")
-    text = cron.read_text(encoding="utf-8")
-    assert "job tick" not in text and "SHELL=/bin/sh\n0 3 * * * /usr/local/bin/backup.sh  # 别人的\n" in text
-    assert out["data"]["removed_old"]
+def test_plain_run_refused_while_open(capsys, env):
+    code, out = run(capsys, "daily", "run")
+    rid = out["data"]["run_id"]
+    n = len(env["calls"])
+    code, out = run(capsys, "daily", "run")
+    assert code == 2 and out["error"]["code"] == "daily_open" and rid in out["error"]["message"]
+    assert "daily done" in out["error"]["hint"] and "--only" in out["error"]["hint"]
+    assert out["data"]["open"]["run_id"] == rid and len(env["calls"]) == n
+    close(capsys)
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and out["data"]["run_id"] != rid
 
 
-@needs_cron
-def test_unschedule_only_removes_ours(capsys, cron):
-    other_root = "40 4 * * * /elsewhere/maapilot daily run # maapilot-v2 /elsewhere\n"
-    cron.write_text(OTHER + other_root, encoding="utf-8")
-    run(capsys, "daily", "schedule")
-    code, out = run(capsys, "daily", "unschedule", "--dry-run")
-    assert code == 0 and len(out["data"]["removed"]) == 2 and "maapilot-v2 /elsewhere" in out["data"]["preview"]
-    code, out = run(capsys, "daily", "unschedule")
-    assert cron.read_text(encoding="utf-8") == OTHER + other_root
+def test_stale_open_daily_auto_closed(capsys, env):
+    """超过 6 小时没收尾的算放弃：自动收尾（汇报里加一条告警），再开新的。"""
+    code, out = run(capsys, "daily", "run")
+    old = out["data"]["run_id"]
+    op = daily.open_daily()
+    daily._write_open({**op, "started_at": (now() - timedelta(hours=7)).isoformat(timespec="seconds")})
+    assert daily.open_daily()["stale"] is True
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and out["data"]["run_id"] != old
+    o = reportmod.load(old)
+    assert o["open"] is False and o["closed_by"] == "auto" and any("没有收尾" in a for a in o["alerts"])
+    assert "没有收尾" in reportmod.md_path(old).read_text(encoding="utf-8")
+    assert daily.open_daily()["run_id"] == out["data"]["run_id"]
 
 
-def test_schedule_bad_time(capsys, cron):
-    code, out = run(capsys, "daily", "schedule", "--times", "25:00")
-    assert code == 2 and cron.read_text(encoding="utf-8") == OTHER
+def test_stale_open_with_only_starts_fresh(capsys, env):
+    code, out = run(capsys, "daily", "run")
+    old = out["data"]["run_id"]
+    daily._write_open({**daily.open_daily(), "started_at": (now() - timedelta(hours=8)).isoformat(timespec="seconds")})
+    code, out = run(capsys, "daily", "run", "--only", "recruit")
+    assert code == 0 and out["data"]["run_id"] != old and "segments" not in out["data"]
 
 
-@needs_cron
-def test_empty_crontab(capsys, tmp_path, monkeypatch, sched_ready):
-    paths.PRIVATE.mkdir(parents=True, exist_ok=True)
-    paths.CONFIG.write_text("emulator: {address: 'emu:1'}\n", encoding="utf-8")
-    monkeypatch.setenv("MAAPILOT_CRONTAB", str(fake_crontab(tmp_path, monkeypatch, None)))
-    code, out = run(capsys, "daily", "schedule", "--times", "04:40")
-    assert code == 0 and (tmp_path / "crontab.txt").read_text(encoding="utf-8").count("\n") == 1
-    code, out = run(capsys, "daily", "unschedule")
-    assert (tmp_path / "crontab.txt").read_text(encoding="utf-8") == ""
+def test_daily_done_closes_and_writes_goals_section(capsys, env):
+    paths.GOALS.write_text(GOAL, encoding="utf-8")
+    code, out = run(capsys, "daily", "run")
+    rid = out["data"]["run_id"]
+    summary = "刷了 6 次 CE-6，遥到精2 了。\n\n- 花了 40 万龙门币\n\n结果：完成"
+    code, out = run(capsys, "daily", "done", "--summary", summary, "--result", "完成")
+    assert code == 0, out
+    assert out["data"]["run_id"] == rid and out["data"]["closed"] is True and daily.open_daily() is None
+    d = reportmod.load(rid)
+    assert d["open"] is False and d["closed_by"] == "agent" and d["goals_summary"]["text"].endswith("结果：完成")
+    assert "next" not in d
+    md = reportmod.md_path(rid).read_text(encoding="utf-8")
+    sec = md.split("## 目标部分")[1]
+    assert "刷了 6 次 CE-6" in sec and "- 花了 40 万龙门币" in sec and "结果：" not in md and "还没收尾" not in md
+    assert "见下面「目标部分」" in md
+    code, out = run(capsys, "daily", "done", "--summary", "再交一次")              # 已经收尾了
+    assert code == 2 and out["error"]["code"] == "not_in_daily"
 
+
+def test_daily_done_without_goals(capsys, env):
+    """没有目标（只有固定日常）也照样用 daily done 收尾。"""
+    code, out = run(capsys, "daily", "run")
+    rid = out["data"]["run_id"]
+    close(capsys, "固定日常都做完了，刷了 12 次 1-7。")
+    md = reportmod.md_path(rid).read_text(encoding="utf-8")
+    assert "## 目标部分" in md and "刷了 12 次 1-7" in md
+
+
+def test_daily_done_errors(capsys, env, tmp_path):
+    code, out = run(capsys, "daily", "done", "--summary", "x")
+    assert code == 2 and out["error"]["code"] == "not_in_daily"
+    run(capsys, "daily", "run")
+    code, out = run(capsys, "daily", "done")
+    assert code == 2 and out["error"]["code"] == "bad_arguments"
+    code, out = run(capsys, "daily", "done", "--summary", "   ")
+    assert code == 2
+    f = tmp_path / "s.txt"
+    f.write_text("从文件读的总结", encoding="utf-8")
+    (paths.PRIVATE / "daily-run.json").write_text(json.dumps({"run_id": "x", "pid": os.getpid(),
+                                                              "host": __import__("socket").gethostname()}), encoding="utf-8")
+    code, out = run(capsys, "daily", "done", "--summary-file", str(f))              # daily run 还在跑：跑完再收尾
+    assert code == 4 and out["error"]["code"] == "daily_running"
+    (paths.PRIVATE / "daily-run.json").unlink()
+    code, out = run(capsys, "daily", "done", "--summary-file", str(f))
+    assert code == 0 and out["data"]["chars"] == len("从文件读的总结")
+
+
+def test_daily_done_truncates_long_summary(capsys, env):
+    run(capsys, "daily", "run")
+    code, out = run(capsys, "daily", "done", "--summary", "字" * 30000 + "\n结果：完成")
+    assert code == 0 and out["data"]["truncated"] is True and out["data"]["chars"] <= 20000
+
+
+# --- 剿灭 ------------------------------------------------------------------------------------------------------------
 
 def test_annihilation_skipped_when_week_capped(capsys, env):
     from maapilot.tools import maa_cmd
@@ -480,6 +403,7 @@ def test_annihilation_skipped_when_week_capped(capsys, env):
     paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     code, out = run(capsys, "daily", "run")
     assert code == 0 and "annihilation" in maa_tasks(env)
+    close(capsys)
     # 打了、认出了掉落、没有合成玉 → 本周拿满；掉落一样都没认出不下结论
     assert maa_cmd.record_annihilation(1, 0, drops_seen=False)["capped"] is False
     assert maa_cmd.record_annihilation(1, 0, drops_seen=True)["capped"] is True
@@ -501,12 +425,31 @@ def test_annihilation_week_resets_and_counts_orundum(monkeypatch):
                                            "capped": False, "failures": 0}
 
 
+def test_annihilation_blocked_after_repeated_failures(capsys, env):
+    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
+    cfg["daily"]["tasks"] = ["startup", "annihilation", "award"]
+    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    env["behavior"]["fail"] = {"annihilation"}
+    run(capsys, "daily", "run")
+    code, out = run(capsys, "daily", "run", "--only", "annihilation")
+    assert any("这周的日常先不打了" in a for a in out["data"]["alerts"])
+    close(capsys)
+    env["calls"].clear()
+    code, out = run(capsys, "daily", "run")
+    assert "annihilation" not in maa_tasks(env)
+    row = next(t for t in out["data"]["tasks"] if t["task"] == "annihilation")
+    assert "没打成" in row["skipped"]
+
+
+# --- 子进程 ----------------------------------------------------------------------------------------------------------
+
 def test_children_get_run_id(capsys, env, monkeypatch):
     seen = []
     real = daily.maapilot_call
 
     def spy(args, env_, timeout_s=None):
         seen.append(env_.get("MAAPILOT_RUN_ID"))
+        assert "MAAPILOT_DAILY_RUN" not in env_                          # 旧版给无头 agent 的标记不再设
         return real(args, env_, timeout_s)
     monkeypatch.setattr(daily, "maapilot_call", spy)
     code, out = run(capsys, "daily", "run")
@@ -554,47 +497,50 @@ def test_snapshot_that_turned_into_failed_check_stops_run(capsys, env, monkeypat
     assert maa_tasks(env) == ["startup"]
 
 
-def test_recovery_prompt_has_real_command_for_farm(capsys, env, monkeypatch):
-    env["behavior"]["fail"] = {"fight"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    prompts = [c["argv"][1] for c in claude_calls(env)]
-    assert any("maapilot maa fight 1-7" in p for p in prompts)
-    assert not any("maa farm" in p for p in prompts)
-
-
-def test_agent_gets_new_token_afterwards(capsys, env):
-    env["behavior"]["fail"] = {"recruit"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    (call,) = claude_calls(env)
-    after = [c["token"] for c in env["calls"]][-1]
-    assert call["token"] and after and after != call["token"]           # agent 手里的旧 token 不能再进来
-
-
-def test_leftover_maa_after_agent_is_stopped(capsys, env, monkeypatch):
-    monkeypatch.setattr(daily, "LEFTOVER_WAIT_S", 0)
+def test_task_timeout_stops_leftover_maa(capsys, env, monkeypatch):
+    """任务超时、maapilot maa 被杀之后 maa 还在：日常结束掉它，告警里写明。"""
     killed = []
+    monkeypatch.setattr(daily, "TIMEOUT_LEFTOVER_WAIT_S", 0)
     monkeypatch.setattr(daily, "_leftover_maa", lambda: [99999991] if not killed else [])
     monkeypatch.setattr(daily.procs, "kill_pids", lambda pids, grace_s: killed.extend(pids))
     env["behavior"]["fail"] = {"recruit"}
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    env["behavior"]["fail_code"] = "timeout"
+    code, out = run(capsys, "daily", "run")
     assert killed == [99999991] and any("maa 进程" in a for a in out["data"]["alerts"])
 
 
-def test_annihilation_blocked_after_repeated_failures(capsys, env, monkeypatch):
-    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
-    cfg["daily"]["tasks"] = ["startup", "annihilation", "award"]
-    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    env["behavior"]["fail"] = {"annihilation"}
-    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "剿灭不能代理。\n结果：没做成")
-    run(capsys, "daily", "run", "--trigger", "schedule")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert any("这周的日常先不打了" in a for a in out["data"]["alerts"])
-    env["calls"].clear()
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert "annihilation" not in maa_tasks(env)
-    row = next(t for t in out["data"]["tasks"] if t["task"] == "annihilation")
-    assert "没打成" in row["skipped"]
+def _wait_dead(pid, s=10.0):
+    end = time.monotonic() + s
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="脚本靠 shebang 跑、POSIX 进程组")
+def test_timeout_kills_groups_even_if_main_exits_on_term(tmp_path):
+    """主进程收到 TERM 就走了，子孙另起的组不理 TERM：最后也要 KILL 掉。"""
+    pidfile = tmp_path / "child.pid"
+    parent = script(tmp_path / "parent", f"""
+import subprocess, sys, time
+p = subprocess.Popen([sys.executable, "-c",
+                      "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"],
+                     start_new_session=True)
+open({str(pidfile)!r}, "w").write(str(p.pid))
+time.sleep(60)
+""")
+    code, _, timed_out = daily._run_group([str(parent)], env=dict(os.environ), timeout_s=3)
+    child = int(pidfile.read_text(encoding="utf-8"))
+    try:
+        assert timed_out and _wait_dead(child)
+    finally:
+        try:
+            os.kill(child, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 # --- 刷理智的时限按理智算 ------------------------------------------------------------------------------------------
@@ -612,7 +558,6 @@ def test_farm_timeout_from_sanity(monkeypatch):
 
 
 def test_sanity_estimate_regenerates_below_cap():
-    from maapilot.tools import common
     at = (now() - timedelta(minutes=120)).isoformat(timespec="seconds")
     assert daily._sanity_estimate({"at": at, "current": 100, "max": 205}) == 120
     assert daily._sanity_estimate({"at": at, "current": 200, "max": 205}) == 205
@@ -671,6 +616,7 @@ def test_box_read_once_per_game_day(capsys, env):
     assert cmds.index("state box") > cmds.index("maa infrast") and cmds.index("state box") < cmds.index("maa fight 1-7")
     box = next(t for t in out["data"]["tasks"] if t["task"] == "box")
     assert box["ok"] is True and "skipped" not in box
+    close(capsys)
     # 今天（游戏日）读过了：跳过
     from maapilot.tools import common
     common.write_json(paths.STATE / "box.json", {"at": common.iso(), "operators": {}})
@@ -697,6 +643,7 @@ def test_box_disabled_and_only(capsys, env):
     code, out = run(capsys, "daily", "run", "--only", "box")
     assert code == 0, out
     assert all_cmds(env) == ["state box"]
+    close(capsys)
     env["calls"].clear()
     cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
     cfg["daily"]["read_box"] = False
@@ -706,7 +653,7 @@ def test_box_disabled_and_only(capsys, env):
     assert not any(t["task"] == "box" for t in out["data"]["tasks"])
 
 
-def test_box_failure_hands_over_in_session(capsys, env):
+def test_box_failure_hands_over(capsys, env):
     env["behavior"]["fail"] = {"box"}
     code, out = run(capsys, "daily", "run")
     assert code == 1 and out["error"]["code"] == "handoff"
@@ -714,15 +661,6 @@ def test_box_failure_hands_over_in_session(capsys, env):
     assert h["task"] == "box" and h["rest"][:2] == ["box", "farm"]
     assert "maa fight 1-7" not in all_cmds(env)
     assert not (paths.STATE / "box.json").exists()                      # 失败不写 box.json
-
-
-def test_box_failure_scheduled_recovery_prompt(capsys, env):
-    env["behavior"]["fail"] = {"box"}
-    run(capsys, "daily", "run", "--trigger", "schedule")
-    (call,) = claude_calls(env)
-    prompt = call["argv"][1]
-    assert "识别干员练度" in prompt and "maapilot state box" in prompt and "maapilot maa box" not in prompt
-    assert "maa why" not in prompt
 
 
 def test_box_has_its_own_timeout(capsys, env, monkeypatch):
@@ -772,59 +710,31 @@ OLD = {"installed": {"version": "2.6.01", "code": 100}, "latest": {"version": "2
 NEW = {**OLD, "installed": {"version": "2.6.21", "code": 101}, "update_needed": False}
 
 
-def test_maintenance_in_session_skips_everything(capsys, env):
+@pytest.mark.parametrize("trigger", ["manual", "schedule"])
+def test_maintenance_skips_everything(capsys, env, trigger):
     env["behavior"]["maintenance"] = MAINT
-    code, out = run(capsys, "daily", "run")
+    code, out = run(capsys, "daily", "run", "--trigger", trigger)
     assert code == 0, out
     d = out["data"]
     assert d["status"] == "maintenance" and d["ok"] is True and d["failed"] == []
-    assert d["maintenance"] == MAINT
-    assert env["calls"] == [] and claude_calls(env) == []           # 没跑 MAA、没对账、没叫 agent（agent 就在场）
+    assert d["maintenance"] == MAINT and d["tasks"] == []
+    assert env["calls"] == []                                         # 没跑 MAA、没对账（agent 就在场）
     assert d["lines"][1] == "官方停机维护中（10月9日 06:00–12:00），这次没跑。维护后要强制更新游戏。"
-    from maapilot.flows import report
-    assert report.has_problem(d) is False and report.unseen_problems() == []
+    assert reportmod.has_problem(d) is False
     md = read_report(d)
     assert "官方停机维护中（10月9日 06:00–12:00），这次没跑。维护后要强制更新游戏。" in md
     assert "仓库变化" not in md and "没能核对" not in md
-    assert "赶上官方停机维护" in report.summary_lines(d)[0]
+    assert "赶上官方停机维护" in reportmod.summary_lines(d)[0]
+    assert d["open"] is True                                          # agent 告诉用户后 daily done 收尾
 
 
-def test_maintenance_scheduled_wakes_agent_without_maa(capsys, env, monkeypatch):
-    env["behavior"]["maintenance"] = MAINT
-    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "维护到 12:00，期间理智会满溢约 20 点；活动目标不受影响。\n结果：完成")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    d = out["data"]
-    assert d["status"] == "maintenance" and d["ok"] is True and d["failed"] == []
-    assert env["calls"] == []                                         # 没跑 MAA、没对账
-    (call,) = claude_calls(env)
-    prompt = call["argv"][1]
-    assert "10月9日 06:00 到 12:00" in prompt and MAINT["title"] in prompt and "maapilot-events" in prompt
-    assert "不要操作模拟器" in prompt and "maapilot news list" in prompt and "结果：完成" in prompt
-    (row,) = d["tasks"]
-    assert row["task"] == "maintenance" and row["ok"] is True and row["agent"]["recovered"] is True
-    from maapilot.flows import report
-    assert report.has_problem(d) is False
-    md = read_report(d)
-    assert "停机维护：agent" in md and "理智会满溢约 20 点" in md
-
-
-def test_maintenance_agent_missing_claude_is_only_an_alert(capsys, env, tmp_path):
-    env["behavior"]["maintenance"] = {**MAINT, "forced_update": False}
-    cfg = yaml.safe_load(paths.CONFIG.read_text(encoding="utf-8"))
-    cfg["tools"]["claude"] = str(tmp_path / "no-claude")
-    paths.CONFIG.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    d = out["data"]
-    assert d["status"] == "maintenance" and env["calls"] == []
-    assert any("维护期间叫 agent 没叫起来" in a for a in d["alerts"])
-    assert "强制更新" not in read_report(d)
-
-
-def test_maintenance_prompt_without_forced_update():
-    p = daily.maintenance_prompt("20261009-0440", {**MAINT, "forced_update": False})
-    assert "强制更新" not in p and "结果：完成" in p
+def test_news_due_in_result(capsys, env, monkeypatch):
+    from maapilot.tools import doctor
+    monkeypatch.setattr(doctor, "news_brief", lambda: {"at": "t", "lines": ["10月9日 12:00 开始：昨日海"],
+                                                       "due": ["6774:公告"]})
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and out["data"]["news"]["due"] == ["6774:公告"]
+    assert any("官方日程有 1 条消息" in ln for ln in out["data"]["lines"])
 
 
 def test_news_refresh_failure_is_not_fatal(capsys, env):
@@ -852,63 +762,27 @@ def test_version_info_failure_is_not_fatal(capsys, env):
     code, out = run(capsys, "daily", "run", "--trigger", "schedule")
     assert code == 0, out
     assert maa_tasks(env) == ["startup", "recruit", "infrast", "fight 1-7", "award"]
-    assert any("没查到游戏版本" in a for a in out["data"]["alerts"]) and claude_calls(env) == []
+    assert any("没查到游戏版本" in a for a in out["data"]["alerts"])
 
 
-def test_update_needed_headless_wakes_update_agent_then_continues(capsys, env):
+@pytest.mark.parametrize("trigger", ["manual", "schedule"])
+def test_update_needed_hands_off_then_continues(capsys, env, trigger):
     env["behavior"]["versions"] = [OLD, NEW]
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    d = out["data"]
-    (call,) = claude_calls(env)
-    prompt = call["argv"][1]
-    assert "maapilot game update" in prompt and "600000" in prompt and "maapilot maa startup" in prompt
-    assert "2.6.01" in prompt and "2.6.21" in prompt and "不要点同意" in prompt and "结果：完成" in prompt
-    assert call["daily"] == d["run_id"]
-    row = d["tasks"][0]
-    assert row["task"] == "game_update" and row["ok"] is True and row["version"] == {"from": "2.6.01", "to": "2.6.21"}
-    assert maa_tasks(env) == ["startup", "recruit", "infrast", "fight 1-7", "award"]
-    assert [c["args"][1] for c in env["calls"] if c["args"][0] == "guard"] == ["check", "snapshot", "check"]
-    assert d["status"] == "done" and d["failed"] == []
-    assert "更新游戏：完成" in read_report(d)
-
-
-def test_update_prompt_accept_terms():
-    p = daily.update_prompt("20261009-0440", {**OLD, "accept_terms": True})
-    assert "直接点「同意」" in p and "不要点同意" not in p
-
-
-def test_update_agent_fails_stops_run(capsys, env, monkeypatch):
-    env["behavior"]["versions"] = [OLD]
-    monkeypatch.setenv("FAKE_CLAUDE_RESULT", "下载一直失败。\n结果：没做成")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 1 and out["error"]["code"] == "daily_incomplete"
-    d = out["data"]
-    assert d["status"] == "update_failed" and d["failed"] == ["game_update"] and d["ok"] is False
-    assert maa_tasks(env) == []
-    from maapilot.flows import report
-    assert report.has_problem(d) and "没做成：更新游戏" in "\n".join(report.summary_lines(d))
-    assert "没更新成" in read_report(d)
-
-
-def test_update_agent_claims_done_but_still_old(capsys, env):
-    env["behavior"]["versions"] = [OLD, OLD]
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 1 and out["data"]["status"] == "update_failed"
-    assert any("还是旧的" in a for a in out["data"]["alerts"])
-
-
-def test_update_needed_in_session_hands_off(capsys, env):
-    env["behavior"]["version"] = OLD
-    code, out = run(capsys, "daily", "run", "--only", "recruit,farm")
+    code, out = run(capsys, "daily", "run", "--trigger", trigger, "--only", "recruit,farm")
     assert code == 1 and out["error"]["code"] == "handoff"
     d = out["data"]
-    assert d["status"] == "handed_off" and claude_calls(env) == [] and maa_tasks(env) == []
+    assert d["status"] == "handed_off" and maa_tasks(env) == []
     h = d["handoff"]
     assert h["task"] == "game_update" and h["error"] == "游戏客户端要更新（2.6.01 → 2.6.21）"
     assert h["rest"] == ["recruit", "farm"]
     assert "maapilot game update" in out["error"]["hint"] and "--only recruit,farm" in out["error"]["hint"]
-    assert "停下交给在场的 agent 更新" in read_report(d)
+    assert "maapilot-events" in d["next"] and "--only recruit,farm" in d["next"]
+    assert "停下交给 agent 更新" in read_report(d)
+    # agent 更新好了，接着跑：同一份汇报
+    code, out = run(capsys, "daily", "run", "--only", "recruit,farm")
+    assert code == 0, out
+    assert out["data"]["run_id"] == d["run_id"] and maa_tasks(env) == ["recruit", "fight 1-7"]
+    assert out["data"]["game_version"]["update_needed"] is False
 
 
 EXPIRED = [{"title": "打完活动 SV-8"}]
@@ -922,40 +796,17 @@ def no_goal_snapshot(monkeypatch):
     monkeypatch.setattr(goals, "expire_due", lambda: EXPIRED, raising=False)
 
 
-def test_expired_goals_in_session(capsys, env, no_goal_snapshot):
-    code, out = run(capsys, "daily", "run")
+@pytest.mark.parametrize("trigger", ["manual", "schedule"])
+def test_expired_goals_listed_for_the_agent(capsys, env, no_goal_snapshot, trigger):
+    code, out = run(capsys, "daily", "run", "--trigger", trigger)
     assert code == 0, out
     d = out["data"]
-    assert d["goals_expired"] == EXPIRED and claude_calls(env) == []
+    assert d["goals_expired"] == EXPIRED
     md = read_report(d)
     assert "## 目标变动" in md and "- 移除：打完活动 SV-8（到期）" in md
     assert "目标移除：打完活动 SV-8（到期）" in d["lines"]
-    assert any("活动商店" in ln for ln in d["lines"])
-    from maapilot.flows import report
-    assert report.has_problem(d) is False
-
-
-def test_expired_goals_go_into_goals_agent_prompt(capsys, env, no_goal_snapshot):
-    paths.GOALS.write_text("## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n- 原话：x\n- 同意：y\n- 花合成玉/源石：否\n",
-                           encoding="utf-8")
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    (call,) = claude_calls(env)                                       # 目标 agent 顺带看，不另叫
-    prompt = call["argv"][1]
-    assert "遥 精2" in prompt and "到期，程序已挪进已完成" in prompt and "「打完活动 SV-8」" in prompt
-    assert "活动商店没换完" in prompt
-
-
-def test_only_expired_goals_wake_short_agent(capsys, env, no_goal_snapshot):
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
-    assert code == 0, out
-    assert maa_tasks(env) == ["startup", "recruit", "infrast", "fight 1-7", "award"]   # 默认关照刷
-    (call,) = claude_calls(env)
-    prompt = call["argv"][1]
-    assert "没有进行中的目标" in prompt and "「打完活动 SV-8」" in prompt and "结果：完成" in prompt
-    row = next(t for t in out["data"]["tasks"] if t["task"] == "goals")
-    assert row["expired_only"] is True and row["ok"] is True
-    assert [c["args"][1] for c in env["calls"] if c["args"][0] == "guard"] == ["snapshot", "check", "check"]
+    assert any("活动商店" in ln for ln in d["lines"])                 # 定时的也写（以前由无头 agent 看）
+    assert reportmod.has_problem(d) is False
 
 
 def test_goals_change_recorded_and_relayed(capsys, env, monkeypatch):
@@ -982,9 +833,8 @@ def test_goals_change_recorded_and_relayed(capsys, env, monkeypatch):
     assert "- 移除：打完活动 SV-8（到期，期限 2026-10-09 04:00 已过，自动结束）" in md
     assert "- 移除：遥 精2（完成，精2 1级）" in md and "- 新加：新目标 甲" in md
     assert "- 改了：乙 的状态：进行中 → 暂停" in md
-    from maapilot.flows import report
-    assert report.has_problem(d) is False
-    lines = report.summary_lines(d)
+    assert reportmod.has_problem(d) is False
+    lines = reportmod.summary_lines(d)
     assert "目标移除：遥 精2（完成，精2 1级）" in lines and "目标改了：乙 的状态：进行中 → 暂停" in lines
 
 
@@ -994,6 +844,7 @@ def test_goals_unchanged_or_diff_error(capsys, env, monkeypatch):
     monkeypatch.setattr(goals, "diff", lambda a, b: {"removed": [], "added": [], "changed": []}, raising=False)
     code, out = run(capsys, "daily", "run")
     assert code == 0 and "goals_change" not in out["data"] and "目标变动" not in read_report(out["data"])
+    close(capsys)
 
     def boom(a, b):
         raise ValueError("坏了")
@@ -1003,34 +854,55 @@ def test_goals_unchanged_or_diff_error(capsys, env, monkeypatch):
 
 
 def test_goals_change_lines_vanished_goal():
-    from maapilot.flows import report
     d = {"goals_change": {"removed": [{"title": "丙", "fields": {}, "done_entry": None}], "added": [],
                           "changed": [{"title": "丁", "field": "deadline", "before": None, "after": "2026-10-30 04:00"}]}}
-    assert report.goals_change_lines(d) == ["移除：丙（已完成清单里没有它：不是通过移除目标挪走的）",
-                                            "改了：丁 的期限：（空） → 2026-10-30 04:00"]
+    assert reportmod.goals_change_lines(d) == ["移除：丙（已完成清单里没有它：不是通过移除目标挪走的）",
+                                               "改了：丁 的期限：（空） → 2026-10-30 04:00"]
 
 
-def test_goals_change_with_real_snapshot(capsys, env, monkeypatch):
-    """真的 goals.snapshot / diff：目标 agent 把一个目标挪走，汇报里有。"""
+def test_goals_change_across_segments_with_real_snapshot(capsys, env):
+    """真的 goals.snapshot / diff：agent 在两段之间把目标做完挪走，接着跑的那段结束时汇报里有（和这次日常开头比）。"""
     from maapilot.flows import goals
-    if not hasattr(goals, "snapshot"):
-        pytest.skip("goals.snapshot 还没有")
-    paths.GOALS.write_text("## 遥 精2\n- 状态：进行中\n- 对象：干员 遥 → 精2 1级\n- 原话：x\n- 同意：y\n- 花合成玉/源石：否\n",
-                           encoding="utf-8")
-    real = daily.run_agent
-
-    def agent_that_finishes_goal(*a, **k):
-        goals.remove("遥 精2", goals.DONE, "精2 1级 做完了")
-        return real(*a, **k)
-    monkeypatch.setattr(daily, "run_agent", agent_that_finishes_goal)
-    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    paths.GOALS.write_text(GOAL, encoding="utf-8")
+    code, out = run(capsys, "daily", "run")
+    assert code == 0 and out["data"]["goals_pending"] is True
+    goals.remove("遥 精2", goals.DONE, "精2 1级 做完了")
+    code, out = run(capsys, "daily", "run", "--only", "farm,award")
     assert code == 0, out
     (rm,) = out["data"]["goals_change"]["removed"]
     assert rm["title"] == "遥 精2" and rm["done_entry"]["status"].startswith(goals.DONE)
     assert any(ln.startswith("目标移除：遥 精2（") and "精2 1级 做完了" in ln for ln in out["data"]["lines"])
+    assert out["data"]["goals_pending"] is False and out["data"]["award_pending"] is False
+    assert maa_tasks(env)[-2:] == ["fight 1-7", "award"]
 
 
 def test_expire_goals_missing_is_harmless(monkeypatch):
     from maapilot.flows import goals
     monkeypatch.delattr(goals, "expire_due", raising=False)
     assert daily.expire_goals() == []
+
+
+# --- crontab（tests/test_oscompat_sched.py 等用） ---------------------------------------------------------------------
+
+FAKE_CRONTAB = """
+import os, sys
+store = os.environ["FAKE_CRONTAB_FILE"]
+if sys.argv[1] == "-l":
+    if not os.path.exists(store):
+        sys.stderr.write("crontab: no crontab for tester\\n"); sys.exit(1)
+    sys.stdout.write(open(store, encoding="utf-8").read())
+elif sys.argv[1] == "-":
+    open(store, "w", encoding="utf-8").write(sys.stdin.read())
+"""
+
+OTHER = ("SHELL=/bin/sh\n"
+         "*/15 * * * * cd /Users/x/Developer/MAA && .venv/maapilot job tick >> private/log/tick.log 2>&1\n"
+         "0 3 * * * /usr/local/bin/backup.sh  # 别人的\n")
+
+
+def fake_crontab(tmp_path, monkeypatch, initial: str | None):
+    store = tmp_path / "crontab.txt"
+    if initial is not None:
+        store.write_text(initial, encoding="utf-8")
+    monkeypatch.setenv("FAKE_CRONTAB_FILE", str(store))
+    return script(tmp_path / "crontab", FAKE_CRONTAB)
