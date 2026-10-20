@@ -1,4 +1,4 @@
-"""`maapilot daily run / status / schedule / unschedule`：日常与定时。契约见 docs/cli.md「daily」，设计见 docs/design.md 第 6 节。
+"""`maapilot daily run / status / schedule / unschedule`：日常与定时。契约见 docs/cli.md「daily」，设计见 docs/design.md「运行方式」。
 
 `daily done`（agent.report_done）：定时日常叫起的 agent 结束前交代结果，日常在它结束后读走、放进汇报。
 

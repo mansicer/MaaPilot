@@ -74,7 +74,7 @@
 权限规则是 `maapilot` 整个放行、只列例外，表里没列的新命令也放行。
 "放行"的命令不弹确认；"询问"的（`guard allow`，还有开发用的 `dev`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`），无头运行（`claude -p` / `codex exec`）里一律被拒。
 
-**程序只死守真实货币**（docs/design.md「思路」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
+**程序只死守真实货币**（docs/design.md「设计哲学」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
 定时日常叫起的无头 agent 里（环境里有 `MAAPILOT_DAILY_RUN`，空的也算；或者这条命令是正在跑的日常进程的子孙，清掉环境变量也认得出）
 用户不在场，直接退出码 3 `needs_user`，什么也没做（`maapilot/tools/confirm.py`）。
 别的会改东西的命令（`daily schedule / unschedule`、`reset`、`host install`、`lock release`、改 `config.yaml`）都放行：agent 先在对话里问清楚、用户同意后再跑（AGENTS.md 硬规则），程序不另弹确认。
