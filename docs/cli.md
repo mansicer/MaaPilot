@@ -217,7 +217,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 | `award` | | Award（任务奖励、邮件、免费单抽） |
 | `fight <关卡>` | `[--times N] [--medicine N] [--expiring-medicine [天]]` | Fight（刷关；`--times` 默认打到理智用完；`--medicine` 默认 0；`--expiring-medicine` 只用 N 天内过期的，不写天数为 2） |
 | `annihilation` | `[--stage <剿灭关>] [--times N] [--medicine N]` | Fight（剿灭；默认当期剿灭、打 1 次；`--stage` 也可写 龙门外环 / 龙门市区 / 切尔诺伯格） |
-| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`prts://<id>`（旧写法 `maa://<id>`、纯数字也认；作业集 `prts://s<id>` 还不支持）或本地 JSON，如 `copilot strip` 存的。作业站的作业先取下来存成 `private/cache/copilot/<id>.json` 再把文件交给 maa-cli：0.7.6 起它的作业码改成 `prts://`、`maa://` 会报弃用，0.7.5 只认 `maa://`，给文件哪个版本都一样，`data.copilot.file` 是这个文件；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
+| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`prts://<id>`（旧写法 `maa://<id>`、纯数字也认；作业集 `prts://s<id>` 还不支持）或本地 JSON，如 `copilot strip` 存的。作业站的作业先取下来存成 `private/cache/copilot/<id>.json` 再把文件交给 maa-cli：0.7.6 起它的作业码改成 `prts://`、`maa://` 会报弃用，0.7.5 只认 `maa://`，给文件哪个版本都一样，`data.copilot.file` 是这个文件；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid raid` 突袭：只给一份作业时 maa-cli 丢掉突袭设置、按屏幕上的模式打，所以开打前截一张图核对关卡详情页是突袭模式（只看、不点），核对结果写进 `data.copilot.raid_check: {mode, shot}`，不是突袭就不开打（`not_raid_mode`，见下）；`--raid both` 单份作业做不到，退出码 2（`bad_arguments`），分两次跑；不用理智液。用了哪些写进 `data.copilot`） |
 | `closedown` | | CloseDown（关游戏） |
 
 `config.yaml` 的 `daily.params.<任务>` 会先合进默认参数，`--params` 最后合。理智液（`--medicine N`）：用户第一次同意后按记忆办。
@@ -250,7 +250,7 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 剿灭没做成不另记：`daily run` 和别的项一样交回 agent，由它判断原因（不能代理、找不到入口、掉线），要用户决定的写进总结。
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
-重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
+重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）、`not_raid_mode`（`copilot --raid raid` 开打前关卡详情页不是突袭模式：`data.raid_check.mode` 为 `normal` 是还在常规模式，`unknown` 是认不出模式按钮（不在详情页，如已进编队页，或这关没有突袭），`data.raid_check.shot` 是那张截图；没跑 maa、没花理智，切到突袭、停在详情页再跑）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
 maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa run` 的标准输出里没有 Summary 任务行；`fight` 的日志里既没有 `Current sanity` 也没有 `Mission started`），
 命令照常返回，`data.upstream_format` 是一句说明，同时记进 `sources.json`（maa-cli 的输出格式可能变了，次数、理智、掉落记不到）。
 
