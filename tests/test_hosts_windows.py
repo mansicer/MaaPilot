@@ -215,30 +215,20 @@ def test_codex_rules_cover_every_maapilot_form():
                 continue
             for form in MAAPILOT_FORMS:
                 assert _decide(rules, [form, *cmd[1:]]) == dec, f"{form} {' '.join(cmd[1:])}：应是 {dec}"
-    for prog in ("maa", "maa.exe"):
-        assert _decide(rules, [prog, "fight", "1-7"]) == "forbidden"
-        assert _decide(rules, [prog, "install"]) is None                          # setup 装 maa-cli：照常问
-    for prog in ("adb", "adb.exe"):
-        assert _decide(rules, [prog, "-s", "emu:1", "shell", "input"]) == "forbidden"
+    for prog in ("maa", "maa.exe", "adb", "adb.exe"):                            # 10-20 起不设规则，按默认
+        assert _decide(rules, [prog, "fight", "1-7"]) is None
 
 
-def test_claude_denies_windows_forms():
-    """Claude Code 的放行只列本名（启动钩子放好了 PATH，别的写法按默认弹确认）；禁止的要连 Windows 的写法一起列。"""
-    deny = [" ".join(c) for c in _claude_bash("deny")]
-    for form in MAAPILOT_FORMS:
-        assert f"{form} skland token" in deny
-    for prog in ("maa", "maa.exe"):
-        for sub in ("run", "fight", "copilot", "ssscopilot", "roguelike", "reclamation", "startup", "closedown"):
-            assert f"{prog} {sub}" in deny
-    for prog in ("adb", "adb.exe"):
-        assert f"{prog} shell" in deny and f"{prog} -s" in deny
+def test_claude_denies_no_commands():
+    """10-20 起 Claude Code 只拒绝森空岛凭据文件，不拒绝任何命令（maa / adb 的 Windows 写法也不再列）。"""
+    assert _claude_bash("deny") == []
 
 
 def test_rules_check_expectations_match_the_rules_file():
     """host install 用 codex execpolicy check 核对的那些命令：项目的规则文件确实给这些结论（不用真的 codex 也核对一遍）。"""
     rules = _codex_rules()
-    assert {w for w, _ in host_cmd.EXPECT} == {"allow", "prompt", "forbidden"}
-    assert any("Scripts" in c[0] for _, c in host_cmd.EXPECT) and any(c[0] == "adb.exe" for _, c in host_cmd.EXPECT)
+    assert {w for w, _ in host_cmd.EXPECT} == {"allow", "prompt"}                  # 10-20 起没有 forbidden
+    assert any("Scripts" in c[0] for _, c in host_cmd.EXPECT)
     for want, cmd in host_cmd.EXPECT:
         assert _decide(rules, cmd) == want, cmd
 

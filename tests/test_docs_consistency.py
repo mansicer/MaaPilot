@@ -147,9 +147,6 @@ def _all_subcommands() -> list[list[str]]:
 @pytest.mark.parametrize("where,cmd,full", INVOCATIONS, ids=[f"{f}:{c}" for f, c, _ in INVOCATIONS])
 def test_skill_command_has_permission_rule(where, cmd, full):
     argv = normalize(cmd)
-    if any(" ".join(argv).startswith(u) for u in USER_ONLY):           # 让用户自己在终端里跑的：agent 被拒
-        assert _rule(argv) == "deny", f"{where} 的 `{cmd}` 只能由用户跑，agent 应被拒"
-        return
     assert _rule(argv) in ("allow", "ask"), f"{where} 的 `{cmd}` 没有放行或询问的权限规则"
 
 
@@ -160,9 +157,8 @@ def test_every_subcommand_has_rule():
 
 
 def test_dev_commands_not_for_user_agent():
-    """开发用的命令：skill、CLAUDE.md 里不提，也没有放行规则。"""
+    """开发用的命令：skill、CLAUDE.md 里不提。"""
     assert not [c for _, c, _ in INVOCATIONS if c.split(" ", 1)[0] in DEV_ONLY]
-    assert all(_rule([d, "review"]) == "ask" for d in DEV_ONLY)                     # dev rules 会改 agent 自己的权限
 
 
 def test_confirm_commands_are_ask():
@@ -170,9 +166,7 @@ def test_confirm_commands_are_ask():
         assert _rule(c.split()) == "ask", f"`{c}` 必须是询问"       # 询问优先于整个放行的 maapilot:*
 
 
-def test_user_only_commands_and_token_file_are_denied():
-    for c in USER_ONLY:
-        assert _rule(c.split()) == "deny", f"`{c}` 要由用户自己跑，agent 应被拒"
+def test_token_file_is_denied():
     deny = _settings()["permissions"]["deny"]
     assert "Read(private/skland.json)" in deny and "Edit(private/skland.json)" in deny
 

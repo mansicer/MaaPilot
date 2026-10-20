@@ -7,7 +7,7 @@
 
 两边的差别（都按今天的实际做法）：
 - maapilot 的几种写法（`MAAPILOT`）：Codex 每条规则每种写法都列（规则按命令的第一个词认程序，没 PATH 时 agent 写 `.venv` 里的）；
-  Claude Code 的放行 / 询问只列本名（启动钩子把 `.venv` 的程序目录放进了 PATH，别的写法按默认弹确认），拒绝的每种写法都列。
+  Claude Code 的放行 / 询问只列本名（启动钩子把 `.venv` 的程序目录放进了 PATH，别的写法按默认弹确认）。
 - 文件规则（`FILES`：Read / Edit / WebFetch）只有 Claude Code 有；Codex 的规则只管命令，管不了文件（靠沙箱和 AGENTS.md 硬规则）。
 - `sleep 300` 在 Claude Code 里是整条命令精确匹配，在 Codex 里是前缀（Codex 没有精确匹配的写法）。
 """
@@ -25,10 +25,6 @@ CODEX = {ALLOW: "allow", ASK: "prompt", DENY: "forbidden"}       # 结论在 Cod
 # maapilot 的几种写法：PATH 里的、.venv 里的（macOS / Linux）、Windows 的 .exe（PATH 里的、.venv 里两种分隔符）
 MAAPILOT = ("maapilot", ".venv/bin/maapilot", "maapilot.exe", ".venv\\Scripts\\maapilot.exe", ".venv/Scripts/maapilot.exe")
 BARE = MAAPILOT[0]
-
-TOKEN_WHY = "MaaPilot：森空岛凭据只由用户自己处理"
-DIRECT_WHY = "MaaPilot：只通过 maapilot 操作模拟器"
-
 
 @dataclass(frozen=True)
 class Cmd:
@@ -53,23 +49,16 @@ def _cmds(decision: str, *specs: str, why: str | None = None) -> list[Cmd]:
     return [Cmd(tuple(s.split()), decision, why) for s in specs]
 
 
-# maapilot 的命令：整个放行，只列例外（拒绝 > 询问 > 放行，两边都是）。加普通的新命令不用改这里，也不用重新生成。
-# 例外：记下花合成玉 / 源石的同意（guard allow）要问；开发命令（dev，其中 dev rules 会改 agent 自己的权限）要问；
-# 用户自己在终端里跑的（skland token）拒绝。其余以用户在对话里的同意为准（AGENTS.md 硬规则 3），程序那层另有把关（锁、对账、定时日常里拒绝）。
-# 新命令要是会花合成玉 / 源石、碰凭据或改权限，记得加进这里的例外。
+# maapilot 的命令：整个放行，只留记下花合成玉 / 源石的同意（guard allow）询问（询问 > 放行，两边都是；10-20 用户定，开发后期再收）。
+# 新命令不用改这里，也不用重新生成。其余以用户在对话里的同意为准（AGENTS.md 硬规则 3），程序那层另有把关（锁、对账、定时日常里拒绝）。
 COMMANDS: list[Cmd] = [
     Cmd((), ALLOW),
-    *_cmds(ASK, "guard allow", "dev"),
-    *_cmds(DENY, "skland token", why=TOKEN_WHY),
+    *_cmds(ASK, "guard allow"),
 ]
 
-# 别的程序：掉线时等用户回复的 5 分钟计时器放行；直接用 maa 跑任务、adb shell / -s 绕过了锁和对账，拒绝
-# （maa install / update、adb connect / devices 不在其列，按默认问）。
+# 别的程序：掉线时等用户回复的 5 分钟计时器放行。直接跑 maa / adb 不另设规则（按宿主默认），靠锁、对账和 AGENTS.md 硬规则。
 OTHERS: list[Other] = [
     Other(None, ("sleep",), ("300",), ALLOW, exact=True),
-    Other("MAA", ("maa", "maa.exe"),
-          ("run", "fight", "copilot", "ssscopilot", "roguelike", "reclamation", "startup", "closedown"), DENY, DIRECT_WHY),
-    Other("ADB", ("adb", "adb.exe"), ("shell", "-s"), DENY, DIRECT_WHY),
 ]
 
 # 文件和网页（只有 Claude Code）：(工具, 范围, 结论)。写文件的规则写 Edit（覆盖所有写文件的工具；Write(...) 不生效）。
@@ -83,8 +72,6 @@ FILES: list[tuple[str, str, str]] = [
     ("WebFetch", "domain:prts.maa.plus", ALLOW),
     ("WebFetch", "domain:prts.plus", ALLOW),
     ("WebFetch", "domain:maa.plus", ALLOW),
-    ("Edit", "private/guard/**", DENY),           # 只由程序写
-    ("Edit", "private/lock.json", DENY),
     ("Read", "private/skland.json", DENY),        # 森空岛凭据
     ("Edit", "private/skland.json", DENY),
 ]
@@ -148,8 +135,7 @@ def dump_json(d: dict) -> str:
 CODEX_HEADER = """\
 # MaaPilot：Codex 的命令规则。由 maapilot/policy.py 生成（maapilot dev rules），不要手改；和 .claude/settings.json 的权限出自同一份。
 # allow 在沙箱外跑、不弹确认；prompt 每次问用户（无头 codex exec 里等于拒绝）；forbidden 一律拒绝。
-# maapilot 整个放行，只列例外：合成玉 / 源石的放行（guard allow）、开发命令（dev）要问，森空岛凭据拒绝；其余以用户在对话里的同意为准。
-# 禁止的只有绕过锁和对账的直接操作（直接用 maa 跑任务、直接 adb shell）和森空岛凭据。
+# maapilot 整个放行，只有合成玉 / 源石的放行（guard allow）要问；其余以用户在对话里的同意为准。
 # 规则按命令的第一个词认程序，所以 maapilot 的几种写法（PATH 里的、.venv 里的、Windows 的 .exe）、adb / maa 的 .exe 都列上。
 # Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样拆开的命令还没核实过；写绝对路径的也认不出来
 # （拦直接操作靠的是锁、对账和 AGENTS.md 的硬规则，这里只是一道护栏）。

@@ -27,10 +27,7 @@ EXPECT = [("allow", ["maapilot", "doctor", "--brief"]),
           ("allow", ["maapilot.exe", "daily", "run"]),
           ("prompt", ["maapilot", "guard", "allow", "源石", "1"]),
           ("prompt", [".venv\\Scripts\\maapilot.exe", "guard", "allow", "源石", "1"]),
-          ("forbidden", ["adb", "shell", "input", "tap", "1", "1"]),
-          ("forbidden", ["adb.exe", "shell", "input", "tap", "1", "1"]),
-          ("forbidden", ["maa.exe", "fight", "1-7"]),
-          ("forbidden", [".venv/Scripts/maapilot.exe", "skland", "token"])]
+          ("allow", [".venv/Scripts/maapilot.exe", "daily", "done"])]
 
 
 def codex_home() -> Path:

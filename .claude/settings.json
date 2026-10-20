@@ -15,37 +15,9 @@
       "WebFetch(domain:maa.plus)"
     ],
     "ask": [
-      "Bash(maapilot guard allow:*)",
-      "Bash(maapilot dev:*)"
+      "Bash(maapilot guard allow:*)"
     ],
     "deny": [
-      "Bash(maapilot skland token:*)",
-      "Bash(.venv/bin/maapilot skland token:*)",
-      "Bash(maapilot.exe skland token:*)",
-      "Bash(.venv\\Scripts\\maapilot.exe skland token:*)",
-      "Bash(.venv/Scripts/maapilot.exe skland token:*)",
-      "Bash(maa run:*)",
-      "Bash(maa fight:*)",
-      "Bash(maa copilot:*)",
-      "Bash(maa ssscopilot:*)",
-      "Bash(maa roguelike:*)",
-      "Bash(maa reclamation:*)",
-      "Bash(maa startup:*)",
-      "Bash(maa closedown:*)",
-      "Bash(maa.exe run:*)",
-      "Bash(maa.exe fight:*)",
-      "Bash(maa.exe copilot:*)",
-      "Bash(maa.exe ssscopilot:*)",
-      "Bash(maa.exe roguelike:*)",
-      "Bash(maa.exe reclamation:*)",
-      "Bash(maa.exe startup:*)",
-      "Bash(maa.exe closedown:*)",
-      "Bash(adb shell:*)",
-      "Bash(adb -s:*)",
-      "Bash(adb.exe shell:*)",
-      "Bash(adb.exe -s:*)",
-      "Edit(private/guard/**)",
-      "Edit(private/lock.json)",
       "Read(private/skland.json)",
       "Edit(private/skland.json)"
     ]

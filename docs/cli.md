@@ -792,7 +792,7 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
   显式带上项目的权限设置（文件夹没被信任时无头 claude 不读它；要确认的一律自动拒绝）；
 - `codex`：`<tools.codex> exec -C <仓库> --sandbox workspace-write --json --skip-git-repo-check --ephemeral -o <记录>.last.txt -c notify=[] --disable computer_use --disable browser_use --disable browser_use_external "<提示>"`
   （`--skip-git-repo-check`：下载的压缩包不是 git 仓库也能跑；`--ephemeral`：无头会话不留在用户的会话列表里）。
-  命令在沙箱里跑（只能写仓库、没有网络），项目的 `.codex/rules/maapilot.rules` 把 maapilot 命令放到沙箱外、禁止直接用 `maa` 跑任务、`adb shell` / `adb -s`、
+  命令在沙箱里跑（只能写仓库、没有网络），项目的 `.codex/rules/maapilot.rules` 把 maapilot 命令放到沙箱外，
   要问的（只有 `guard allow`）在 exec 里一律被拒（审批固定是"从不"）。规则只有 Codex 信任这个文件夹时才加载（`host install codex`；没信任时 `daily schedule` 拒绝，见下）。
   codex 的每条命令自成进程组：超时时先找出它的子孙进程组一起结束，再结束 codex。
   记录的判读：这一轮报了 `turn.failed`、没有一轮做完（没有 `turn.completed`）、或者没留下最后的话 → 算出错（`is_error`）；顶层的 `error` 事件（断线重连）不算。
@@ -1181,9 +1181,9 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 ## Codex 命令规则
 
 `.codex/rules/maapilot.rules`（入库，Starlark 的 `prefix_rule`）和下面 Claude Code 的权限出自同一份规则 `maapilot/policy.py`，由 `maapilot dev rules` 生成（见「Claude Code 权限设置」；不要手改）：
-放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），拒绝 → `forbidden`：`prompt` 只有 `guard allow`；`forbidden` 是直接用 `maa` 跑任务、`adb shell` / `adb -s`、`maapilot skland token`。
+放行 → `allow`（在沙箱外跑），询问 → `prompt`（无头 `codex exec` 里等于拒绝），拒绝 → `forbidden`：`prompt` 只有 `guard allow`，没有 `forbidden`（10-20 用户定：权限只留两条，另一条是森空岛凭据文件，只有 Claude Code 拦得住）。
 规则按命令的第一个词认程序：maapilot 的几种写法（`maapilot`、`.venv/bin/maapilot`、`maapilot.exe`、`.venv\Scripts\maapilot.exe`、`.venv/Scripts/maapilot.exe`）
-放行 / 询问 / 禁止都一样，`maa.exe`、`adb.exe` 和 `maa`、`adb` 一样禁止。macOS 上 Codex 还会把绝对路径的程序按程序名认（`execpolicy check --resolve-host-executables` 实测），
+放行 / 询问都一样。macOS 上 Codex 还会把绝对路径的程序按程序名认（`execpolicy check --resolve-host-executables` 实测），
 Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的写法还没核实。没列的命令在沙箱里跑（只能写仓库、没有网络，连不上模拟器）。
 只有 Codex 信任这个文件夹时才加载（`host install codex`；`agent` 是 codex 时 `doctor` 的 `codex` 项是必需项，`daily schedule` 拒绝 `codex_untrusted`）。
 
@@ -1223,37 +1223,9 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
       "WebFetch(domain:maa.plus)"
     ],
     "ask": [
-      "Bash(maapilot guard allow:*)",
-      "Bash(maapilot dev:*)"
+      "Bash(maapilot guard allow:*)"
     ],
     "deny": [
-      "Bash(maapilot skland token:*)",
-      "Bash(.venv/bin/maapilot skland token:*)",
-      "Bash(maapilot.exe skland token:*)",
-      "Bash(.venv\\Scripts\\maapilot.exe skland token:*)",
-      "Bash(.venv/Scripts/maapilot.exe skland token:*)",
-      "Bash(maa run:*)",
-      "Bash(maa fight:*)",
-      "Bash(maa copilot:*)",
-      "Bash(maa ssscopilot:*)",
-      "Bash(maa roguelike:*)",
-      "Bash(maa reclamation:*)",
-      "Bash(maa startup:*)",
-      "Bash(maa closedown:*)",
-      "Bash(maa.exe run:*)",
-      "Bash(maa.exe fight:*)",
-      "Bash(maa.exe copilot:*)",
-      "Bash(maa.exe ssscopilot:*)",
-      "Bash(maa.exe roguelike:*)",
-      "Bash(maa.exe reclamation:*)",
-      "Bash(maa.exe startup:*)",
-      "Bash(maa.exe closedown:*)",
-      "Bash(adb shell:*)",
-      "Bash(adb -s:*)",
-      "Bash(adb.exe shell:*)",
-      "Bash(adb.exe -s:*)",
-      "Edit(private/guard/**)",
-      "Edit(private/lock.json)",
       "Read(private/skland.json)",
       "Edit(private/skland.json)"
     ]
@@ -1280,12 +1252,10 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
   无头运行里命令自己也拒绝，换了宿主也一样。
 - `daily schedule / unschedule`、`reset`、`host install`、`lock release`、改 `private/config.yaml` 都放行：agent 在对话里问过、用户同意了就做（AGENTS.md 硬规则），
   程序不另设关卡。`daily schedule` 的输出带上定时日常要执行的程序（`exec`），agent 转告用户；`reset` 日常在跑、锁被占着时自己不做；`lock release` 只删残留的锁。
-- 直接用 `maa` 跑任务（`run` / `fight` / `copilot` / `ssscopilot` / `roguelike` / `reclamation` / `startup` / `closedown`）、`adb shell`、`adb -s` 被拒：绕过了锁和对账，一律经 `maapilot`。
-  Windows 的写法（`maa.exe`、`adb.exe`，`.venv` 里 / 带 `.exe` 的 maapilot 跑 `skland token`）同样拒绝；放行只列 `maapilot` 本名（启动钩子把 `.venv` 的程序目录放进了 PATH），
-  别的写法按默认弹确认。
-  setup 里装 maa-cli（`maa install`、`maa update`）、`adb connect` / `adb devices` 不在拒绝之列，按默认弹确认。
-- `private/guard/`、`lock.json` 只由程序写（拒绝编辑）。
-- 森空岛的 token：`skland token` 只能由用户自己在终端里跑（拒绝），`private/skland.json` agent 读不了、改不了（拒绝；Codex 拦不住读文件，见「Codex 命令规则」）。
+- `maapilot` 整个放行（`Bash(maapilot:*)`），只列本名（启动钩子把 `.venv` 的程序目录放进了 PATH），别的写法按默认弹确认。
+  直接跑 `maa` / `adb`、改 `private/guard/` 和锁都没有规则：靠 AGENTS.md 硬规则、锁和对账（10-20 用户定，开发后期再收）。
+- 森空岛凭据：`private/skland.json` agent 读不了、改不了（拒绝；Codex 拦不住读文件，见「Codex 命令规则」）。
+  `skland token` 让用户自己在终端里跑是 AGENTS.md 的约定，不是权限规则。
 - `guard snapshot` 可以放行：上次对账之后跑过可能花东西的命令时它改做对账（见「guard」），不能拿来抹掉花费。
 - 启动钩子 `bin/session-start` 用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）：先往 `$CLAUDE_ENV_FILE` 写一行把 `.venv/bin` 加进 PATH（环境还没建也写，setup 建好后同一会话就能用），再跑 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。
   `next` 是 `setup` / `guard` 时另带顶层的 `systemMessage`（直接显示给用户的一行）：钩子不会让 agent 先开口，要用户先说一句，这一行告诉用户"随便说一句就开始"。
