@@ -99,7 +99,7 @@ description: 明日方舟养成目标 via MaaPilot goals.md —— 用户说要�
   程序会拿干员 / 仓库快照再核对一次（先 `state skland` 或 `state box` 让快照是新的）。森空岛常常滞后几小时，刚做完的培养它还没更新：
   `op progress`、`op upgrade`、`state op` 在游戏里读到 / 做成的练度程序会自己记下、一起算，所以刚练完时先用这几个命令读一次（专精用 `op progress`，到了它报"本来就到了"）。
   退出码 3 `not_achieved` 说明快照和现场读数里都还没到（`data.short` 是差哪儿），
-  不要自己硬移除：告诉用户差什么，用户说"算完成"才加 `--confirmed-by-user` 重跑；无人值守时写进总结等用户。
+  不要自己硬移除：告诉用户差什么，用户说"算完成"才加 `--confirmed-by-user` 重跑；用户不在时（定时日常）写进总结等用户。
 
 ## 问用户的情形
 

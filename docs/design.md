@@ -31,15 +31,15 @@
 | **会话里能按时醒来**（会话内定时任务） | 定时日常：到点在用户的会话里醒来，跑日常、当场汇报 |
 | （可选）项目级权限规则 | 护栏：`guard allow` 每次弹确认、不读森空岛凭据 |
 
-会话一直开着是前提：会话关了、定时任务过期了，由用户和 harness 处理，项目不管（10-20 用户定）。
+定时用一次性的接力（会话里始终只留一个"下一次日常"，每次醒来先定好下一个），harness 没有一次性定时才用重复的。会话一直开着是前提：会话关了、定时任务过期了，由用户和 harness 处理，项目不管（10-20 用户定）。
 
 目前的情况：
 
 | harness | 会话内定时 | 备注 |
 |---|---|---|
-| Claude Code（命令行、桌面版） | 有（会话内定时；桌面版另有本地定时任务） | 长命令放后台，结束时叫醒 |
-| Codex 桌面版 | 有（会话内定时任务，结果回到同一会话） | 要应用开着 |
-| Codex 命令行 | 待确认 | |
+| Claude Code（命令行、桌面版） | 有（`CronCreate` 一次性 / 重复定时；重复的 7 天后过期） | 长命令放后台，结束时叫醒；10-20 命令行实测 |
+| Codex 桌面版 | 有（会话内定时任务，结果回到同一会话） | 要应用开着；10-20 用户在 Windows 上实测 |
+| Codex 命令行 | 没有（10-20 确认） | 只能在对话里用，不支持定时日常 |
 
 各 harness 的具体做法（说明文件、skills 怎么找到、权限、定时怎么建、实测情况）写在 `docs/harnesses.md`。
 
@@ -48,7 +48,7 @@
 ```
 MaaPilot/
   AGENTS.md               给 agent 的总说明（各 agent 通用）：身份、怎么跟用户说话、硬规则、启动时做什么
-  CLAUDE.md               引用 AGENTS.md，加 Claude Code 专用的几条（后台叫醒、超时）
+  CLAUDE.md               引用 AGENTS.md，加 Claude Code 专用的几条（会话内定时、后台叫醒、超时）
   .claude/settings.json   Claude Code 的权限、启动钩子（由 maapilot/policy.py 生成）
   .codex/rules/           Codex 的命令规则（同上生成）
   .agents/skills/         各 skill（见第 6 节；.claude/skills 是指向它的链接）
@@ -77,9 +77,10 @@ MaaPilot/
 | `goals list / add / remove / update / move / expire` | 目标清单的增删改；`move` 调先后 = 优先级 |
 | `op upgrade / mastery`、`craft` | 养成、合成的快捷方式：能成就省事，失败了 agent 自己在界面上做 |
 | `guard snapshot / check / allow` | 真实货币对账；`allow` 记下用户同意的一次花费 |
-| `daily run` | 日常的固定流程：按配置依次跑 MAA 日常项，出错交回在场的 agent；跑完交给 agent 做目标部分（见第 7 节） |
-| `daily done` | agent 交上这次日常目标部分的总结，程序放进汇报 |
-| `report show / latest / seen` | 读汇报；记下哪次已经告诉过用户 |
+| `daily run` | 日常的固定流程：按配置依次跑 MAA 日常项，出错交回在场的 agent；跑完交给 agent 做目标部分（见第 7 节）。开始时记下"进行中的日常"，`--only` 接着写同一份汇报 |
+| `daily done` | agent 收尾这次日常：总结写进汇报的「目标部分」，清掉"进行中" |
+| `daily status / unschedule` | 有没有在跑、没收尾的日常、上一次；`unschedule` 只用来删掉 v0.1 留下的系统定时 |
+| `report show / latest / list / write` | 读汇报；`write --append` 追加一段补充 |
 | `news list / show / told` | 国服游戏内公告里的维护和活动日程；记下哪个时间点已经告诉过用户 |
 | `game version / update` | 模拟器上的游戏版本和官网最新版；下载、覆盖安装（只有官服） |
 | `reset [--dry-run] [--memory]` | 从头设置：`private/` 整个改名成备份（不删任何东西） |
@@ -123,13 +124,13 @@ MaaPilot/
 
 | skill | 什么时候用 | 写什么 |
 |---|---|---|
-| `maapilot-setup` | 第一次打开，或用户说要重新设置 | ① 模拟器：没装就按 MAA 文档引导；装好就找 ADB 地址、写配置。② `tools install` 装 maa-cli 和 adb，跑 `doctor` 排查到全部通过；试跑"启动游戏回首页"；读一次仓库和干员。③ 问日常：每天几次、几点；做哪些 MAA 日常项；没有目标时刷哪关。④ 写配置，**用 harness 自己的定时功能在会话里定好日常**（各家做法见 `docs/harnesses.md`），写 `setup.json` |
-| `maapilot-daily` | 定时日常醒来时；用户说"跑一次日常" | 定时日常的整套做法（第 7 节）；有目标时按优先级策划理智和养成（`calc stages` 给建议），没有就刷默认关；更新目标进度；汇报格式和必说的内容 |
+| `maapilot-setup` | 第一次打开，或用户说要重新设置 | ① 模拟器：没装就按 MAA 文档引导；装好就找 ADB 地址、写配置。② `tools install` 装 maa-cli 和 adb，跑 `doctor` 排查到全部通过；试跑"启动游戏回首页"；读一次仓库和干员。③ 问日常：每天几次、几点；做哪些 MAA 日常项；没有目标时刷哪关。④ 写配置，**用 harness 自己的定时功能在会话里定好日常**（一次性定时接力；各家做法见 `docs/harnesses.md`），发现 v0.1 的系统定时就请用户同意后删掉，写 `setup.json` |
+| `maapilot-daily` | 定时日常醒来时；用户说"跑一次日常" | 定时日常的整套做法（第 7 节，先定好下一次）；有目标时按优先级策划理智和养成（`calc stages` 给建议），没有就刷默认关；更新目标进度；`daily done` 收尾；汇报必说的四样 |
 | `maapilot-goals` | 用户说要练谁、要打哪关、不要某个目标了；日常里核对进度 | 怎么分解：练度 → 材料；关卡 → 需要的练度 → 材料。能马上做完就直接做；不能就报"要花什么、够不够、差多少、大约几天"，用户同意后写入 |
 | `maapilot-training` | 升级、精英化、升技能、专精、模组 | 页面路线、确认框上看什么、常见卡点；先试 `op` 快捷命令，失败就截图自己点；做完核对 |
 | `maapilot-base` | 合成材料、制造站改产、基建 | 加工站路线、心情消耗、换心情满的干员、合成顺序；制造站改产和改回 |
 | `maapilot-battle` | 打某一关、剿灭、推图、模组任务 | 先按练度判断打不打得过；找作业、自动编队 + 作业打；剿灭用 MAA；打完核对 3 星；打不过就说缺什么、问要不要加成长期目标 |
-| `maapilot-events` | 日常开头或启动检查发现新公告、维护结束、活动开始；用户问活动、维护 | 维护后更新游戏、第一次启动、`data sync`；活动开始时读公告、查活动关和商店、对照目标，跟用户说值得拿什么、问要不要改安排；说完 `news told` |
+| `maapilot-events` | `daily run` 的结果或启动检查（`news.due`）发现新公告、维护结束、活动开始；用户问活动、维护 | 维护后更新游戏、第一次启动、`data sync`；活动开始时读公告、查活动关和商店、对照目标，跟用户说值得拿什么、问要不要改安排；说完 `news told` |
 | `maapilot-recovery` | MAA 任务失败、页面卡住、掉线 | 先看失败那一刻的截图和 `maa why` 的事实，自己判断原因；常见卡点（弹窗、公告、掉线重登、维护）；处理完让日常接着跑；处理不了写清卡在哪 |
 
 每个 skill 末尾有"要问用户的情形"：用户没提过的花费、第一次遇到而记忆里没有答案的事。合成玉和源石不在任何 skill 里放行，永远单独问。
@@ -141,18 +142,23 @@ MaaPilot/
 
 **自由对话**：用户直接说要做的事，agent 加载对应 skill 去做，出错当场处理（`maapilot-recovery`）。例如"把某某练到精2" → `maapilot-goals` 判断能不能马上做，能就 `maapilot-training` 直接做，不能就报数后写进目标。
 
-**定时日常**（harness 触发）：setup 时 agent 用 harness 的会话内定时，在用户的会话里定好每天的时间，提示词写明"这是定时日常，按 `maapilot-daily` 做"。到点 agent 在同一个会话里醒来：
+**定时日常**（harness 触发）：setup 时 agent 用 harness 的会话内定时，按 `config.yaml` 的 `schedule` 在用户的会话里定好下一次（一次性定时接力，见第 2 节），
+提示写成自足的一句（"定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"，到点时前面的对话可能已被压缩）。到点 agent 在同一个会话里醒来：
 
-1. 跑 `maapilot daily run`（长命令，按 harness 的方式放后台等结束）。程序做开头的检查（到期的目标挪走；公告旧了重拉，正在维护就不跑；游戏版本旧了交给 agent 更新），再按配置依次跑 MAA 日常项；
-   某项失败就停下交回在场的 agent，agent 按 `maapilot-recovery` 处理后让它接着跑。
-2. 固定流程跑完，agent 按 `maapilot-daily` 做目标部分：按目标的优先级用理智刷材料、做养成和合成、更新目标进度；用户提过的花费直接做，没提过的写进汇报"要你决定的事"。
-3. agent 用 `daily done` 交上总结，程序前后货币对账、写汇报。
-4. agent 在会话里把结果和目标进度告诉用户（按用户偏好决定详略），`report seen`。
+1. 先定好下一次日常的一次性定时（只留一个）：这次出错、没收尾，下一次照样会来。
+2. 跑 `maapilot daily run --trigger schedule`（长命令，按 harness 的方式放后台等结束）。程序记下"进行中的日常"，做开头的检查（到期的目标挪走；公告旧了重拉，正在维护就不跑；游戏版本旧了交给 agent 更新），
+   再按配置依次跑 MAA 日常项；某项失败就停下交回在场的 agent，agent 按 `maapilot-recovery` 处理后 `daily run --only <rest>` 接着跑（同一个 run_id、同一份汇报）。
+3. 固定流程跑完，agent 按 `maapilot-daily` 做目标部分：按目标的优先级用理智刷材料、做养成和合成、更新目标进度；然后 `maa award`、`guard check`。用户提过的花费直接做，没提过的写进"要你决定的事"。
+4. agent 用 `daily done` 收尾：总结（做了什么、目标进度、花了什么、要用户决定的事）写进汇报的「目标部分」，清掉"进行中"。
+5. agent 在会话里把结果和目标进度告诉用户（按用户偏好决定详略）。
 
-用户可能在场也可能不在：**定时日常运行期间 `guard allow` 一律被程序拒绝**（程序自己记着日常在跑，不看 agent 怎么说），合成玉、源石的花费只能等用户回来、在对话里同意后再做。
-怎么可靠地认出"这是定时日常期间"是实现时要先定的一点。
+`--trigger schedule` 只是标记"定时叫醒的"（写进汇报），程序的行为和手动的一样。定时日常里 agent 不问问题、不等回答（用户多半不在），没同意过的事写进"要你决定的事"；用户自己说"跑一次日常"时照常当场问。
 
-会话开头的启动检查列出进行中的目标、官方日程；还没告诉过用户的问题（`unseen_problems`）和到点还没说的日程（`news.due`），第一句就说。
+**进行中的日常**：从 `daily run` 开始到 `daily done` 收尾。这段时间里不带 `--only` 的 `daily run` 被拒（先收尾或接着跑）；超过 6 小时没收尾的算放弃，下次开日常时自动收尾，汇报里记一条告警。
+**这段时间里 `guard allow` 一律被程序拒绝**（不分定时、手动，程序看自己记的状态，不看 agent 怎么说）：日常里本来就不该临时决定花真实货币，等收尾后用户在对话里同意再记。
+
+会话开头的启动检查列出进行中的目标、官方日程、没收尾的日常（`daily_open`）、还留着的 v0.1 系统定时（`legacy_schedule`）；没收尾的和到点还没说的日程（`news.due`），第一句就说。
+结果当场在会话里说，不再记"有没有告诉过用户"；`news told` 保留，免得同一条活动 / 维护消息每次都重复说。
 
 **长期目标**：靠每天日常推进；材料够了就养成，完成或用户放弃就移除。
 
@@ -167,26 +173,25 @@ MaaPilot/
   `maapilot` 命令整个放行；不直接跑 `maa` / `adb`、不碰 `private/guard/` 和锁靠 `AGENTS.md` 硬规则、模拟器锁和对账。
   规则只在 `maapilot/policy.py` 写一份，`maapilot dev rules` 生成 `.claude/settings.json` 和 `.codex/rules/`。
 
-## 9. 现状与迁移（10-20）
+## 9. 迁移（v0.2.0 已完成）
 
-第 7 节的"harness 触发"是定下的方向，代码里还是旧的做法，按下面迁移（实测和步骤见 roadmap）：
+v0.1 用系统定时任务（crontab / Windows 任务计划程序）启动日常、再无头叫起 agent、把结果推进会话；v0.2.0 改成第 7 节的 harness 触发：
 
-| 旧的（还在代码里） | 去向 |
+| 去掉的 | 改成 |
 |---|---|
-| 系统定时（`maapilot/oscompat/sched.py`、`launch.py`；`daily schedule / unschedule`） | 去掉，改由 harness 的会话内定时 |
-| 定时日常里无头叫起 agent（`config.yaml` 的 `agent`、`maapilot/hosts.py` 的调用和读输出） | 去掉，醒来的 agent 自己做；`daily done` 保留 |
-| 把结果推进会话（`codex queue`、记录会话编号）、`daily watch` | 去掉，结果本来就在会话里 |
-| 靠"是不是被日常进程叫起的"认出无人值守（`maapilot/tools/confirm.py`） | 改成按"定时日常期间"拒绝 `guard allow`；`report seen` / `news told` 不再拦 |
-| `host status / install` | 留下 Codex 信任文件夹这部分（规则要信任后才加载） |
+| 系统定时（`daily schedule`）、无头 agent（`config.yaml` 的 `agent`）、推送（`codex queue`、记录会话）、`daily watch` | harness 的会话内定时在用户会话里叫醒 agent，结果当场说 |
+| 靠环境变量、进程关系认出"定时日常期间" | 程序记下"进行中的日常"，期间拒绝 `guard allow` |
+| `report seen`、`unseen_problems` | 不需要了；`news told` 保留 |
 
-迁移前先实测：Claude Code（这台 Mac）、Codex 桌面版（Windows）的会话内定时能不能在项目里醒来、跑长命令、守住项目规则；实测通过后实现，旧的系统定时留一个版本作备用。
+`daily unschedule` 留着，只用来删掉 v0.1 留下的系统定时（`doctor` 的 `legacy_schedule` 会提示）。`host install codex` 留着信任文件夹（Codex 要信任后才加载项目规则）。
+升级的用户怎么做见 `docs/harnesses.md`「从 v0.1 升级」。
 
 ## 10. 验收
 
 1. 打开项目、启动 agent，说第一句话就进入 setup；确认模拟器、确认日常内容、定好定时后 setup 完成。
 2. 自由对话里能做到：跑一次日常；练干员（等级、技能、专精）；合成指定材料；复杂任务（模组任务、剿灭）。
 3. 定时日常到点在会话里醒来，按目标优先级做完，当场汇报；MAA 出错时 agent 当场接管。
-4. 没经用户同意的合成玉、源石减少会被发现并停下；定时日常期间 `guard allow` 被拒绝。
+4. 没经用户同意的合成玉、源石减少会被发现并停下；日常进行中（没收尾）`guard allow` 被拒绝。
 
 ## 11. 识别回归测试
 
