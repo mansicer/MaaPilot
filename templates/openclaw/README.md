@@ -15,7 +15,7 @@
 | `${HH:MM}` | 日常时间，例如 `04:40` |
 | `${HOUR}` / `${MINUTE}` | 同一个时间的 24 小时制和分钟，例如 `4` / `40` |
 | `${TZ}` | IANA 时区，例如 `Asia/Shanghai` |
-| `${CHANNEL}` / `${DELIVERY_TO}` | 定时结果投递的渠道和会话；不需要外部通知时删掉整个 `delivery` 块 |
+| `${CHANNEL}` / `${ACCOUNT_ID}` / `${DELIVERY_TO}` | 定时结果投递的渠道、账号和会话；只有一个默认账号时可以删掉 `accountId`，不需要外部通知时删掉整个 `delivery` 块 |
 
 ## 文件
 
@@ -26,10 +26,10 @@
 
 ## 接入
 
-1. 把 `agent-entry.json` 的 `agents.entries` 合并进配置，替换占位符。
+1. 用 `openclaw agents add ${AGENT_ID} --workspace "${REPO}" --agent-dir "${AGENT_DIR}" --model "${MODEL}"` 注册 agent，或把 `agent-entry.json` 的 `agents.entries` 合并进配置并替换占位符。
 2. 运行 `openclaw agents list` 或当前版本的等价命令，确认 agent 和 workspace 已载入。
 3. 在 MaaPilot 仓库里打开这个 agent 的会话，完成 `maapilot-setup`。
-4. 按 `config.yaml` 的 `schedule` 为每个时间点建一条 `cron-daily.json`。可以用当前版本的 `openclaw automations add` / Control UI 建，也可以直接调用 Gateway RPC；RPC 的 job 就是模板这个对象：
+4. 按 `config.yaml` 的 `schedule` 为每个时间点建一条 `cron-daily.json`。可以用当前版本的 `openclaw automations add` / Control UI 建，也可以直接调用 Gateway RPC；RPC 的 job 就是模板这个对象。`agentTurn` 没写 `toolsAllow` 时，OpenClaw 会按当前调度器策略补默认的工具权限；要收紧权限，按 OpenClaw 自己的 exec/approvals 配置做：
 
 ```sh
 openclaw gateway call cron.add --params "$(cat templates/openclaw/cron-daily.json)"

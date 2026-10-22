@@ -36,7 +36,8 @@ def test_daily_job_is_recurring_and_does_not_build_its_own_successor():
 
 def test_daily_job_has_no_deployment_specific_delivery():
     job = _json("cron-daily.json")
-    assert job["delivery"] == {"mode": "announce", "channel": "${CHANNEL}", "to": "${DELIVERY_TO}"}
+    assert job["delivery"] == {"mode": "announce", "channel": "${CHANNEL}", "accountId": "${ACCOUNT_ID}",
+                               "to": "${DELIVERY_TO}", "bestEffort": True}
     text = (OPENCLAW / "README.md").read_text(encoding="utf-8")
     assert "agents.entries" in text and "agents.list" in text
     assert "cron-oneshot.json" not in text

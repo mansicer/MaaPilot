@@ -82,6 +82,8 @@ OpenClaw 也支持一次性 `at` 任务，但 10-22 实测出现过任务到期�
 
 OpenClaw 的 `sessionTarget: "isolated"` 会在独立任务会话里运行，不继承用户对话；适合无人值守的定时日常。需要用户现场拍板的事情应回报到主会话，由主会话转达。独立任务没有只在主会话提供的阻塞式 `ask_user`，agent 不应在定时任务里等待交互。
 
+`agentTurn` 任务的 `payload.toolsAllow` 省略时，OpenClaw 会按当前调度器策略补默认工具权限；MaaPilot 需要运行 `maapilot`、读写项目文件和看截图。需要收紧权限时用 OpenClaw 的 `tools.exec` / exec approvals 配置，模板不写死工具白名单。
+
 容器里跑要注意：
 
 - agent 的 workspace **必须**是仓库根目录，`AGENTS.md` 和 `.agents/skills` 都在那儿。

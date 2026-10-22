@@ -15,6 +15,8 @@
   "delivery": {
     "mode": "announce",
     "channel": "${CHANNEL}",
-    "to": "${DELIVERY_TO}"
+    "accountId": "${ACCOUNT_ID}",
+    "to": "${DELIVERY_TO}",
+    "bestEffort": true
   }
 }
