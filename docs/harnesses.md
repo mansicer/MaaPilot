@@ -10,10 +10,10 @@ MaaPilot 只做和游戏相关的部分（说明文档、skills、`maapilot` 工
 | 读图 | 看截图判断界面 |
 | 跑命令、读写文件，命令能跑很久（放后台等结束时叫醒，或前台够长） | 调 `maapilot`；`daily run` 要 20–60 分钟 |
 | 读项目里的说明和 skills | `AGENTS.md`、`.agents/skills/` |
-| 能按时唤醒 agent 并运行日常（会话内定时，或等价的定时任务） | 定时日常：到点跑日常、收尾并汇报 |
+| **会话里能按时醒来**（Claude Code / Codex 用会话内定时；OpenClaw 用等价的 Gateway 定时） | 定时日常：到点跑日常、收尾并汇报 |
 | （可选）项目级权限规则 | 护栏：`guard allow` 每次弹确认、不读森空岛凭据 |
 
-会话内定时的结果回到原会话；独立定时任务用 harness 的投递能力汇报。会话一直开着是前提：会话关了、定时过期了，由用户和 harness 处理。
+Claude Code / Codex 的会话内定时结果回到原会话；OpenClaw 的独立定时任务用 harness 的投递能力汇报。前者要求会话一直开着，后者要求 Gateway 一直运行；会话关了、定时过期了或 Gateway 停了，由用户和 harness 处理。
 
 ## 定时日常怎么定（各 harness 通用）
 

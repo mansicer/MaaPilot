@@ -66,7 +66,7 @@
 | `daily run / status` | `run` 操作 | 放行 | B |
 | `daily done` | 否（agent 收尾这次日常） | 放行 | B |
 | `daily unschedule` | 否（删 v0.1 留下的 crontab 行 / Windows 任务） | 放行 | B |
-| `host status` / `host install <claude\|codex>` | 否（`install codex` 改 Codex 的用户设置） | 放行 | A |
+| `host status` / `host install <claude\|codex\|openclaw>` | 否（`install codex` 改 Codex 的用户设置；`install openclaw` 只给步骤） | 放行 | A |
 | `report show / latest / list / write` | 否 | 放行 | B |
 
 权限规则是 `maapilot` 整个放行、只列例外，表里没列的新命令也放行。
@@ -716,7 +716,7 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
 
 ## daily —— 日常
 
-v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话或 harness 的独立任务会话里）。定时日常由 harness 的定时任务叫醒 agent，
+v0.2.0 起只有一种做法：**agent 在场**。Claude Code / Codex 在用户开着的会话里由会话内定时叫醒；OpenClaw 在 Gateway 的独立任务会话里由重复定时叫醒，
 由它跑 `daily run --trigger schedule`；项目不再自己定时、不再无头叫起 agent、不往会话里推消息（docs/design.md「运行方式」）。
 `daily run` 遇到要判断的事（某项失败、掉线、游戏要更新、有进行中的目标）就停下交回 agent；agent 处理完用 `--only` 接着跑，
 做完目标部分、领奖励、对账后用 `daily done` 收尾。

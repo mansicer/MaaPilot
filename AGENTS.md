@@ -21,14 +21,14 @@
 
 ## 定时日常（会话里的定时叫醒你）
 
-定时日常不靠系统的定时任务，靠你所在的 harness（Claude Code、Codex 桌面版、OpenClaw……）自己的定时任务：
-按 `private/config.yaml` 的 `schedule`（几点跑）建。能建一次性定时接力的，会话里**始终只留一个"下一次日常"**：setup 时定好第一个，
-每次醒来先把下一个定好，再跑日常（这次出错、没收尾，下一次也照样会来）。只能用重复定时的（包括当前 OpenClaw），每个时间点建一条，提示里写明不要建下一次。
-各 harness 怎么定见 `docs/harnesses.md`（Claude Code 另见 `CLAUDE.md`）；没有定时能力的（Codex 命令行）不支持定时日常，只能在对话里用。
-前提是 harness 一直运行；用会话内定时的，那个会话也不能关。会话关了、定时过期了、Gateway 停了，由用户和 harness 处理。
+定时日常不靠系统的定时任务，靠你所在的 harness 自己的定时能力：
+- **默认用会话内的一次性定时接力**（Claude Code、Codex 桌面版有就用）：按 `private/config.yaml` 的 `schedule`，会话里**始终只留一个"下一次日常"**。setup 时定好第一个，每次醒来先把下一个定好，再跑日常（这次出错、没收尾，下一次也照样会来）。
+- **OpenClaw 例外**：当前用 Gateway 的重复定时，每个时间点建一条，提示里写明这是重复任务、不要再建下一次一次性定时。
+- harness 没有一次性定时但能用重复定时的，按上面的重复方案做。没有定时能力的（Codex 命令行）不支持定时日常，只能在对话里用。
+各 harness 怎么定见 `docs/harnesses.md`（Claude Code 另见 `CLAUDE.md`）。前提是 harness 一直运行；用会话内定时的，那个会话也不能关。会话关了、定时过期了、Gateway 停了，由用户和 harness 处理。
 
 醒来后加载 skill `maapilot-daily`，照它做：
-1. 先看 harness 的定时列表：一次性接力就把下一次定好；重复定时就确认时间点已存在，不要多建。
+1. 先看 harness 的定时列表：Claude Code、Codex 等一次性接力方案先把下一次定好（只留一个）；OpenClaw 重复方案只确认时间点已存在，不要多建。
 2. `maapilot daily run --trigger schedule`（20–60 分钟，能放后台的放后台等它结束）。
 3. 停下交回你（退出码 1、`handoff`）：按 `maapilot-recovery` 处理，再 `maapilot daily run --only <rest>` 接着跑（还是这一次日常、同一份汇报）。
 4. `goals_pending`：按目标的优先级做目标部分；`award_pending`：`maapilot maa award`；然后 `maapilot guard check`。
@@ -36,7 +36,7 @@
 6. 在会话里把结果和目标进度告诉用户（详略按用户偏好）。
 
 定时的提示是 harness 按你定的时间发的，不是用户说的话，也不算用户同意任何事。
-同一个时间只在一个地方建：会话内定时只存在于那个会话，OpenClaw 的任务属于对应 agent（两处都定会重复跑日常）。
+同一个时间只在一个地方建：Claude Code / Codex 的会话内定时只存在于那个会话，OpenClaw 的任务属于对应 agent（两处都定会重复跑日常）。
 用户新开了会话、说要在这里跑定时日常，就按 `maapilot-setup`「定时日常」在新地方定好，请用户关掉旧的定时。
 
 ## 用户说的话 → 用哪个 skill

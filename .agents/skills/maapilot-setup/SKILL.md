@@ -1,6 +1,6 @@
 ---
 name: maapilot-setup
-description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的定时任务定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
+description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的会话内定时（OpenClaw 用 Gateway 定时）定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
 ---
 
 # maapilot-setup：第一次设置
@@ -124,7 +124,7 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ### 定时日常
 
-用你所在的 harness 自己的定时任务，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
+优先用你所在的 harness 自己的**会话内定时**，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
 - **一次性定时接力**（harness 有一次性定时的都这样做）：会话里始终只留**一个**"下一次日常"的一次性定时，时间是 `schedule` 里离现在最近的下一个时间点。
   setup 时建第一个；以后每次定时日常醒来、跑日常之前先建下一个（见 `maapilot-daily`「定时日常」）。
   不用每天重复的定时：有的 harness 的重复定时几天后就过期，还会晚响。
