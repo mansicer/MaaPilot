@@ -28,10 +28,10 @@
 | 读图 | 看截图判断界面 |
 | 跑命令、读写文件，命令能跑很久（放后台等结束时叫醒，或前台够长） | 调 `maapilot`；`daily run` 要 20–60 分钟 |
 | 读项目里的说明和 skills | `AGENTS.md`、`.agents/skills/` |
-| **会话里能按时醒来**（会话内定时任务） | 定时日常：到点在用户的会话里醒来，跑日常、当场汇报 |
+| 能按时唤醒 agent 并运行日常（会话内定时，或等价的定时任务） | 定时日常：到点跑日常、收尾并汇报 |
 | （可选）项目级权限规则 | 护栏：`guard allow` 每次弹确认、不读森空岛凭据 |
 
-定时用一次性的接力（会话里始终只留一个"下一次日常"，每次醒来先定好下一个），harness 没有一次性定时才用重复的。会话一直开着是前提：会话关了、定时任务过期了，由用户和 harness 处理，项目不管（10-20 用户定）。
+能建一次性定时接力的 harness 用一次性接力（始终只留一个"下一次日常"，每次醒来先定好下一个）；没有可靠一次性定时或只能用重复定时的（OpenClaw）按时间点各建一条，并避免 agent 再建下一次。harness 和会话一直开着是前提：会话关了、定时任务过期了，由用户和 harness 处理，项目不管（10-20 用户定）。
 
 目前的情况：
 
@@ -40,6 +40,7 @@
 | Claude Code（命令行、桌面版） | 有（`CronCreate` 一次性 / 重复定时；重复的 7 天后过期） | 长命令放后台，结束时叫醒；10-20 命令行实测 |
 | Codex 桌面版 | 有（会话内定时任务，结果回到同一会话） | 要应用开着；10-20 用户在 Windows 上实测 |
 | Codex 命令行 | 没有（10-20 确认） | 只能在对话里用，不支持定时日常 |
+| OpenClaw | 有（Gateway 重复定时，独立任务会话） | 结果用 `delivery` 投递；一次性任务可靠性待查；10-22 实测 |
 
 各 harness 的具体做法（说明文件、skills 怎么找到、权限、定时怎么建、实测情况）写在 `docs/harnesses.md`。
 
@@ -142,7 +143,7 @@ MaaPilot/
 
 **自由对话**：用户直接说要做的事，agent 加载对应 skill 去做，出错当场处理（`maapilot-recovery`）。例如"把某某练到精2" → `maapilot-goals` 判断能不能马上做，能就 `maapilot-training` 直接做，不能就报数后写进目标。
 
-**定时日常**（harness 触发）：setup 时 agent 用 harness 的会话内定时，按 `config.yaml` 的 `schedule` 在用户的会话里定好下一次（一次性定时接力，见第 2 节），
+**定时日常**（harness 触发）：setup 时 agent 用 harness 的定时任务，按 `config.yaml` 的 `schedule` 定好下一次（能用一次性就接力，否则用重复定时，见第 2 节），
 提示写成自足的一句（"定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"，到点时前面的对话可能已被压缩）。到点 agent 在同一个会话里醒来：
 
 1. 先定好下一次日常的一次性定时（只留一个）：这次出错、没收尾，下一次照样会来。
@@ -179,7 +180,7 @@ v0.1 用系统定时任务（crontab / Windows 任务计划程序）启动日常
 
 | 去掉的 | 改成 |
 |---|---|
-| 系统定时（`daily schedule`）、无头 agent（`config.yaml` 的 `agent`）、推送（`codex queue`、记录会话）、`daily watch` | harness 的会话内定时在用户会话里叫醒 agent，结果当场说 |
+| 系统定时（`daily schedule`）、无头 agent（`config.yaml` 的 `agent`）、推送（`codex queue`、记录会话）、`daily watch` | harness 的定时任务叫醒 agent；会话内结果当场说，独立任务按配置投递 |
 | 靠环境变量、进程关系认出"定时日常期间" | 程序记下"进行中的日常"，期间拒绝 `guard allow` |
 | `report seen`、`unseen_problems` | 不需要了；`news told` 保留 |
 

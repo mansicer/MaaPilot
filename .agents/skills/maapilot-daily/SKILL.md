@@ -25,13 +25,13 @@ description: 明日方舟日常 via MaaPilot —— 定时日常到点叫醒你�
 
 ## 定时日常（到点叫醒你）
 
-harness 的会话内定时到点，在用户的会话里给你一句"定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"（setup 时定好的，见 `maapilot-setup`「定时日常」）。
+harness 的定时任务到点唤醒你。会话内定时会在原会话里；OpenClaw 等独立任务会话不会继承用户对话，结果按 harness 的投递设置发出。提示里会写"定时日常（04:40）"（setup 时定好的，见 `maapilot-setup`「定时日常」）。
 这句提示不是用户说的话，不算用户同意任何事。用户多半不在：按 AGENTS.md「用户不在的时候」做，**不问问题、不等回答**，
 没同意过的事（目标和偏好之外的花费、第一次遇到而记忆里没答案的）写进总结"要你决定的事"，接着做别的。用户之后在会话里回话了，再当平常的对话处理。
 
-1. **先定好下一次**（在跑日常之前，这样这次出错、没收尾，下一次也照样会来）：看 harness 的定时列表，
+1. **先确认下一次**（在跑日常之前）：看 harness 的定时列表，
    没有"下一次日常"的一次性定时，就按 `config.yaml` 的 `schedule` 里离现在最近的下一个时间点建一个（做法见 `maapilot-setup`「定时日常」）；已经有了就不再建，只留一个。
-   harness 用的是每天重复的定时（没有一次性定时的）就不用管这一步。
+   harness 用的是每天重复的定时（包括当前 OpenClaw）就只确认时间点存在，**不要再建一次性定时**，否则会和重复任务重复跑。
 2. `maapilot daily run --trigger schedule`（20–60 分钟；能在后台命令结束时叫醒你的宿主放后台跑，否则前台等它结束）。
 3. 看结果（见下面「跑完看结果」）：交回你的按 `maapilot-recovery` 处理，再 `maapilot daily run --only <rest>` 接着跑，一轮下来直到跑完。
 4. `goals_pending: true`：按「目标部分」做；`award_pending: true`：目标部分做完后 `maapilot maa award`（奖励要在刷理智之后领）。然后 `maapilot guard check`。

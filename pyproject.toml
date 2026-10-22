@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "maapilot"
 dynamic = ["version"]
-description = "明日方舟账号助手：给 Claude Code 用的命令行工具"
+description = "明日方舟账号助手：给 agent 用的命令行工具"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
 dependencies = [

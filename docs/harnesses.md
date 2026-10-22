@@ -10,10 +10,10 @@ MaaPilot 只做和游戏相关的部分（说明文档、skills、`maapilot` 工
 | 读图 | 看截图判断界面 |
 | 跑命令、读写文件，命令能跑很久（放后台等结束时叫醒，或前台够长） | 调 `maapilot`；`daily run` 要 20–60 分钟 |
 | 读项目里的说明和 skills | `AGENTS.md`、`.agents/skills/` |
-| **会话里能按时醒来**（会话内定时任务） | 定时日常：到点在用户的会话里醒来，跑日常、当场汇报 |
+| 能按时唤醒 agent 并运行日常（会话内定时，或等价的定时任务） | 定时日常：到点跑日常、收尾并汇报 |
 | （可选）项目级权限规则 | 护栏：`guard allow` 每次弹确认、不读森空岛凭据 |
 
-结果就在会话里当场说，不需要另外的通知功能。会话一直开着是前提：会话关了、定时过期了，由用户和 harness 处理。
+会话内定时的结果回到原会话；独立定时任务用 harness 的投递能力汇报。会话一直开着是前提：会话关了、定时过期了，由用户和 harness 处理。
 
 ## 定时日常怎么定（各 harness 通用）
 
@@ -64,22 +64,70 @@ MaaPilot 只做和游戏相关的部分（说明文档、skills、`maapilot` 工
 没有会话内定时（10-20 确认），**不支持定时日常**，只能在对话里用（"跑一次日常"、练干员……）。
 说明文件、skills、权限、PATH 同 Codex 桌面版。想要定时日常，改用 Codex 桌面版或 Claude Code。
 
+## OpenClaw
+
+OpenClaw 是一个常驻的 Gateway：agent 有独立的 workspace，定时用 Gateway 自己的 cron。MaaPilot 不需要为它生成项目级规则文件，也不用链接 skills。本节的配置格式按 OpenClaw 2026.10 及以后验证；旧配置里的 `agents.list` 可用 `openclaw doctor --fix` 迁移到 `agents.entries`。
+
+| 项 | 做法 |
+|---|---|
+| 说明文件 | 直接用 `AGENTS.md`（OpenClaw 每次会话开头读 workspace 的 `AGENTS.md`，不用另写） |
+| skills | **不用链接**：`<workspace>/.agents/skills` 是 OpenClaw 的原生 skills 目录（优先级仅次于 `<workspace>/skills`），8 个 maapilot skill 直接可见 |
+| 接入 | 把本仓库注册成 `agents.entries.<id>` 下的 agent，`workspace` 指向仓库根目录；片段见 `templates/openclaw/agent-entry.json` |
+| 权限 | 没有项目规则文件；用 `tools.exec.ask` / exec approvals 做护栏（可选，默认不拦） |
+| 定时 | 每个日常时间点建一条重复任务（`schedule.kind="cron"` + `tz`），`payload.kind="agentTurn"`，`agentId` 指到本 agent；片段见 `templates/openclaw/cron-daily.json` |
+| 长命令 | `exec` 前台/后台 + `process` 轮询；`daily run` 把 `timeoutSeconds` 给到 5400（和 `task_timeout_min` 对齐） |
+| 汇报 | 可选用 `delivery.mode="announce"` 投递到指定渠道；模板里用占位符，不绑定具体平台 |
+
+OpenClaw 也支持一次性 `at` 任务，但 10-22 实测出现过任务到期未执行、记录里没有 `lastRunAtMs`、任务仍残留的情况。在调度器行为确认前，MaaPilot 用重复 cron，避免日常依赖“上一轮创建下一轮”的链条。重复任务的提示必须明确“这是重复定时，不要再建下一次”，否则 `maapilot-daily` 会按一次性接力的规则多建一条。
+
+OpenClaw 的 `sessionTarget: "isolated"` 会在独立任务会话里运行，不继承用户对话；适合无人值守的定时日常。需要用户现场拍板的事情应回报到主会话，由主会话转达。独立任务没有只在主会话提供的阻塞式 `ask_user`，agent 不应在定时任务里等待交互。
+
+容器里跑要注意：
+
+- agent 的 workspace **必须**是仓库根目录，`AGENTS.md` 和 `.agents/skills` 都在那儿。
+- 模拟器在宿主机、agent 在容器里时，adb 用 `host.docker.internal:<端口>`（MuMu 12 默认 16384，每多开一个实例 +32），模拟器里要打开 ADB 调试。
+- 容器重建或宿主机重启后 adb 连接可能丢失。定时提示应在 `daily run` 前确认设备已连接；必要时重新 `adb connect`。
+- `.openclaw/` 是 OpenClaw 往 workspace 里写状态的地方，已在 `.gitignore` 里。
+- 不要往仓库里放 `SOUL.md` / `USER.md` / `IDENTITY.md` / `TOOLS.md` / `HEARTBEAT.md`：那是每个 agent 自己的 bootstrap 文件，缺了 OpenClaw 照常跑（只是提示里多一条"文件缺失"）。真不想让它生成，配 `agents.defaults.skipBootstrap`。
+
+实测（10-21 至 10-22，OpenClaw 2026.10.5，Linux 容器 + Windows 宿主机 MuMu 12）：
+
+- `maapilot doctor` 全绿（`ok_all: true`），截图 1600×900 约 0.2–0.6 秒一张，`input` 能发点击。
+- adb / maa-cli 装在项目 `.tools/`（`maapilot tools install adb` / `maa-cli`），`doctor --fix` 补齐 OCR 模型、数据表、独立 MaaCore v6.20.1。
+- 定时：重复 cron 到点唤醒，agent 启动任务后 52 秒完成并成功投递；`timeoutSeconds: 5400` 支撑长命令，实测未超时。
+- 一次性 `at` 任务在 10-22 出现到期未执行；这版接入不依赖一次性接力。
+- 容器里没有 `crontab` 时，`doctor` 的 `legacy_schedule` 项会报 false；这是 v0.1 遗留检查，不影响 OpenClaw 使用。截图 / OCR 测试在缺桌面依赖的容器里可能报错，验证时要先排除环境问题。
+- OpenClaw 2026.10.5 要求 Node 24.16+ 或 26.1+；实际测试环境曾有 Node 24.14 能启动，但不要把它当成受支持版本，部署时按 OpenClaw 官方要求安装 Node。
+
 ## 从 v0.1 升级
 
-v0.1 用系统的定时任务启动日常、无头叫起 agent、把结果推进会话；v0.2.0 起改成上面的会话内定时。升级的用户：
+v0.1 用系统的定时任务启动日常、无头叫起 agent、把结果推进会话；v0.2.0 起改成上面的 harness 定时。升级的用户：
 1. 删掉旧的系统定时（crontab 里本项目的那一行、Windows "任务计划程序" `MaaPilot` 文件夹里本项目的任务）：启动检查和 `doctor` 会报 `legacy_schedule`，
    agent 先 `maapilot daily unschedule --dry-run` 给用户看，用户同意后 `maapilot daily unschedule`。
-2. 按 skill `maapilot-setup`「定时日常」在会话里定好第一个定时。
+2. 按 skill `maapilot-setup`「定时日常」在 harness 里定好第一个定时。
 3. 升级前就开着的会话：让 agent 重新读一遍 `AGENTS.md`，停掉它还在后台挂着的 `daily watch`（这个命令已经没有了）；最好直接重开一个会话。
 4. `config.yaml` 里的 `agent`、`schedule_options` 用不到了，可以删（`doctor` 的 `agent_config` 会提示）。
 5. 在 Windows 上靠 Codex 命令行无头跑定时日常的：改用 Codex 桌面版。
 
 ## 接一个新的 harness
 
-1. **核对要求**：读图、跑长命令、读 `AGENTS.md` 和 skills、会话内定时（对照最上面的表）。没有会话内定时的只能在对话里用。
+1. **核对要求**：读图、跑长命令、读 `AGENTS.md` 和 skills、能按时唤醒 agent 的定时能力（对照最上面的表）。没有定时能力的只能在对话里用。
 2. **说明文件**：harness 读 `AGENTS.md` 就不用另写；读别的文件名的（例如 `CODEBUDDY.md`），写一个引入 `AGENTS.md` 的，只加这个 harness 专用的几条（定时工具叫什么、长命令怎么等）。
 3. **skills**：harness 不读 `.agents/skills/` 的，建一个指向它的链接（像 `.claude/skills`）。
 4. **权限**（可选）：在 `maapilot/policy.py` 加生成这个 harness 规则文件的部分，`maapilot dev rules` 生成，`tests/test_policy.py` 核对；规则要信任文件夹才加载的，在 `host install` 里加上。
-5. **实测**，结果写进本文件这个 harness 的一节：会话内定时按时醒来（一次性的有没有、重复的会不会过期、准不准）；`maapilot` 命令放行、`guard allow` 弹确认；
+5. **实测**，结果写进本文件这个 harness 的一节：定时按时唤醒（一次性的有没有、重复的会不会过期、准不准）；`maapilot` 命令放行、`guard allow` 弹确认；
    长命令怎么等结束；读图；真跑一次完整的定时日常。
 6. README「支持哪些 Agent」的表里加一行。
+
+## 接一个新的 harness（补充：要不要写代码）
+
+判断标准：**只有"找程序"和"权限规则格式"需要动代码，别的都是文档**。
+
+- 找程序（`maapilot host status / install` 用）：在 `maapilot/hosts.py` 的 `HOSTS` 加名字 + 一组 `*_FALLBACKS`，
+  再在 `maapilot/tools/host_cmd.py` 的 `status()` / `install()` 里给它一个分支（OpenClaw 无"信任目录"，
+  `install` 只返回接下来要做什么，不改用户配置）。
+- 权限规则格式（有项目级规则文件的才需要）：在 `maapilot/policy.py` 加生成逻辑，`maapilot dev rules` 生成，
+  `tests/test_policy.py` 核对。OpenClaw 没有这一步。
+- 定时**不要**写进代码：v0.2 起定时由 harness 在会话里建（`docs/design.md` 第 1 条设计哲学），
+  `hosts.py` 只负责"程序在哪"。给新 harness 的定时模板放 `templates/<harness>/`，由 agent 按 skill 去建。
+- skills：先确认 harness 读不读 `.agents/skills`。读就不用链接（OpenClaw 读），不读就补链接。

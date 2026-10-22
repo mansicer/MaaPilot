@@ -1,6 +1,6 @@
 ---
 name: maapilot-setup
-description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的会话内定时定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
+description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的定时任务定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
 ---
 
 # maapilot-setup：第一次设置
@@ -124,15 +124,16 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ### 定时日常
 
-用你所在的 harness 自己的**会话内定时**，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
+用你所在的 harness 自己的定时任务，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
 - **一次性定时接力**（harness 有一次性定时的都这样做）：会话里始终只留**一个**"下一次日常"的一次性定时，时间是 `schedule` 里离现在最近的下一个时间点。
   setup 时建第一个；以后每次定时日常醒来、跑日常之前先建下一个（见 `maapilot-daily`「定时日常」）。
   不用每天重复的定时：有的 harness 的重复定时几天后就过期，还会晚响。
+- **OpenClaw**：当前用 Gateway 的重复定时，不用一次性接力；每个 `schedule` 时间点建一条，提示里写明“这是重复定时，不要再建下一次”。做法和原因见 `docs/harnesses.md`「OpenClaw」。
 - 提示写成单看这一句就知道要做什么的（到点时前面的对话可能已经被压缩掉了）："定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"（括号里写这一次的时间）。
 - 建之前先列一遍 harness 里已有的定时：已经有下一次日常的就不再建（只留一个）。建完再列一遍，**以 harness 里读回来的为准**：时间对上了才告诉用户"下一次是 10 月 21 日（明天）04:40"；对不上就说没定成。
 - 改时间：删掉还没到的那个，按新时间建下一个。不要定时了：删掉还没到的那个。
 - harness 没有一次性定时、只有重复的：每个时间点建一个每天重复的定时，有过期的照 `docs/harnesses.md` 跟用户说清多久要续一次。
-- harness 没有会话内定时（Codex 命令行）：定时日常做不了，跟用户说清：可以在对话里说"跑一次日常"；想要定时，换用 Claude Code 或 Codex 桌面版。setup 照样做完。
+- harness 没有定时能力（Codex 命令行）：定时日常做不了，跟用户说清：可以在对话里说"跑一次日常"；想要定时，换用 Claude Code、Codex 桌面版或 OpenClaw。setup 照样做完。
 - 跟用户说清：到点时电脑要开着、不睡眠，模拟器要能连上（最好开着），**这个会话不要关**（Codex 桌面版要应用开着）。
 
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。

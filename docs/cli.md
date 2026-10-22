@@ -716,7 +716,7 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
 
 ## daily —— 日常
 
-v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。定时日常也是 harness 的会话内定时到点在会话里叫醒 agent，
+v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话或 harness 的独立任务会话里）。定时日常由 harness 的定时任务叫醒 agent，
 由它跑 `daily run --trigger schedule`；项目不再自己定时、不再无头叫起 agent、不往会话里推消息（docs/design.md「运行方式」）。
 `daily run` 遇到要判断的事（某项失败、掉线、游戏要更新、有进行中的目标）就停下交回 agent；agent 处理完用 `--only` 接着跑，
 做完目标部分、领奖励、对账后用 `daily done` 收尾。
@@ -900,23 +900,26 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 ## host —— agent 宿主（不碰模拟器）
 
-用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建会话内定时见 docs/harnesses.md）。程序的找法在 `maapilot/hosts.py`：
-写了 `tools.<宿主>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），
+用户可以在 Claude Code、Codex 或 OpenClaw 里用 MaaPilot（各 harness 怎么接、怎么定时见 docs/harnesses.md）。程序的找法在 `maapilot/hosts.py`：
+写了 `tools.<宿主>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`CODEX_FALLBACKS` / `CLAUDE_FALLBACKS` / `OPENCLAW_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），
 Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`。
 
-`host status`（只读）：`{"hosts": {"claude": {path, trusted}, "codex": {path, trusted}}}`：`trusted` 是这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`，
+`host status`（只读）：`{"hosts": {"claude": {path, trusted}, "codex": {path, trusted}, "openclaw": {path, trusted: null}}}`：`trusted` 是这个文件夹被信任过没有——Claude Code 看 `~/.claude.json`，
 Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（上级目录信任也算；没信任时 Codex 不加载 `.codex/rules/`）。v0.1 的 `agent`、`session(s)` 去掉了。
+OpenClaw 没有项目信任目录这一步，所以 `trusted` 固定为 `null`。
 
-`host install <claude|codex> [--dry-run]`（权限放行：改的是用户的 Codex 设置，agent 先在对话里问过用户）：
+`host install <claude|codex|openclaw> [--dry-run]`（权限放行：改的是用户的 Codex 设置，agent 先在对话里问过用户）：
 - `codex`：Codex 的用户设置（`$CODEX_HOME/config.toml`，默认 `~/.codex/config.toml`）里还没信任这个文件夹就在末尾追加
   `[projects."<仓库>"] trust_level = "trusted"`（别的不动；已有这一段但不是 trusted → `codex_untrusted`，请用户自己改），
   再用 `codex execpolicy check` 核对 `.codex/rules/maapilot.rules`（`rules.ok`）。`next` 是还要做的事（`--dry-run` 时再不带它跑一次；规则核对没过时告诉开发者）。
   `{"host", "path", "config", "append", "changed", "trusted", "rules": {ok, results}, "next": [...]}`。
 - `claude`：Claude Code 的信任只能在交互里接受，只报告 `trusted` 和做法。
+- `openclaw`：只检查程序、返回注册 agent 和建重复定时的步骤，不改 OpenClaw 配置；找不到程序时退出码 5（`no_openclaw`）。
 
 | 错误码 | 退出码 | 什么时候 |
 |---|---|---|
 | `no_codex` | 5 | 找不到 codex |
+| `no_openclaw` | 5 | 找不到 openclaw |
 | `codex_config_unreadable` | 5 | Codex 的 config.toml 读不了（TOML 写错） |
 | `codex_untrusted` | 2 | 用户在 Codex 里明确没信任这个文件夹 |
 
@@ -985,8 +988,8 @@ private/
 | `emulator.adb` | adb 程序 | `adb` |
 | `server` | 客户端（MAA 的 client_type）：`Official` / `Bilibili` / `YoStarEN` / `YoStarJP` / `YoStarKR` / `txwy` | `Official` |
 | `agent` | v0.1 的设置（定时日常叫起哪个无头 agent），v0.2.0 起不用：写了就忽略，`doctor` 的 `agent_config` 提示可以删 | 无 |
-| `tools.maa` / `tools.claude` / `tools.codex` | maa、claude、codex 程序（`maa` 写程序名时先用 `.tools/` 里装好的；claude / codex 给 `host status / install`、`doctor` 找程序用） | `maa` / `claude` / `codex` |
-| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建会话内定时（`maapilot-setup`、docs/harnesses.md） | `["04:40", "16:40"]` |
+| `tools.maa` / `tools.claude` / `tools.codex` / `tools.openclaw` | maa、claude、codex、openclaw 程序（`maa` 写程序名时先用 `.tools/` 里装好的；其余给 `host status / install`、`doctor` 找程序用） | `maa` / `claude` / `codex` / `openclaw` |
+| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建定时任务（`maapilot-setup`、docs/harnesses.md） | `["04:40", "16:40"]` |
 | `schedule_options` | v0.1 的设置（Windows 任务计划程序的补跑、唤醒），不用了：写了就忽略（`agent_config` 提示可以删） | 无 |
 | `daily.tasks` | 按顺序跑的 MAA 日常项：`startup` `recruit` `infrast` `mall` `annihilation` `award` | 全部 |
 | `daily.default_stage` | 没有进行中的目标时刷哪关 | `"1-7"` |

@@ -9,6 +9,7 @@
     <img alt="platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blueviolet">
     <img alt="Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-D97757">
     <img alt="Codex" src="https://img.shields.io/badge/agent-Codex-412991">
+    <img alt="OpenClaw" src="https://img.shields.io/badge/agent-OpenClaw-2f6fed">
     <img alt="MAA" src="https://img.shields.io/badge/powered%20by-MAA-ff69b4">
     <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </div>
@@ -19,7 +20,7 @@
 
 每天按时做完日常、当场汇报；练干员、合材料、打关卡，跟它说一声就行
 
-底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 里的 agent 判断做什么
+底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 里的 agent 判断做什么
 
 </div>
 
@@ -27,7 +28,7 @@
 
 ## 下载与安装
 
-需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code) 或 [Codex](https://developers.openai.com/codex) 二选一（要定时日常的话，Codex 用桌面版）。
+需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 之一（要定时日常的话，Codex 用桌面版）。
 
 ### 用 Claude Code
 
@@ -54,16 +55,22 @@ codex
 - 装运行环境要联网，Codex 会请你批准在沙箱外跑这几条命令，点同意就行；
 - 设置里助手会请你同意一次 `maapilot host install codex`（在 Codex 的设置里信任这个文件夹），信任了项目的命令规则才生效。
 
+### 用 OpenClaw
+
+把本仓库注册成 OpenClaw agent，并把 agent 的 `workspace` 指向仓库根目录：`AGENTS.md` 和 `.agents/skills/` 必须在这个目录下。配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)，容器、模拟器和定时限制见 [`docs/harnesses.md`](docs/harnesses.md) 的「OpenClaw」一节。
+
+OpenClaw 的定时日常使用 Gateway 的重复定时。每个日常时间点建一条，任务提示里要说明“这是重复定时，不要再建下一次一次性定时”，否则 `maapilot-daily` 会按一次性接力的规则多建一条。
+
 ### 在 Windows 上
 
-步骤和上面一样，在 PowerShell 里 clone、打开 Claude Code 或 Codex，说一句"开始"。另外注意：
+步骤和上面一样，在 PowerShell 里 clone、打开其中一个 agent，说一句"开始"。另外注意：
 
 - clone 时最好加上 `-c core.symlinks=true`（`git clone -c core.symlinks=true https://github.com/mansicer/MaaPilot.git`）；忘了也没关系，设置时会补上。
 - 项目文件夹、Python、MAA、adb 都装在普通目录（例如 `C:\Users\<你>\` 下）：在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录，别的程序看不到。
 
 ### 从 v0.1 升级
 
-v0.2.0 起定时日常改由 agent 自己的会话内定时来跑，不再用系统的定时任务：
+v0.2.0 起定时日常改由 agent 所在 harness 的定时任务来跑，不再用系统的定时任务：
 - 旧的系统定时（macOS 的 crontab 那一行、Windows "任务计划程序"里的任务）要删掉：更新后打开会话，启动检查会提醒，跟助手说"删掉"就行（它会先给你看要删什么）。
 - 再让助手在会话里定好定时日常（"把定时日常设一下"），这个会话之后别关。
 - 更新前就开着的会话：让助手重新读一遍 AGENTS.md；它还在后台挂着的旧的"盯着日常"命令可以停掉（新版已经没有了），最好直接重开一个会话。
@@ -76,16 +83,17 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 1. 多模态输入（支持图片输入）
 2. 长时工具调用：bash 命令，文件访问
 3. 读取 AGENTS 文档和使用 skills
-4. 会话里能按时醒来：会话内的定时任务，到点在同一个会话里叫醒 agent
+4. 能按时唤醒 agent 并运行日常：会话内定时，或等价的 Gateway 定时任务
 5. 项目级权限（可选）：限制 Agent 直接操控模拟器（如通过 adb）
 
-1–3 是在对话里使用的前提，4 是定时日常的前提。结果就在会话里当场说，不另外要通知功能。
+1–3 是在对话里使用的前提，4 是定时日常的前提。会话内定时的结果回原会话；OpenClaw 的独立定时任务可以通过 `announce` 投递结果。
 
 | Agent | 对话里用 | 定时日常 |
 |---|---|---|
 | Claude Code（命令行、桌面版） | 支持 | 支持 |
 | Codex 桌面版 | 支持 | 支持 |
 | Codex 命令行 | 支持 | 不支持（没有会话内定时） |
+| OpenClaw | 支持 | 支持（Gateway 重复定时） |
 
 各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses.md`](docs/harnesses.md)，接新的 agent 也看那里。
 
@@ -104,7 +112,7 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 
 ### 怎么跟它说
 
-在这个文件夹里打开 Claude Code 或 Codex，直接说想做的事：
+在这个文件夹里打开 Claude Code、Codex 或 OpenClaw，直接说想做的事：
 
 - "现在跑一次日常" / "今天做了什么"
 - "把遥练到精2" / "给能天使专三" / "目标进度怎么样"
