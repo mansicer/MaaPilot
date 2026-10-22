@@ -1,0 +1,20 @@
+{
+  "name": "MaaPilot 日常 ${HH:MM}",
+  "agentId": "${AGENT_ID}",
+  "sessionTarget": "isolated",
+  "schedule": {
+    "kind": "cron",
+    "expr": "${MINUTE} ${HOUR} * * *",
+    "tz": "${TZ}"
+  },
+  "payload": {
+    "kind": "agentTurn",
+    "message": "定时日常（${HH:MM}）：这是重复定时，不要按 skill maapilot-daily 再建下一次一次性定时。按 skill maapilot-daily 跑 MaaPilot 日常；跑完用 maapilot daily done 收尾并汇报。",
+    "timeoutSeconds": 5400
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "${CHANNEL}",
+    "to": "${DELIVERY_TO}"
+  }
+}

@@ -1,9 +1,10 @@
-"""`maapilot host status / install <claude|codex>`：agent 宿主的准备情况与安装（见 maapilot.hosts）。契约见 docs/cli.md「host」。
+"""`maapilot host status / install <claude|codex|openclaw>`：agent 宿主的准备情况与安装（见 maapilot.hosts）。契约见 docs/cli.md「host」。
 
 install codex：在 Codex 的用户配置（$CODEX_HOME/config.toml，默认 ~/.codex/config.toml）里信任这个文件夹——
 不信任时 Codex 不加载项目的 `.codex/rules/`，会话里的 codex 既用不了放行的 maapilot，也拦不住直接跑 adb / maa。
 只追加一段 `[projects."<仓库路径>"]`，别的不动；再用 `codex execpolicy check` 核对规则。改用户的设置，agent 先在对话里问过用户。
 install claude：Claude Code 的信任只能在交互里接受，这里只检查、给出做法。
+install openclaw：OpenClaw 没有项目规则文件、也不用信任目录；这里只检查程序并给出注册 agent 的步骤，不改用户配置。
 """
 from __future__ import annotations
 
@@ -84,13 +85,18 @@ def _rules_check(binary: str) -> dict:
 
 
 def status() -> dict:
-    """两个宿主的程序在哪、信没信任这个文件夹。"""
+    """各宿主的程序在哪、信没信任这个文件夹。"""
     cfg = config.load_or_defaults()
     from maapilot.tools import doctor
     out = {"hosts": {}}
     for h in hosts.HOSTS:
         path = hosts.resolve(cfg, h, which=doctor.PROBE.which)      # 和 doctor 找的是同一个
-        trusted = codex_trusted(paths.ROOT) if h == "codex" else doctor.claude_trusted(paths.ROOT)
+        if h == "codex":
+            trusted = codex_trusted(paths.ROOT)
+        elif h == "openclaw":
+            trusted = None                     # OpenClaw 没有"信任目录"这一步：agent 在配置里按 workspace 直接读
+        else:
+            trusted = doctor.claude_trusted(paths.ROOT)
         out["hosts"][h] = {"path": path, "trusted": trusted}
     return out
 
@@ -102,6 +108,17 @@ def install(host: str, dry_run: bool) -> dict:
         t = doctor.claude_trusted(paths.ROOT)
         return {"host": host, "trusted": t, "changed": False,
                 "next": None if t else "在这个文件夹里交互地启动一次 claude，接受\"信任这个文件夹\"的提示"}
+    if host == "openclaw":
+        # OpenClaw 没有项目规则文件、也不用信任目录：接入方式是把它注册成一个 agent（workspace 指向本仓库），
+        # 定时日常由 agent 在 Gateway 里建。做法和实测见 docs/harnesses.md 的 OpenClaw 一节。
+        binary = hosts.resolve(cfg, "openclaw", fallback=True)
+        if not binary:
+            raise CliError("no_openclaw", "找不到 openclaw", exit=ENVIRONMENT,
+                           hint="先装 OpenClaw；装在别处就在 config.yaml 的 tools.openclaw 写绝对路径")
+        return {"host": host, "path": binary, "trusted": None, "changed": False,
+                "next": ["按 docs/harnesses.md「OpenClaw」一节把本仓库注册成一个 agent",
+                         "把 templates/openclaw/agent-entry.json 合并进 openclaw.json 的 agents.entries",
+                         "用 templates/openclaw/cron-daily.json 建重复定时；不要建一次性接力"]}
     binary = hosts.binary(cfg, "codex")
     if not Path(binary).is_absolute():
         raise CliError("no_codex", f"找不到 codex（{binary}）", exit=ENVIRONMENT,
@@ -144,11 +161,11 @@ def cmd_install(args):
 
 
 def register(sub) -> None:
-    g = sub.add_parser("host", help="agent 宿主（Claude Code / Codex）的准备情况与安装")
+    g = sub.add_parser("host", help="agent 宿主（Claude Code / Codex / OpenClaw）的准备情况与安装")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
-    p = gs.add_parser("status", help="两个宿主找不找得到、信没信任这个文件夹（只读）")
+    p = gs.add_parser("status", help="各宿主找不找得到、信没信任这个文件夹（只读）")
     p.set_defaults(func=cmd_status, command="host status")
-    p = gs.add_parser("install", help="让宿主加载项目的规则（codex：在 Codex 设置里信任这个文件夹）")
+    p = gs.add_parser("install", help="准备宿主（codex 信任文件夹；openclaw 只给接入步骤）")
     p.add_argument("host", choices=hosts.HOSTS)
     p.add_argument("--dry-run", action="store_true", help="只看要改什么，不改")
     p.set_defaults(func=cmd_install, command="host install")

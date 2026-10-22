@@ -1,6 +1,6 @@
-"""agent 宿主（Claude Code、Codex）的程序在哪：`host status / install`、doctor 用。
+"""agent 宿主（Claude Code、Codex、OpenClaw）的程序在哪：`host status / install`、doctor 用。
 
-v0.2.0 起项目不再无头叫起 agent、也不往会话里推消息：定时日常由 harness 的会话内定时在用户的会话里叫醒 agent。
+v0.2.0 起项目不再无头叫起 agent、也不往会话里推消息：定时日常由 harness 的定时任务叫醒 agent。
 这里只剩找程序：`tools.<宿主>` 写了就只认它，没写按 PATH → 常见安装位置找。Codex 要信任这个文件夹才加载项目的
 `.codex/rules/`（`maapilot host install codex`，见 tools/host_cmd.py）。config.yaml 里旧的 `agent` 不再用（写了就忽略，doctor 提示可以删）。
 """
@@ -10,11 +10,13 @@ import shutil
 
 from maapilot.oscompat import exe
 
-HOSTS = ("claude", "codex")
+HOSTS = ("claude", "codex", "openclaw")
 
 
 # PATH 上没有时再到这些常见位置找。%VAR% 没有的位置跳过，
 # 所以 Windows 的写法放在这里也不影响 macOS / Linux。Windows 上 %LOCALAPPDATA%\Programs\… 是猜的安装位置（没核实）
+OPENCLAW_FALLBACKS = ("~/.local/bin/openclaw", "/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw",
+                     r"%APPDATA%\npm\openclaw.cmd", r"%LOCALAPPDATA%\pnpm\openclaw.cmd", r"%USERPROFILE%\scoop\shims\openclaw.exe")
 CODEX_FALLBACKS = ("~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
                    r"%APPDATA%\npm\codex.cmd", r"%LOCALAPPDATA%\pnpm\codex.cmd", r"%USERPROFILE%\scoop\shims\codex.exe",
                    r"%USERPROFILE%\.local\bin\codex.exe", r"%LOCALAPPDATA%\Programs\OpenAI\Codex\codex.exe")
@@ -24,7 +26,11 @@ CLAUDE_FALLBACKS = ("~/.local/bin/claude", "~/.claude/local/claude", "/opt/homeb
 
 
 def fallbacks(host: str) -> tuple[str, ...]:
-    return CODEX_FALLBACKS if host == "codex" else CLAUDE_FALLBACKS
+    if host == "codex":
+        return CODEX_FALLBACKS
+    if host == "openclaw":
+        return OPENCLAW_FALLBACKS
+    return CLAUDE_FALLBACKS
 
 
 def resolve(cfg: dict, host: str, *, which=shutil.which, environ=None, fallback: bool = False) -> str | None:

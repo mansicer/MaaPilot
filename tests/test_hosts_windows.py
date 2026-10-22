@@ -101,7 +101,9 @@ def test_configured_tool_is_not_swapped_silently(monkeypatch):
 def test_windows_fallbacks_listed():
     assert r"%APPDATA%\npm\codex.cmd" in hosts.CODEX_FALLBACKS
     assert r"%USERPROFILE%\.local\bin\claude.exe" in hosts.CLAUDE_FALLBACKS
-    assert not [f for f in hosts.CODEX_FALLBACKS + hosts.CLAUDE_FALLBACKS if re.match(r"[A-Za-z]:\\", f)]  # 不写死盘符
+    assert r"%APPDATA%\npm\openclaw.cmd" in hosts.OPENCLAW_FALLBACKS
+    assert not [f for f in hosts.CODEX_FALLBACKS + hosts.CLAUDE_FALLBACKS + hosts.OPENCLAW_FALLBACKS
+                if re.match(r"[A-Za-z]:\\", f)]  # 不写死盘符
 
 
 def test_binary_and_codex_path_use_the_same_codex(env, codex, monkeypatch):
