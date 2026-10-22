@@ -102,6 +102,8 @@ def test_windows_fallbacks_listed():
     assert r"%APPDATA%\npm\codex.cmd" in hosts.CODEX_FALLBACKS
     assert r"%USERPROFILE%\.local\bin\claude.exe" in hosts.CLAUDE_FALLBACKS
     assert r"%APPDATA%\npm\openclaw.cmd" in hosts.OPENCLAW_FALLBACKS
+    assert r"%USERPROFILE%\.local\bin\openclaw.cmd" in hosts.OPENCLAW_FALLBACKS
+    assert "~/.openclaw/bin/openclaw" in hosts.OPENCLAW_FALLBACKS
     assert not [f for f in hosts.CODEX_FALLBACKS + hosts.CLAUDE_FALLBACKS + hosts.OPENCLAW_FALLBACKS
                 if re.match(r"[A-Za-z]:\\", f)]  # 不写死盘符
 

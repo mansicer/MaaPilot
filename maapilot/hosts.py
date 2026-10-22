@@ -15,7 +15,8 @@ HOSTS = ("claude", "codex", "openclaw")
 
 # PATH 上没有时再到这些常见位置找。%VAR% 没有的位置跳过，
 # 所以 Windows 的写法放在这里也不影响 macOS / Linux。Windows 上 %LOCALAPPDATA%\Programs\… 是猜的安装位置（没核实）
-OPENCLAW_FALLBACKS = ("~/.local/bin/openclaw", "/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw",
+OPENCLAW_FALLBACKS = ("~/.local/bin/openclaw", "~/.openclaw/bin/openclaw", "/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw",
+                     r"%USERPROFILE%\.local\bin\openclaw.exe", r"%USERPROFILE%\.local\bin\openclaw.cmd",
                      r"%APPDATA%\npm\openclaw.cmd", r"%LOCALAPPDATA%\pnpm\openclaw.cmd", r"%USERPROFILE%\scoop\shims\openclaw.exe")
 CODEX_FALLBACKS = ("~/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
                    r"%APPDATA%\npm\codex.cmd", r"%LOCALAPPDATA%\pnpm\codex.cmd", r"%USERPROFILE%\scoop\shims\codex.exe",
