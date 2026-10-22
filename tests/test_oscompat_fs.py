@@ -163,7 +163,6 @@ def test_make_dir_link_symlink(tmp_path):
 
 def test_imread_imwrite_non_ascii_path(tmp_path):
     np = pytest.importorskip("numpy")
-    pytest.importorskip("cv2")
     img = np.zeros((4, 6, 3), dtype=np.uint8)
     img[1, 2] = (10, 20, 30)
     p = tmp_path / "截图 目录" / "模板.png"
@@ -177,7 +176,6 @@ def test_imread_imwrite_non_ascii_path(tmp_path):
 
 
 def test_clears_templates_load():
-    pytest.importorskip("cv2")
     from maapilot.crew import clears
     clears._template.cache_clear()
     names = [p.stem for p in clears.TEMPLATES.glob("*.png")]
@@ -263,3 +261,25 @@ def test_divert_stdout_sends_fd1_to_stderr(tmp_path):
     assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
     assert json.loads(r.stdout.decode("utf-8"))["command"] == "goals list"
     assert "原生日志" in r.stderr.decode("utf-8")
+
+
+def test_no_cv2_import():
+    """cv2 和 MaaFramework 各带一份 OpenCV，macOS 上一起加载 objc 会报类重复：代码里不再 import cv2。"""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "maapilot"
+    hits = [str(p) for p in root.rglob("*.py") if re.search(r"^\s*(import cv2|from cv2)", p.read_text(encoding="utf-8"), re.M)]
+    assert hits == []
+
+
+def test_ccoeff_normed_finds_template():
+    np = pytest.importorskip("numpy")
+    from maapilot.crew import clears
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, (60, 80, 3), dtype=np.uint8)
+    tpl = img[20:35, 30:50].copy()
+    res = clears.ccoeff_normed(img, tpl)
+    dy, dx = np.unravel_index(int(np.argmax(res)), res.shape)
+    assert (dy, dx) == (20, 30) and abs(res[dy, dx] - 1) < 1e-6
+    flat = np.full((20, 20, 3), 7, dtype=np.uint8)
+    assert (clears.ccoeff_normed(flat, flat[:5, :5]) == 0).all()     # 方差为 0 的窗口记 0
