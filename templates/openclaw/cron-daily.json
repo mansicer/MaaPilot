@@ -9,7 +9,7 @@
   },
   "payload": {
     "kind": "agentTurn",
-    "message": "定时日常（${HH:MM}）：这是重复定时，不要按 skill maapilot-daily 再建下一次一次性定时。按 skill maapilot-daily 跑 MaaPilot 日常；跑完用 maapilot daily done 收尾并汇报。",
+    "message": "定时日常（${HH:MM}）：这是重复定时，不要按 skill maapilot-daily 再建下一次一次性定时。先读 private/memory/MEMORY.md（如存在），按 skill maapilot-daily 跑 MaaPilot 日常；跑完必须用 maapilot daily done 收尾。旧截图、后台完成通知、无变化的进度只内部处理，不逐条回复。最终仅给一条简短总结（结果、必要花费、失败及待决定事项），由 delivery 投递；不要另用消息工具或主会话重复转发。无人值守遇到未获授权事项就跳过并写入总结，不等待答复，也不自行扩大授权。",
     "timeoutSeconds": 5400
   },
   "delivery": {
@@ -17,6 +17,6 @@
     "channel": "${CHANNEL}",
     "accountId": "${ACCOUNT_ID}",
     "to": "${DELIVERY_TO}",
-    "bestEffort": true
+    "bestEffort": false
   }
 }

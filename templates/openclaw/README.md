@@ -15,7 +15,7 @@
 | `${HH:MM}` | 日常时间，例如 `04:40` |
 | `${HOUR}` / `${MINUTE}` | 同一个时间的 24 小时制和分钟，例如 `4` / `40` |
 | `${TZ}` | IANA 时区，例如 `Asia/Shanghai` |
-| `${CHANNEL}` / `${ACCOUNT_ID}` / `${DELIVERY_TO}` | 定时结果投递的渠道、账号和会话；只有一个默认账号时可以删掉 `accountId`，不需要外部通知时删掉整个 `delivery` 块 |
+| `${CHANNEL}` / `${ACCOUNT_ID}` / `${DELIVERY_TO}` | 定时结果投递的渠道、账号和会话；保留渠道提供的原始大小写，不需要外部通知时设置 `delivery.mode="none"` |
 
 ## 文件
 
@@ -36,4 +36,8 @@ openclaw gateway call cron.add --params "$(cat templates/openclaw/cron-daily.jso
 openclaw gateway call cron.list --json
 ```
 
-定时结果默认投递到 `delivery` 指定的会话；不需要外部通知就删掉 `delivery` 块。不要在仓库里放 `SOUL.md`、`USER.md`、`IDENTITY.md`、`TOOLS.md`、`HEARTBEAT.md` 这些 agent 自己的 bootstrap 文件；预置 workspace 可以设 `agents.defaults.skipBootstrap: true`。
+定时结果默认投递到 `delivery` 指定的会话；不需要外部通知时显式设置 `delivery.mode="none"`，避免宿主采用默认投递策略。模板用 `bestEffort=false` 暴露投递失败，最终简报只由 `delivery` 发送一次。收件人保留原始大小写，不从 session key 推导；任务执行成功和消息送达分别检查。完成接入后，经用户授权用不操作游戏的测试任务验证投递和去重，详见 [`OpenClaw 消息投递`](../../docs/harnesses.md#openclaw-消息投递)。
+
+如果另有主 agent 转交任务，也要将该节的交互阻塞反馈、渠道发送状态检查和重复结果静默规则加入主 agent 的说明文件；只修改 MaaPilot 的提示词无法约束主 agent 的转发行为。
+
+不要在仓库里放 `SOUL.md`、`USER.md`、`IDENTITY.md`、`TOOLS.md`、`HEARTBEAT.md` 这些 agent 自己的 bootstrap 文件；预置 workspace 可以设 `agents.defaults.skipBootstrap: true`。
