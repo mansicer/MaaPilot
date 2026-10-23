@@ -1,6 +1,6 @@
 ---
 name: maapilot-setup
-description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的会话内定时定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
+description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、找 ADB 地址、doctor 逐项排查、装 maa-cli 与资源、试启动游戏、第一次读仓库和干员、问日常几点跑做哪些、用 harness 的定时定好定时日常、清掉旧版的系统定时、写 setup.json。Use at session start when doctor --brief says next "setup" (private/setup.json missing), or when the user says 重新设置 / 换模拟器 / reinstall / setup / first run.
 ---
 
 # maapilot-setup：第一次设置
@@ -28,16 +28,15 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
    - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
 3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
    再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
-4. 装好后 `maapilot doctor --offline`（Claude Code 的启动钩子已经把 `.venv/bin` 加进了 PATH，同一个会话就能用；提示找不到命令（例如在 Codex 里）就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
-   在 Codex 里装东西要联网，沙箱里没有网络：命令会请用户批准在沙箱外跑，告诉用户这是装运行环境、点同意。
+4. 装好后 `maapilot doctor --offline`（提示找不到命令就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
+   你所在的 harness 装东西有额外要求的（例如要用户批准联网），见你所在 harness 的文件（AGENTS.md「你所在的 harness」）。
 
 **Windows**（上面是 macOS / Linux 的写法；Windows 上程序在 `.venv\Scripts\` 下，不是 `.venv/bin/`）：
 - 没有 uv：征得同意后 `winget install astral-sh.uv`；没有 winget 就在 PowerShell 里 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`。装完要重开终端（或 agent）才找得到 `uv`。
 - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv -e .`；不用 uv 时是 `<python.exe 路径> -m venv .venv`、`.venv\Scripts\python.exe -m pip install -e .`。
 - 之后命令写成 `.venv\Scripts\maapilot.exe <命令> …`（`maapilot` 提示找不到时；见 AGENTS.md「命令约定」）。
 - 仓库最好用 `git clone -c core.symlinks=true …` 拿（`.claude/skills` 是指向 `.agents/skills` 的链接）；已经普通 clone 了，`maapilot doctor --fix` 会把这个链接补上。
-- **项目文件夹、Python、maa、adb 最好装在普通目录**（例如 `C:\Users\<你>\` 下）：在 Codex 的 Windows 应用里装的东西可能落进它的隔离目录（`…\AppData\Local\Packages\…\LocalCache\…`），
-  别的程序看不到。遇到时请用户在普通的 PowerShell 里重新装到普通目录。
+- **项目文件夹、Python、maa、adb 最好装在普通目录**（例如 `C:\Users\<你>\` 下）：有的 harness 的 Windows 应用会把装的东西放进它的隔离目录，别的程序看不到（见你所在 harness 的文件（AGENTS.md「你所在的 harness」））。
 
 ## 1. 模拟器
 
@@ -73,8 +72,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `legacy_schedule` | 还留着旧版的系统定时任务：见第 4 步「旧版的定时任务」，用户同意后 `maapilot daily unschedule` |
 | `agent_config` | `config.yaml` 里还写着旧版的 `agent`（现在用不到了）：跟用户说一声，同意后删掉那几行 |
 
-**在 Codex 里**还要信任这个文件夹：`maapilot host status` 里 codex 的 `trusted` 是 `false` 时，征得同意后 `maapilot host install codex`（在 Codex 设置里信任这个文件夹）。
-必须做：不信任时 Codex 不加载项目的命令规则，`guard allow` 每次弹确认这道护栏就没了。
+你所在 harness 的文件（AGENTS.md「你所在的 harness」）里有「setup 时要多做的」，照着做完（例如信任这个文件夹，项目的权限规则才生效）。
 
 装软件前说清装什么、为什么；用户不同意就停在这里，告诉用户缺了它哪些事做不了。
 
@@ -85,13 +83,13 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 1. `maapilot maa startup`（启动游戏回首页，一两分钟）。成功后看 `data.home`：不是 `true` 就 `maapilot screen shot` 看停在哪，按 `maapilot-recovery`「回首页」回去；
    是 `true` 也截一张图，看一眼确实在首页（右上有"终端"）。
    失败：按 `maapilot-recovery` 看屏幕。常见：停在登录页（账号没登录过 → 请用户在模拟器里手动登录一次）、公告弹窗、正在更新资源（等它下完）。
-2. `maapilot state depot`（读仓库，一两分钟），再 `maapilot state box`（读干员，几分钟；Claude Code 里放后台跑，Codex 里前台跑、等它结束）。
+2. `maapilot state depot`（读仓库，一两分钟），再 `maapilot state box`（读干员，几分钟；按 AGENTS.md「怎么跟用户说话」的长命令做法跑）。
 3. 告诉用户读到了什么，一两句："读到了：龙门币约 120 万、合成玉 3200、干员 86 名。"读不到就说哪样没读到，稍后日常会再读。
 
 ## 4. 问日常（一次一个问题）
 
 1. **每天几次、几点**：默认每天两次 04:40 和 16:40。说明：游戏 04:00 换日，别放在 04:00 前后；分钟别选整点、半点（:00、:30，有的 harness 会提前一两分钟叫醒）。
-   到点时电脑要开着、不能睡眠，模拟器也要开着，**这个会话也要一直开着**（Codex 桌面版要应用开着）：定时是记在这个会话里的，关掉就没了。
+   到点时电脑要开着、不能睡眠，模拟器也要开着，**这个会话也要一直开着**：定时是记在这个会话里的，关掉就没了（各 harness 还要注意什么见你所在 harness 的文件（AGENTS.md「你所在的 harness」））。
 2. **做哪些日常项**，默认全做，逐项用玩家的话说：启动游戏、公开招募、基建换班收菜、信用商店与访问好友、剿灭（本周合成玉拿满就不打）、领任务奖励和邮件。用户说"都做"就不再细问。
 3. **没有目标时刷哪关**：默认 1-7（产固源岩，理智划算）。有目标时会优先刷目标缺的材料。
 4. **游戏更新后的用户协议**：游戏大版本更新后，有时会弹出《用户协议》《隐私政策》更新，要点"同意"才能进游戏。问："以后遇到这种更新，要我直接替你点同意，还是每次先问你？"
@@ -124,16 +122,16 @@ Windows 路径在 YAML 里用单引号（`'C:\...\maa.exe'`），双引号里的
 
 ### 定时日常
 
-用你所在的 harness 自己的**会话内定时**，不用系统的定时任务。各 harness 的工具和实测情况见 `docs/harnesses.md`（Claude Code 的做法写在 `CLAUDE.md`）。
-- **一次性定时接力**（harness 有一次性定时的都这样做）：会话里始终只留**一个**"下一次日常"的一次性定时，时间是 `schedule` 里离现在最近的下一个时间点。
+用你所在的 harness 自己的定时，不用系统的定时任务。工具叫什么、怎么建见你所在 harness 的文件（AGENTS.md「你所在的 harness」），通用做法见 `docs/harnesses/README.md`。
+- **一次性定时接力**（harness 有一次性定时、而且可靠的都这样做）：会话里始终只留**一个**"下一次日常"的一次性定时，时间是 `schedule` 里离现在最近的下一个时间点。
   setup 时建第一个；以后每次定时日常醒来、跑日常之前先建下一个（见 `maapilot-daily`「定时日常」）。
   不用每天重复的定时：有的 harness 的重复定时几天后就过期，还会晚响。
 - 提示写成单看这一句就知道要做什么的（到点时前面的对话可能已经被压缩掉了）："定时日常（04:40）：按 skill maapilot-daily 做；先定好下一次"（括号里写这一次的时间）。
 - 建之前先列一遍 harness 里已有的定时：已经有下一次日常的就不再建（只留一个）。建完再列一遍，**以 harness 里读回来的为准**：时间对上了才告诉用户"下一次是 10 月 21 日（明天）04:40"；对不上就说没定成。
 - 改时间：删掉还没到的那个，按新时间建下一个。不要定时了：删掉还没到的那个。
-- harness 没有一次性定时、只有重复的：每个时间点建一个每天重复的定时，有过期的照 `docs/harnesses.md` 跟用户说清多久要续一次。
-- harness 没有会话内定时（Codex 命令行）：定时日常做不了，跟用户说清：可以在对话里说"跑一次日常"；想要定时，换用 Claude Code 或 Codex 桌面版。setup 照样做完。
-- 跟用户说清：到点时电脑要开着、不睡眠，模拟器要能连上（最好开着），**这个会话不要关**（Codex 桌面版要应用开着）。
+- harness 没有一次性定时、或一次性的不可靠：每个时间点建一个每天重复的定时，提示里写明"这是每天重复的定时，不用再建"；会过期的，照它的文件跟用户说清多久要续一次。
+- harness 没有定时：定时日常做不了，跟用户说清：可以在对话里说"跑一次日常"；想要定时，换用支持的 harness（README「支持哪些 Agent」）。setup 照样做完。
+- 跟用户说清：到点时电脑要开着、不睡眠，模拟器要能连上（最好开着），**这个会话不要关**。
 
 3. 写 `private/setup.json`：`{"done_at": "<现在的 ISO 时间，带时区>", "version": 1}`。
 4. 告诉用户以后怎么用，简短几条：

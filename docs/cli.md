@@ -1,6 +1,6 @@
 # `maapilot` 命令契约
 
-给实现命令的开发者和写 skill 的人：每个命令的参数、做什么、输出、碰不碰模拟器、要不要用户确认。设计依据见 [design.md](design.md)。
+给实现命令的开发者和写 skill 的人：每个命令的参数、做什么、输出、碰不碰模拟器、要不要用户确认。设计依据见 [CLAUDE_DEV.md](../CLAUDE_DEV.md)「设计哲学」。
 
 ## 通用约定
 
@@ -30,7 +30,7 @@
 - **外部数据的格式变了**：森空岛、MAA 的活动列表 / 任务表、maa-cli 的输出、官方公告、官网安装包地址、企鹅物流、一图流、游戏数据表，
   程序用到的字段对不上时报 `error.code` 为 `upstream_format`（退出码 1，message 写明哪个来源、缺哪个字段，`data: {source, field, effect}`），
   不当成"没有数据"悄悄过去；有退路的（森空岛的理智 → 首页识别）照样退，同样记下来。都记进 `private/state/sources.json`，
-  `doctor --brief` 的 `sources`、日常汇报的"要注意"会列出来（见 docs/design.md「外部数据源」）。这是要开发者改程序的事，原样重试没用。
+  `doctor --brief` 的 `sources`、日常汇报的"要注意"会列出来（见 CLAUDE_DEV.md「外部数据源」）。这是要开发者改程序的事，原样重试没用。
 - **坐标**：所有坐标、区域都是 1280×720 参考坐标系（截图也按这个尺寸存），与设备真实分辨率无关（要求 16:9）。
 - **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
   只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
@@ -38,7 +38,7 @@
 - **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行；别的命令失败（包括参数写错、退出码 2）或有结果摘要的（`calc need`、`goals` 改动）也记一行（见[文件](#private-文件)）。
 - **物品与干员名**：参数里用游戏里的中文名；输出里物品同时给 `id` 与 `name`。
 - **长命令**：`daily run` 要 20–60 分钟，`maa fight`、`state box` 等可能几分钟。Claude Code 的 Bash 超时最长 10 分钟：
-  预计超过几分钟的放后台跑，结束时会收到通知（`CLAUDE.md`）。Codex 的后台命令结束叫不醒模型：前台跑、等它结束。
+  预计超过几分钟的放后台跑，结束时会收到通知（`docs/harnesses/claude-code.md`）。Codex 的后台命令结束叫不醒模型：前台跑、等它结束。
 
 ## 命令总览
 
@@ -72,7 +72,7 @@
 权限规则是 `maapilot` 整个放行、只列例外，表里没列的新命令也放行。
 "放行"的命令不弹确认；"询问"的（`guard allow`，还有开发用的 `dev`）每次都弹宿主的确认（Claude Code 的 `ask`、Codex 的 `prompt`）。
 
-**程序只死守真实货币**（docs/design.md「设计哲学」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
+**程序只死守真实货币**（CLAUDE_DEV.md「设计哲学」）：只有 `guard allow`（记下用户同意的一笔合成玉 / 源石花费）由程序把关——
 有日常在跑、或者跑完还没收尾（`daily done` 之前；不分手动、定时）时，直接退出码 3 `needs_user`，什么也没做（`maapilot/tools/confirm.py`）：
 定时日常多半是用户不在的时候跑的，这时记下的"同意"一定是假的；日常里本来就不该临时决定花真实货币，等收尾后用户在对话里同意再记。
 别的会改东西的命令（`daily unschedule`、`reset`、`host install`、`lock release`、改 `config.yaml`）都放行：agent 先在对话里问清楚、用户同意后再跑（AGENTS.md 硬规则），程序不另弹确认。
@@ -176,7 +176,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 
 `maapilot screen ocr [--roi X Y W H] [--find <正则>] [--name <名>] [--image <图片>]`
 截图并识别文字（MaaFramework + PaddleOCR）。`--roi` 只识别一块（越界退出码 2 `bad_roi`）；`--find` 只返回匹配的。截图同样存下。
-`--image` 不连模拟器、不截图，在一张已有的截图上跑同一套识别（排查识别错误、做回归样本用，见 design.md「识别回归测试」）；
+`--image` 不连模拟器、不截图，在一张已有的截图上跑同一套识别（排查识别错误、做回归样本用，见 CLAUDE_DEV.md「识别回归测试」）；
 `path` 就是这张图。图片不在、读不了或不是 16:9 退出码 2（`bad_image`）；OCR 资源加载不了退出码 5（`ocr_unavailable`）。
 
 ```json
@@ -731,7 +731,7 @@ agent 用 `guard allow` 补记（宿主会再问一次），再 `guard check`：
 ## daily —— 日常
 
 v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。定时日常也是 harness 的会话内定时到点在会话里叫醒 agent，
-由它跑 `daily run --trigger schedule`；项目不再自己定时、不再无头叫起 agent、不往会话里推消息（docs/design.md「运行方式」）。
+由它跑 `daily run --trigger schedule`；项目不再自己定时、不再无头叫起 agent、不往会话里推消息（AGENTS.md「定时日常」）。
 `daily run` 遇到要判断的事（某项失败、掉线、游戏要更新、有进行中的目标）就停下交回 agent；agent 处理完用 `--only` 接着跑，
 做完目标部分、领奖励、对账后用 `daily done` 收尾。
 
@@ -918,7 +918,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 ## host —— agent 宿主（不碰模拟器）
 
-用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建会话内定时见 docs/harnesses.md）。程序的找法在 `maapilot/hosts.py`：
+用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建定时见 docs/harnesses/）。程序的找法在 `maapilot/hosts.py`：
 写了 `tools.<宿主>` 就只认它（写错了报出来，不悄悄换成别的）；没写时 PATH → 常见安装位置（`CODEX_FALLBACKS` / `CLAUDE_FALLBACKS`，可以写 `%APPDATA%` 这样的环境变量），
 Windows 上找到 npm 的 `.cmd` 包装时优先用原生的 `.exe`。
 
@@ -962,7 +962,7 @@ Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（�
 `maapilot dev rules [--check] [--root <目录>]`：按 `maapilot/policy.py` 生成两个宿主的权限规则文件和本文件里抄的设置（见「Claude Code 权限设置」）。
 `data`：`{"files": [{"path", "changed"}], "written"}`；`--check` 只核对、不写，有不一样的退出码 1 `rules_out_of_date`（`data.files` 照样带上）。
 
-`dev` 下的命令都不加权限规则（用户的 agent 用会弹确认），skill 和 `AGENTS.md` / `CLAUDE.md` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
+`dev` 下的命令都不加权限规则（用户的 agent 用会弹确认），skill、`AGENTS.md` 和 `docs/harnesses/` 里不提，`maapilot --help` 里不列（`tests/test_docs_consistency.py` 的 `DEV_ONLY`）。
 
 ---
 
@@ -1004,7 +1004,7 @@ private/
 | `server` | 客户端（MAA 的 client_type）：`Official` / `Bilibili` / `YoStarEN` / `YoStarJP` / `YoStarKR` / `txwy` | `Official` |
 | `agent` | v0.1 的设置（定时日常叫起哪个无头 agent），v0.2.0 起不用：写了就忽略，`doctor` 的 `agent_config` 提示可以删 | 无 |
 | `tools.maa` / `tools.claude` / `tools.codex` | maa、claude、codex 程序（`maa` 写程序名时先用 `.tools/` 里装好的；claude / codex 给 `host status / install`、`doctor` 找程序用） | `maa` / `claude` / `codex` |
-| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建会话内定时（`maapilot-setup`、docs/harnesses.md） | `["04:40", "16:40"]` |
+| `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建会话内定时（`maapilot-setup`、docs/harnesses/） | `["04:40", "16:40"]` |
 | `schedule_options` | v0.1 的设置（Windows 任务计划程序的补跑、唤醒），不用了：写了就忽略（`agent_config` 提示可以删） | 无 |
 | `daily.tasks` | 按顺序跑的 MAA 日常项：`startup` `recruit` `infrast` `mall` `annihilation` `award` | 全部 |
 | `daily.default_stage` | 没有进行中的目标时刷哪关 | `"1-7"` |
