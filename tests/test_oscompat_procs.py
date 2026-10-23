@@ -43,11 +43,24 @@ def _pids(f: Path, within: float = 15) -> tuple[int, int]:
     raise AssertionError("子进程没起来")
 
 
+def _settled(pid: int, within: float = 5) -> None:
+    """等 pid 的命令行稳定下来：macOS 上虚拟环境的 python 刚起来时会换成框架里的 Python.app 再跑，
+    换之前和换之后读到的命令行不一样（CI 上碰到过两次读取正好卡在换的前后）。"""
+    end, last = time.monotonic() + within, None
+    while time.monotonic() < end:
+        now = procs.cmdline(pid)
+        if now is not None and now == last:
+            return
+        last = now
+        time.sleep(0.1)
+
+
 @pytest.fixture
 def tree(tmp_path):
     f = tmp_path / "pids"
     p = procs.spawn([sys.executable, "-c", TREE, str(f)], stdout=subprocess.DEVNULL)
     me, kid = _pids(f)
+    _settled(kid)
     yield p, me, kid
     for pid in (me, kid):
         try:
