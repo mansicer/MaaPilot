@@ -1,4 +1,4 @@
-"""skills、CLAUDE.md 里写的命令都要是真能跑的命令，权限规则（maapilot/policy.py）也要对得上。
+"""skills、AGENTS.md、harness 说明（docs/harnesses/）里写的命令都要是真能跑的命令，权限规则（maapilot/policy.py）也要对得上。
 
 从说明文字里抽出 `maapilot …`（以及反引号里以命令组开头的简写，如 `state depot`），把占位符换成样例值，
 交给 argparse 解析；再检查每条命令都有权限规则（放行或询问），要用户确认的几条在"询问"里。
@@ -17,10 +17,11 @@ import pytest
 from maapilot import cli, policy
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")) + [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md"]
+DOCS = (sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")) + sorted((ROOT / "docs" / "harnesses").glob("*.md"))
+        + [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md"])
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
           "daily", "guard", "lock", "reset", "skland", "news", "game", "copilot")
-# 权限设置里是询问的命令：只有记下花合成玉 / 源石的同意（design.md「审批与权限」、docs/cli.md 命令总览）
+# 权限设置里是询问的命令：只有记下花合成玉 / 源石的同意（CLAUDE_DEV.md「设计哲学」第 3 条、docs/cli.md 命令总览）
 ASK = ("guard allow",)
 # 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）
 USER_ONLY = ("skland token",)
@@ -157,7 +158,7 @@ def test_every_subcommand_has_rule():
 
 
 def test_dev_commands_not_for_user_agent():
-    """开发用的命令：skill、CLAUDE.md 里不提。"""
+    """开发用的命令：skill、AGENTS.md、harness 说明里不提。"""
     assert not [c for _, c, _ in INVOCATIONS if c.split(" ", 1)[0] in DEV_ONLY]
 
 

@@ -3,7 +3,7 @@
     .venv/bin/python tests/fixtures/screens/make.py private/shots/20261011-165659.png home_130 --keep 640 15 640 265
 
 --keep 可以给多次（1280×720 参考坐标，要覆盖被测函数读的所有区域）。写到 tests/fixtures/screens/<名>.png。
-做完用读图工具看一眼：留下的区域里不能有昵称、ID、好友名。用法见 docs/design.md「识别回归测试」。
+做完用读图工具看一眼：留下的区域里不能有昵称、ID、好友名。用法见 CLAUDE_DEV.md「识别回归测试」。
 """
 from __future__ import annotations
 

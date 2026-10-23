@@ -68,18 +68,11 @@ v0.2.0 起定时日常改由 agent 自己的会话内定时来跑，不再用系
 - 再让助手在会话里定好定时日常（"把定时日常设一下"），这个会话之后别关。
 - 更新前就开着的会话：让助手重新读一遍 AGENTS.md；它还在后台挂着的旧的"盯着日常"命令可以停掉（新版已经没有了），最好直接重开一个会话。
 - 在 Windows 上靠 Codex 命令行跑定时日常的：改用 Codex 桌面版。
+- `private/config.yaml` 里的 `agent`、`schedule_options` 用不到了，可以删（启动检查会提示）。
 
 ### 支持哪些 Agent
 
-MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接进来。
-
-1. 多模态输入（支持图片输入）
-2. 长时工具调用：bash 命令，文件访问
-3. 读取 AGENTS 文档和使用 skills
-4. 会话里能按时醒来：会话内的定时任务，到点在同一个会话里叫醒 agent
-5. 项目级权限（可选）：限制 Agent 直接操控模拟器（如通过 adb）
-
-1–3 是在对话里使用的前提，4 是定时日常的前提。结果就在会话里当场说，不另外要通知功能。
+MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能读 `AGENTS.md` 和 skills 的 agent 都能在对话里用；还能按时叫醒 agent 的，就能跑定时日常（完整要求见 [`docs/harnesses/`](docs/harnesses/)）。
 
 | Agent | 对话里用 | 定时日常 |
 |---|---|---|
@@ -87,7 +80,7 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 | Codex 桌面版 | 支持 | 支持 |
 | Codex 命令行 | 支持 | 不支持（没有会话内定时） |
 
-各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses.md`](docs/harnesses.md)，接新的 agent 也看那里。
+各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses/`](docs/harnesses/)（每家一个文件），接新的 agent 看那里的 README。
 
 ## 亮点功能
 
@@ -128,11 +121,10 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 
 ## 参与开发
 
-先读 [`CLAUDE_DEV.md`](CLAUDE_DEV.md)（开发规矩）。
+先读 [`CLAUDE_DEV.md`](CLAUDE_DEV.md)（设计哲学和开发规矩）。思路是"程序薄、agent 厚"：`maapilot` 命令只做可靠的事，做法写进 skill。
 
-- 设计：[`docs/design.md`](docs/design.md)——思路是"程序薄、agent 厚"：`maapilot` 命令只做可靠的事，做法写进 skill
 - 命令与输出：[`docs/cli.md`](docs/cli.md)
-- 给用户的 agent 的说明：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 引用它）和 [`.agents/skills/`](.agents/skills/)
+- 给用户的 agent 的说明：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 只引用它）、[`.agents/skills/`](.agents/skills/) 和 [`docs/harnesses/`](docs/harnesses/)
 - 测试：`.venv/bin/python -m pytest -q`
 
 ## 致谢
