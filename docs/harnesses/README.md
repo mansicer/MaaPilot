@@ -65,23 +65,17 @@ MaaPilot 只做和游戏相关的部分（`AGENTS.md`、skills、`maapilot` 工�
 - **改 `.gitignore`**：harness 在项目文件夹里写本机状态的（像 Codex 的 `.codex/config.toml`），加进去，别提交到仓库。
 - **新增 `templates/<名字>/`**：接入要用户改 harness 自己的配置时（例如注册 agent、建定时任务的配置片段），片段和说明放这里，由用户或 agent 照着做；项目不替用户改它的配置。
 
-**接入时程序得替用户改 harness 的设置、或调它的命令行时**
+**harness 有项目级权限规则时**（例如 Claude Code 的 `.claude/settings.json`、Codex 的 `.codex/rules/`）
 
-例如 Codex：只有信任了这个文件夹才加载项目的命令规则，`maapilot host install codex` 要往 Codex 的用户设置里写一段信任，再调 `codex execpolicy check` 核对规则文件，所以程序得找得到 codex 装在哪。
-Claude Code 的信任只能在它里面交互地点，程序只报告信没信任。只靠读 `AGENTS.md`、skills 和自己的定时就能用的 harness，接入步骤写进 `<名字>.md` 就行，下面这几处都不用动。
+- **改 `maapilot/policy.py`**：加上生成这个 harness 规则文件的部分，按 `CLAUDE_DEV.md` 的做法重新生成；`tests/test_policy.py` 核对。
 
-- **改 `maapilot/hosts.py`**：`HOSTS` 加名字；加一组常见安装位置 `<名字>_FALLBACKS`（PATH 上找不到时去找），Windows 的写法用 `%APPDATA%` 这样的环境变量，不写死盘符。
-- **改 `maapilot/tools/host_cmd.py`**：`status()` 报告它的程序在哪、信没信任；`install()` 加它的分支，做那件要替用户做的事（改设置前 agent 要先在对话里问过用户），给出 `next`（还要用户做什么）。
-- **改 `docs/cli.md`**：「host」一节写清它的 status / install 做什么、输出什么；配置项表里加 `tools.<名字>`（用户装在别处时写绝对路径）；新的错误码（例如找不到程序）加进错误码表。
-- **测试**：`tests/test_hosts.py`（install 改了什么、找不到程序时报什么）、`tests/test_hosts_windows.py`（Windows 的安装位置）。
+**规则要用户先在 harness 里做一步才生效时**（例如 Codex 要先信任这个文件夹）
 
-**harness 有项目级权限规则文件时**
+- **改 `maapilot/hosts.py`**：加上它的名字和常见安装位置，让程序找得到它。
+- **改 `maapilot/tools/host_cmd.py`**：让 `host install <名字>` 替用户做这一步（agent 先在对话里问过用户）。
+- **跟着改**：`docs/cli.md` 的「host」一节，`tests/test_hosts.py`。
 
-例如 Claude Code 的 `.claude/settings.json`、Codex 的 `.codex/rules/maapilot.rules`。
-
-- **改 `maapilot/policy.py`**：加生成它的规则文件的部分（`guard allow` 询问、森空岛凭据拒绝读写，按它支持的写法表达），再按 `CLAUDE_DEV.md` 的做法重新生成规则文件，生成的文件也要提交。
-- **测试**：`tests/test_policy.py` 核对生成的文件和 `policy.py` 一致、各 harness 的结论一样。
-- 规则要信任文件夹才加载的，同时做上一组（`host install` 里加信任）。
+只靠读 `AGENTS.md`、skills 就能用的 harness，这两组都不用动。
 
 定时不写进代码（设计哲学第 1 条）：定时由 harness 自己建，项目只在 `<名字>.md` 里写做法。
 
