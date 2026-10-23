@@ -36,29 +36,59 @@ MaaPilot 只做和游戏相关的部分（`AGENTS.md`、skills、`maapilot` 工�
 
 ### 要新增、修改的文件
 
-| 文件 | 新增 / 修改 | 什么时候要 | 写什么 |
-|---|---|---|---|
-| `docs/harnesses/<名字>.md` | 新增 | 一定要 | 这个 harness 的全部做法：说明文件、skills、启动检查、权限、PATH、定时、长命令、setup 时要多做的、实测（照 `claude-code.md` 的样子） |
-| `docs/harnesses/README.md` | 修改 | 一定要 | 开头的对应表加一行 |
-| `AGENTS.md` | 修改 | 一定要 | 「你所在的 harness」的对应表加一行；别的地方不写这个 harness 的名字和做法 |
-| `README.md` | 修改 | 一定要 | 「支持哪些 Agent」的表加一行；开头的徽章、介绍和安装要求里的 agent 列表；加一节"用 XX"（怎么打开、第一次要做什么） |
-| `.agents/skills/*/SKILL.md` | 一般不改 | 通用规则对不上时 | 把通用规则补全（例如"没有一次性定时、或不可靠的，用重复定时"），不写"某某例外" |
-| 说明文件（例如 `CLAUDE.md`） | 新增 | harness 不读 `AGENTS.md`、读别的文件名时 | 只有一行引入 `AGENTS.md`，不加专用内容 |
-| skills 链接（例如 `.claude/skills`） | 新增 | harness 不读 `.agents/skills/` 时 | 指向 `.agents/skills` 的链接；Windows 上没建成的，在 `doctor --fix` 里补上（`maapilot/tools/doctor.py`） |
-| `.gitignore` | 修改 | harness 往项目文件夹里写本机状态时 | 加上它的状态目录（像 `.codex/config.toml`） |
-| `templates/<名字>/` | 新增 | 接入要用户改 harness 自己的配置时 | 配置片段和说明；项目不替用户改它的配置 |
-| `maapilot/hosts.py` | 修改 | 要让启动检查、`maapilot host status` 认得这个程序时 | `HOSTS` 加名字，加一组常见安装位置 `*_FALLBACKS` |
-| `maapilot/tools/host_cmd.py` | 修改 | 同上 | `status()`、`install()` 里加它的分支（要信任文件夹的，在 install 里做） |
-| `docs/cli.md` | 修改 | 改了上面两个文件时 | 「host」一节、配置项 `tools.<名字>`、错误码表 |
-| `maapilot/policy.py` | 修改 | harness 有项目级权限规则文件时 | 加生成它的规则文件的部分，再按 `CLAUDE_DEV.md` 的做法重新生成 |
-| 测试 | 修改 / 新增 | 改了代码或加了模板时 | `tests/test_hosts.py`、`tests/test_hosts_windows.py`（找程序）；`tests/test_policy.py`（权限规则）；模板的 JSON 校验 |
+**一定要改的**
 
-定时不写进代码（设计哲学第 1 条）：定时由 harness 自己建，项目只写做法（`<名字>.md`）；程序只负责找程序和生成权限规则。
+- **新增 `docs/harnesses/<名字>.md`**：这个 harness 的全部做法都写在这里，照 `claude-code.md` 的样子：
+  - 开头一张表：说明文件（它读哪个文件）、skills（怎么找到）、启动检查（有没有启动钩子，没有就靠 `AGENTS.md` 让 agent 自己跑）、权限（有没有项目规则、拦得住什么）、PATH（`maapilot` 怎么写）、定时（用什么工具、一次性还是重复）、长命令（能不能放后台等它叫醒）。
+  - 「定时日常」：工具叫什么、怎么建、怎么列、怎么删，提示怎么写，有什么坑（过期、提前或推迟响、要应用开着）。
+  - 「setup 时要多做的」（有才写）：例如信任文件夹、批准联网、注册 agent。
+  - 「实测」：测过什么、哪天、结论；没测的标"待实测"。
+- **改 `docs/harnesses/README.md`**：开头的对应表加一行。
+- **改 `AGENTS.md`**：「你所在的 harness」的对应表加一行。别的地方不写这个 harness 的名字和做法。
+- **改 `README.md`**（给用户看的）：
+  - 「支持哪些 Agent」的表加一行（对话里用、定时日常支不支持）；
+  - 开头的徽章、介绍和"需要"里的 agent 列表；
+  - 加一节"用 XX"：怎么在项目文件夹里打开它、第一次要点什么、定时日常有什么前提。
+
+**一般不改的**
+
+- **`.agents/skills/*/SKILL.md`**：skills 只写通用规则。这个 harness 和通用规则对不上时，把通用规则补全（例如"没有一次性定时、或一次性的不可靠的，用每天重复的定时"），不写"某某例外"；它独有的做法写进 `<名字>.md`。
+- **日常汇报的格式**：所有 harness 都一样，不为某个 harness 改。
+
+**harness 不读我们的文件时**
+
+- **新增说明文件**（例如 Claude Code 读的 `CLAUDE.md`）：harness 不读 `AGENTS.md`、只读别的文件名时才要。内容只有一行引入 `AGENTS.md`，不加专用内容。
+- **新增 skills 链接**（例如 `.claude/skills`）：harness 不读 `.agents/skills/` 时才要，建一个指向 `.agents/skills` 的链接。Windows 上 git 可能没建成链接，在 `maapilot/tools/doctor.py` 里让 `doctor --fix` 补上，像 `skills_link` 那一项。
+
+**harness 往项目里写东西、或要用户改它的配置时**
+
+- **改 `.gitignore`**：harness 在项目文件夹里写本机状态的（像 Codex 的 `.codex/config.toml`），加进去，别提交到仓库。
+- **新增 `templates/<名字>/`**：接入要用户改 harness 自己的配置时（例如注册 agent、建定时任务的配置片段），片段和说明放这里，由用户或 agent 照着做；项目不替用户改它的配置。
+
+**接入时程序得替用户改 harness 的设置、或调它的命令行时**
+
+例如 Codex：只有信任了这个文件夹才加载项目的命令规则，`maapilot host install codex` 要往 Codex 的用户设置里写一段信任，再调 `codex execpolicy check` 核对规则文件，所以程序得找得到 codex 装在哪。
+Claude Code 的信任只能在它里面交互地点，程序只报告信没信任。只靠读 `AGENTS.md`、skills 和自己的定时就能用的 harness，接入步骤写进 `<名字>.md` 就行，下面这几处都不用动。
+
+- **改 `maapilot/hosts.py`**：`HOSTS` 加名字；加一组常见安装位置 `<名字>_FALLBACKS`（PATH 上找不到时去找），Windows 的写法用 `%APPDATA%` 这样的环境变量，不写死盘符。
+- **改 `maapilot/tools/host_cmd.py`**：`status()` 报告它的程序在哪、信没信任；`install()` 加它的分支，做那件要替用户做的事（改设置前 agent 要先在对话里问过用户），给出 `next`（还要用户做什么）。
+- **改 `docs/cli.md`**：「host」一节写清它的 status / install 做什么、输出什么；配置项表里加 `tools.<名字>`（用户装在别处时写绝对路径）；新的错误码（例如找不到程序）加进错误码表。
+- **测试**：`tests/test_hosts.py`（install 改了什么、找不到程序时报什么）、`tests/test_hosts_windows.py`（Windows 的安装位置）。
+
+**harness 有项目级权限规则文件时**
+
+例如 Claude Code 的 `.claude/settings.json`、Codex 的 `.codex/rules/maapilot.rules`。
+
+- **改 `maapilot/policy.py`**：加生成它的规则文件的部分（`guard allow` 询问、森空岛凭据拒绝读写，按它支持的写法表达），再按 `CLAUDE_DEV.md` 的做法重新生成规则文件，生成的文件也要提交。
+- **测试**：`tests/test_policy.py` 核对生成的文件和 `policy.py` 一致、各 harness 的结论一样。
+- 规则要信任文件夹才加载的，同时做上一组（`host install` 里加信任）。
+
+定时不写进代码（设计哲学第 1 条）：定时由 harness 自己建，项目只在 `<名字>.md` 里写做法。
 
 ### 步骤
 
 1. **核对要求**：对照上面「要 harness 提供什么」。没有定时的只能在对话里用。
-2. 按上表加文件、改文件。`docs/harnesses/<名字>.md` 里先把还没测的标"待实测"。
+2. 按上面「要新增、修改的文件」加文件、改文件。`docs/harnesses/<名字>.md` 里先把还没测的标"待实测"。
 3. **实测**，结论写进 `<名字>.md`：
    - 定时按时醒来：有没有一次性的、可不可靠，重复的会不会过期；
    - `maapilot` 命令放行、`guard allow` 弹确认（拦不住的写明）；
