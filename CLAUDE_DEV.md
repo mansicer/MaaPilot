@@ -24,7 +24,7 @@
 ## 项目
 - 命令契约：`docs/cli.md`（每个命令的参数、输出、错误码、`private/` 文件、配置项）。
 - 系统功能交给 harness（设计哲学第 1 条，用户 10-20 定）：定时、叫醒会话、通知用户都用 agent 所在 harness 自己的（定时任务），
-  程序不装系统定时任务、不无头叫起 agent、不往会话里推消息、不发系统通知 / webhook。各 harness 的做法和实测各写一个文件（`docs/harnesses/<名字>.md`），`AGENTS.md` 和 skills 只写通用的；接新 harness 照下面「接一个新的 harness」。
+  程序不装系统定时任务、不无头叫起 agent、不往会话里推消息、不发系统通知 / webhook。各 harness 的做法和实测各写一个文件（`docs/harnesses/<名字>.md`），`AGENTS.md` 和 skills 只写通用的；接新 harness 要改哪些文件见 `docs/harnesses/README.md`「接一个新的 harness」。
 - 目录：
 
 ```
@@ -68,22 +68,6 @@ MaaPilot/
 
 - 森空岛（`maapilot/crew/skland*.py`）用的是**非官方接口**（社区从森空岛 App / 网页版扒出来的，含数美设备指纹），随时可能变；
   坏了先对照社区的实现（docs/cli.md「skland」写了来源）。测试一律用假的 HTTP。用户的 token 在 `private/skland.json`，开发时也不要读、不要打印。
-
-## 接一个新的 harness
-
-1. **核对要求**：对照 `docs/harnesses/README.md`「要 harness 提供什么」。没有定时的只能在对话里用。
-2. **说明文件**：harness 读 `AGENTS.md` 就不用另写；读别的文件名的（例如 `CLAUDE.md`），写一个只有一行引入 `AGENTS.md` 的文件，不加专用内容。
-3. **skills**：harness 读 `.agents/skills/` 就不用管；不读的建一个指向它的链接（像 `.claude/skills`），Windows 上没建成的在 `doctor --fix` 里补上。
-4. **找程序**（`maapilot host status / install` 要认它时）：`maapilot/hosts.py` 的 `HOSTS` 加名字和一组常见安装位置 `*_FALLBACKS`，
-   `maapilot/tools/host_cmd.py` 的 `status()` / `install()` 加它的分支，`docs/cli.md`「host」跟着改，`tests/test_hosts*.py` 加测试。
-5. **权限**（有项目级规则文件的才做）：在 `maapilot/policy.py` 加生成它的部分，`maapilot dev rules` 生成，`tests/test_policy.py` 核对；规则要信任文件夹才加载的，在 `host install` 里加上。
-6. **写它自己的文件** `docs/harnesses/<名字>.md`（照 `claude-code.md` 的样子）：说明文件、skills、启动检查、权限、PATH、定时、长命令、setup 时要多做的，再加实测。
-   harness 往项目文件夹里写本机状态的，加进 `.gitignore`；要用户改 harness 自己配置的片段放 `templates/<名字>/`，项目不替用户改。
-7. **实测**，结论写进它的文件：定时按时醒来（一次性的有没有、可不可靠，重复的会不会过期）；`maapilot` 命令放行、`guard allow` 弹确认（拦不住的写明）；
-   长命令怎么等结束；读图；真跑一次完整的定时日常。
-8. `docs/harnesses/README.md` 的表、`AGENTS.md`「你所在的 harness」的对应表、README「支持哪些 Agent」的表各加一行。
-
-定时不写进代码（设计哲学第 1 条）：程序只负责找程序和生成权限规则。
 
 ## 识别回归测试
 
