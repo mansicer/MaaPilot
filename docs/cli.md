@@ -46,7 +46,7 @@
 |---|---|---|---|
 | `doctor [--brief] [--offline] [--fix]` | 除 `--brief`/`--offline` 外只读 | 放行 | A |
 | `screen shot / ocr` | 只读，**不拿锁** | 放行 | A |
-| `input tap / swipe / back / text` | 操作 | 放行 | A |
+| `input tap / swipe / back / text / home` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
 | `maa why` | 否（只读 MAA 的日志） | 放行 | A |
 | `copilot find / show / strip` | 否（联网查作业站） | 放行 | A |
@@ -194,9 +194,23 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 | `input swipe X1 Y1 X2 Y2 [--ms 毫秒]` | 滑动（默认 500 ms） |
 | `input back` | 安卓返回键 |
 | `input text "<文字>"` | 往当前输入框输入 |
+| `input home` | 回首页（只导航），截一张首页 |
 
 `data`：`{"done": true}`。操作之后不自动截图：要看结果就 `screen shot`。坐标超出 1280×720 退出码 2（`bad_point`）；
 设备上没做成退出码 1（`input_failed`）。
+
+`input home`：和 `maa startup` 之后回首页同一套（`nav.ensure_home`）：关掉认得的弹窗（表在 `maapilot/crew/overlays.py`：连接故障、公告、月签到、
+登录活动页、获得物资、设置页……，点的都是关闭按钮或空白处）、左上菜单"首页"、返回键，最多 3 轮；不点会花东西的按钮。到了之后截一张首页（同 `screen shot --name home`）。
+关掉的弹窗都写进结果，不悄悄处理：`overlays` 是路上关掉的（按先后，去重），`seen` 是其中要交给 agent 的——活动签到页（`login_event`，新活动的限时登录签到）
+和月签到（`sign_in`）：程序只关不领，`seen` 不为空时带 `hint`，agent 按 `maapilot-daily`「活动签到」回去领。没回到首页 → 退出码 1（`not_home`，`data` 同样给全，看 `shot`）。
+
+```json
+{"home": true, "shot": "/…/private/shots/20261021-051200-home.png", "overlays": ["announcement", "login_event"],
+ "seen": ["login_event"], "hint": "路上关掉了活动签到页（程序只关不领）：…"}
+```
+
+别的命令导航时关掉的活动签到页 / 月签到也一样记下：带运行编号（`daily run` 的子进程）的记进 `private/state/overlays.jsonl`，`daily run` 结束时写进汇报（见「daily」的 `seen_overlays`）；
+`maa startup` 回首页时关掉的写进它的 `data.overlays` / `data.seen`（没关掉什么就没有这两个字段）。
 这里没有页面拦截；合成玉、源石的防线是[对账](#guard-货币对账)。
 
 ## maa —— 调 MAA
@@ -210,14 +224,14 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 
 | 任务 | 参数 | MAA 任务 |
 |---|---|---|
-| `startup` | | StartUp（启动游戏、登录）；成功后再用 MaaFramework 回首页（游戏已经开着时 MAA 不管停在哪页），`data.home`：`true` 到了 / `false` 没回去 / `null` 连不上 |
+| `startup` | | StartUp（启动游戏、登录）；成功后再用 MaaFramework 回首页（游戏已经开着时 MAA 不管停在哪页），`data.home`：`true` 到了 / `false` 没回去 / `null` 连不上；路上关掉了弹窗时 `data.overlays` / `data.seen`（同 `input home`） |
 | `recruit` | | Recruit（公招；默认 4 次、刷新、3★4★ 自动招、5★6★ 留给用户） |
 | `infrast` | | Infrast（基建换班、收菜；无人机加速贸易站） |
 | `mall` | | Mall（信用商店、访问好友；优先买招聘许可，不买家具零件） |
 | `award` | | Award（任务奖励、邮件、免费单抽） |
 | `fight <关卡>` | `[--times N] [--medicine N] [--expiring-medicine [天]]` | Fight（刷关；`--times` 默认打到理智用完；`--medicine` 默认 0；`--expiring-medicine` 只用 N 天内过期的，不写天数为 2） |
 | `annihilation` | `[--stage <剿灭关>] [--times N] [--medicine N]` | Fight（剿灭；默认当期剿灭、打 1 次；`--stage` 也可写 龙门外环 / 龙门市区 / 切尔诺伯格） |
-| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`prts://<id>`（旧写法 `maa://<id>`、纯数字也认；作业集 `prts://s<id>` 还不支持）或本地 JSON，如 `copilot strip` 存的。作业站的作业先取下来存成 `private/cache/copilot/<id>.json` 再把文件交给 maa-cli：0.7.6 起它的作业码改成 `prts://`、`maa://` 会报弃用，0.7.5 只认 `maa://`，给文件哪个版本都一样，`data.copilot.file` 是这个文件；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid` 突袭；不用理智液。用了哪些写进 `data.copilot`） |
+| `copilot <作业>` | `[--formation] [--formation-index 1-4] [--add-trust] [--ignore-requirements] [--support 0-3] [--support-name <干员>] [--raid normal\|raid\|both] [--loop-times N]` | `maa copilot`（作业：`prts://<id>`（旧写法 `maa://<id>`、纯数字也认；作业集 `prts://s<id>` 还不支持）或本地 JSON，如 `copilot strip` 存的。作业站的作业先取下来存成 `private/cache/copilot/<id>.json` 再把文件交给 maa-cli：0.7.6 起它的作业码改成 `prts://`、`maa://` 会报弃用，0.7.5 只认 `maa://`，给文件哪个版本都一样，`data.copilot.file` 是这个文件；`--formation` 自动编队，`--formation-index` 用第几个编队，`--add-trust` 空位按信赖从低到高补人；`--ignore-requirements` 不管作业写的练度要求照样开打；`--support` 助战：0 不用（默认）、1 只缺一人时借、2 缺一人时借否则借 `--support-name`、3 缺一人时借否则随便借；`--raid raid` 突袭：只给一份作业时 maa-cli 丢掉突袭设置、按屏幕上的模式打，所以开打前截一张图核对关卡详情页是突袭模式（只看、不点），核对结果写进 `data.copilot.raid_check: {mode, shot}`，不是突袭就不开打（`not_raid_mode`，见下）；`--raid both` 单份作业做不到，退出码 2（`bad_arguments`），分两次跑；不用理智液。用了哪些写进 `data.copilot`） |
 | `closedown` | | CloseDown（关游戏） |
 
 `config.yaml` 的 `daily.params.<任务>` 会先合进默认参数，`--params` 最后合。理智液（`--medicine N`）：用户第一次同意后按记忆办。
@@ -250,7 +264,7 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 剿灭没做成不另记：`daily run` 和别的项一样交回 agent，由它判断原因（不能代理、找不到入口、掉线），要用户决定的写进总结。
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
-重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
+重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）、`not_raid_mode`（`copilot --raid raid` 开打前关卡详情页不是突袭模式：`data.raid_check.mode` 为 `normal` 是还在常规模式，`unknown` 是认不出模式按钮（不在详情页，如已进编队页，或这关没有突袭），`data.raid_check.shot` 是那张截图；没跑 maa、没花理智，切到突袭、停在详情页再跑）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
 maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa run` 的标准输出里没有 Summary 任务行；`fight` 的日志里既没有 `Current sanity` 也没有 `Mission started`），
 命令照常返回，`data.upstream_format` 是一句说明，同时记进 `sources.json`（maa-cli 的输出格式可能变了，次数、理智、掉落记不到）。
 
@@ -773,6 +787,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
  "failed": [], "goals_active": 0, "goals_pending": false, "award_pending": false, "farm": {"stage": "1-7", "times_done": 12, …},
  "depot_change": [{"id": "4001", "name": "龙门币", "delta": 12000}],
  "guard": {"ok": true}, "alerts": [], "report": "private/reports/2026-09-30-0440.md",
+ "seen_overlays": ["login_event"],                                               // 回首页时关掉了活动签到页 / 月签到才有
  "game_version": {"installed": {"version": "2.7.81", …}, "latest": {"version": "2.7.81", …}, "update_needed": false},
  "goals_expired": [{…同 goals list 的一项…}],                                    // 有到期挪走的才有
  "goals_change": {"removed": [{"title": "…", "fields": {…}, "done_entry": {"status": "完成", "ended": "…"}}],
@@ -789,6 +804,9 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
 `goals_change`：每段结束时（不论怎么结束）把 goals.md 里进行中、暂停的目标和这次日常开头的快照比（`fields` 是固定 6 行的原文，`field` 用输出名 `status` / `object` / `deadline`…）；
 没变就没有这个字段。`removed` 的 `done_entry` 是 goals-done.md 里同名那段的状态与结束行，`null` 表示没经过 `goals remove` / 到期就没了；改标题算一删一加。
 汇报里写成「目标变动」一节，`lines` 里也有（目标变动不算问题，但要告诉用户）。
+`seen_overlays`：这次日常的子命令（`maa startup` 回首页、`guard snapshot` 读仓库……）导航时关掉的活动签到页（`login_event`）/ 月签到（`sign_in`），
+接着跑的几段合在一起；有的话「要注意」（和 `lines` 的"告警："）里写一条"回首页时看到了活动签到页，被程序关掉了，奖励没领：领奖励交给 agent"，`next` 提示收尾前 `input home` 回去看。
+不算问题（`has_problem` 不看它），agent 按 `maapilot-daily`「活动签到」处理。MAA 自己（`maa-cli` 的任务里）关掉的看不到。
 `news`：官方日程（开头拉过的缓存，同 `doctor --brief` 的 `news`）；`due` 不为空时 `lines` 里有一行，agent 按 `maapilot-events` 跟用户说、`news told`。
 `lines`：每次都给的几句中文（怎么结束的、维护时段、目标变动、到期要看的、没做成的项、官方日程……），agent 照着转述。
 
@@ -1062,6 +1080,7 @@ goals-done.md 同样格式，每段多一行 `- 结束：2026-10-05 完成，遥
 `depot.json`：`{"at": iso, "items": {"<id>": count}}`；`box.json`：`{"at": iso, "operators": {"<名>": {"id", "rarity", "elite", "level", "potential"}}}`；
 `sanity.json`：`{"at": iso, "current": n, "max": n}`；
 `live.json`：`{"operators": {"<名>": {"elite", "level", "skill_level", "mastery": {"<技能>": 专几}, "at", "source"}}}`（只有读到的项，都是下界）。
+`overlays.jsonl`：导航时关掉的活动签到页 / 月签到，一行一个 `{"at", "name", "run_id"}`（`run_id` 是 `daily run` 的运行编号，别的命令为 `null`；见「input」）。
 
 ### log/
 
