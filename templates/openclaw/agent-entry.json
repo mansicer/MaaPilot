@@ -1,0 +1,14 @@
+{
+  "agents": {
+    "entries": {
+      "${AGENT_ID}": {
+        "workspace": "${REPO}",
+        "agentDir": "${AGENT_DIR}",
+        "model": "${MODEL}",
+        "identity": {
+          "name": "MaaPilot"
+        }
+      }
+    }
+  }
+}
