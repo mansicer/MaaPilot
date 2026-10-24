@@ -29,6 +29,16 @@ OpenClaw 是一个常驻的 Gateway：agent 有独立 workspace，定时由 Gate
 
 OpenClaw 用 Gateway 的**重复 cron**，不用一次性接力。2026-10-22 的 OpenClaw 2026.10.5 实测里，一次性 `at` 任务出现过到期未执行、没有 `lastRunAtMs`、任务仍残留的情况；重复任务不依赖“上一轮创建下一轮”。
 
+- 建任务用 `openclaw cron add`，参数与 [`cron-daily.json`](../../templates/openclaw/cron-daily.json) 对齐：
+
+  ```sh
+  openclaw cron add --cron "40 4 * * *" --tz Asia/Shanghai --agent <agent id> --session isolated \
+    --name "MaaPilot 日常 04:40" --message "<自足的提示>" --timeout-seconds 5400 \
+    --announce --channel <渠道> --account <账号> --to <会话>
+  ```
+
+  `--best-effort-deliver` 默认关着，保持不加，投递失败才会出现在执行记录里。
+- `openclaw cron list --agent <agent id> --json` 列出现有任务，`openclaw cron edit <id>` 改时间，`openclaw cron rm <id>` 删。只删 MaaPilot 自己的任务。
 - `schedule.kind` 用 `cron`，并写 IANA `tz`；每个日常时间点一条。
 - `sessionTarget` 用 `isolated`，避免长任务混进用户对话历史。
 - 提示单看一句就能执行，并明确写“这是重复定时，不要建下一次一次性定时”。

@@ -57,9 +57,15 @@ codex
 
 ### 用 OpenClaw
 
-把本仓库注册成 OpenClaw agent，并把 agent 的 `workspace` 指向仓库根目录：`AGENTS.md` 和 `.agents/skills/` 必须在这个目录下。配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)，完整步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)。
+把下面这句话发给 OpenClaw：
 
-定时日常使用 Gateway 的重复定时；每个 `schedule` 时间点建一条，不用一次性接力。
+> 帮我安装并配置 https://github.com/mansicer/MaaPilot.git，先阅读仓库里的 AGENTS.md 和 docs/harnesses/openclaw.md，按其中的说明完成设置。
+
+OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓库根目录、加载 skills，然后问你模拟器怎么连、日常几点跑。装运行环境要联网，OpenClaw 会请你确认它执行这些命令。
+
+定时日常用 Gateway 的重复定时，Gateway 要一直开着。
+
+详细配置步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)，配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)。
 
 ### 在 Windows 上
 
