@@ -349,7 +349,11 @@ def _copilot_argv(opts: dict, fetch=fetch_plan) -> tuple[list[str], dict]:
     if opts.get("support_name"):
         argv += ["--support-unit-name", opts["support_name"]]
         info["support_name"] = opts["support_name"]
-    if opts.get("raid") and opts["raid"] != "normal":
+    if opts.get("raid") == "both":
+        # 只给一份作业时 maa-cli 是单作业模式，突袭设置被丢掉，"both" 实际只按屏幕上的模式打一次
+        raise CliError("bad_arguments", "--raid both 做不到：单份作业时 maa-cli 只按屏幕上的模式打一次", exit=BAD_REQUEST,
+                       hint="分两次跑：先在关卡详情页常规模式下跑一次（不加 --raid），再切到突袭、加 --raid raid 跑一次")
+    if opts.get("raid") == "raid":
         argv += ["--raid", opts["raid"]]
         info["raid"] = opts["raid"]
     if opts.get("loop_times"):
@@ -358,9 +362,34 @@ def _copilot_argv(opts: dict, fetch=fetch_plan) -> tuple[list[str], dict]:
     return argv, info
 
 
+def raid_shot():
+    """`--raid raid` 开打前截一张（同 `screen shot`，只读连接、不点）→ (图, 路径)。测试里替换掉。"""
+    from maapilot.tools import screen
+    img, meta = screen.capture(common.connect(ocr=False, readonly=True), "raid-check")
+    return img, meta["path"]
+
+
+def check_raid_mode() -> dict:
+    """单份作业时 maa-cli 丢掉突袭设置、按屏幕上的模式打，所以 `--raid raid` 开打前确认关卡详情页已经是突袭模式。
+    只截图、认切换按钮，**不点任何东西**（不切模式、不点开始行动 / 代理）。是突袭 → {mode, shot}；
+    不是（常规，或认不出：不在详情页）→ CliError not_raid_mode（退出码 1），由 agent 切到突袭再跑。"""
+    from maapilot.crew import battle
+    img, shot = raid_shot()
+    mode = battle.detail_mode(img)
+    data = {"mode": mode, "shot": shot}
+    if mode == "raid":
+        return data
+    msg = ("关卡详情页现在是常规模式，不是突袭" if mode == "normal"
+           else "看不出关卡详情页的模式（不在详情页，或这关没有突袭）")
+    raise CliError("not_raid_mode", msg + "：单份作业时 maa-cli 会按屏幕上的模式打，所以没有开打", exit=FAILED,
+                   data={"raid_check": data},
+                   hint="回到这关的关卡详情页，点切换按钮切到突袭、截图确认后再跑同一条命令（不要先进编队页）")
+
+
 def go_home() -> bool | None:
     """StartUp 成功后游戏已经开着时，MAA 不管停在哪一页（真机：留在终端页）。用 MaaFramework 回首页
-    （关弹窗、左上菜单"首页"、返回键；只导航，不点会花东西的按钮）。→ 到首页了 True / 没回去 False / 连不上 None。"""
+    （关弹窗、左上菜单"首页"、返回键；只导航，不点会花东西的按钮）。→ 到首页了 True / 没回去 False / 连不上 None。
+    路上关掉的弹窗记在 maapilot.crew.overlays（startup 的结果写进 data.overlays / seen）。"""
     try:
         from maapilot.crew import nav
         return bool(nav.ensure_home(common.connect(ocr=True)))
@@ -420,6 +449,8 @@ def run(task: str, **opts) -> dict:
         ttype, params, info = build_params(task, opts, cfg)
     common.ensure_device()
     maa.install_config()                               # 缺的配置补上，profile 的 adb_path 对上 emulator.adb
+    if task == "copilot" and info.get("raid") == "raid":
+        info["raid_check"] = check_raid_mode()
     timeout = opts.get("timeout_s") or TASKS[task][1]
     started = common.now()
     if task == "copilot":
@@ -430,7 +461,13 @@ def run(task: str, **opts) -> dict:
     _note_output(task, mrun, data)
     if mrun.ok:
         if task == "startup":
+            from maapilot.crew import overlays
+            pos = overlays.mark()
             data["home"] = go_home()
+            closed = overlays.closed_since(pos)            # 回首页路上关掉的弹窗：写明，活动签到页 / 月签到交给 agent
+            if closed:
+                data["overlays"] = list(dict.fromkeys(closed))
+                data["seen"] = overlays.notable(closed)
         return data
     data["evidence"] = collect_evidence(task, started, common.now())
     if data["evidence"].get("shot_now"):
@@ -492,6 +529,7 @@ def register(sub) -> None:
     p.add_argument("--support", type=int, choices=range(0, 4), metavar="0-3",
                    help="助战：0 不用（默认）；1 只缺一人时借；2 缺一人时借，否则借 --support-name；3 缺一人时借，否则随便借")
     p.add_argument("--support-name", help="借哪个助战干员")
-    p.add_argument("--raid", choices=("normal", "raid", "both"), help="normal 普通（默认）/ raid 突袭 / both 各打一次")
+    p.add_argument("--raid", choices=("normal", "raid", "both"),
+                   help="normal 普通（默认）/ raid 突袭（开打前核对详情页是突袭模式）/ both 不支持，分两次跑")
     p.add_argument("--loop-times", type=int, help="重复几次")
     p.set_defaults(func=cmd, command="maa copilot", task="copilot")

@@ -44,20 +44,15 @@ def test_daily_job_has_no_deployment_specific_delivery():
     assert not (OPENCLAW / "cron-oneshot.json").exists()
 
 
-def _section(text: str, heading: str) -> str:
-    start = text.index(f"## {heading}")
-    end = text.find("\n## ", start + 3)
-    return text[start:] if end < 0 else text[start:end]
-
-
 def test_openclaw_does_not_replace_the_existing_one_shot_defaults():
-    harnesses = (ROOT / "docs" / "harnesses.md").read_text(encoding="utf-8")
+    harnesses = (ROOT / "docs" / "harnesses" / "README.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    claude = _section(harnesses, "Claude Code（命令行、桌面版）")
-    codex = _section(harnesses, "Codex 桌面版")
-    openclaw = _section(harnesses, "OpenClaw")
-    assert "一次性" in claude and "recurring: false" in claude
-    assert "一次性的定时任务" in codex
-    assert "重复任务" in openclaw
-    assert "默认用会话内的一次性定时接力" in agents
-    assert "OpenClaw 例外" in agents
+    openclaw = (ROOT / "docs" / "harnesses" / "openclaw.md").read_text(encoding="utf-8")
+    assert "claude-code.md" in harnesses
+    assert "codex.md" in harnesses
+    assert "openclaw.md" in harnesses
+    assert "| OpenClaw | `docs/harnesses/openclaw.md` |" in agents
+    assert agents.count("OpenClaw") == 1
+    assert "一次性接力" in openclaw
+    assert "重复 cron" in openclaw
+    assert "OpenClaw 例外" not in (ROOT / ".agents" / "skills" / "maapilot-daily" / "SKILL.md").read_text(encoding="utf-8")

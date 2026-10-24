@@ -125,24 +125,25 @@ def make_dir_link(link: Path, target: Path) -> str:
 
 
 def imread(p: Path | str):
-    """cv2.imread 在 Windows 上读不了带中文的路径：先读字节再解码。读不到 → None。"""
-    import cv2
+    """读图片 → BGR 的 uint8 数组（和 MaaFramework 截图同一格式）；带透明通道、灰度的都转成 3 通道。读不到 → None。
+    用 PIL 不用 cv2（见 crew/clears.ccoeff_normed）；PIL 认中文路径。"""
     import numpy as np
+    from PIL import Image
     try:
-        data = np.fromfile(str(p), dtype=np.uint8)
-    except OSError:
+        with Image.open(str(p)) as im:
+            rgb = np.asarray(im.convert("RGB"))
+    except (OSError, ValueError):
         return None
-    if data.size == 0:
-        return None
-    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+    return np.ascontiguousarray(rgb[:, :, ::-1])
 
 
 def imwrite(p: Path | str, img, ext: str | None = None) -> bool:
-    """cv2.imwrite 在 Windows 上写不了带中文的路径：先编码再写字节。格式按扩展名（或 ext，如 ".png"）。"""
-    import cv2
+    """BGR 数组写成图片。格式按扩展名（或 ext，如 ".png"）。"""
+    from PIL import Image
     p = Path(p)
-    ok, buf = cv2.imencode(ext or p.suffix or ".png", img)
-    if not ok:
+    fmt = (ext or p.suffix or ".png").lstrip(".").upper()
+    try:
+        Image.fromarray(img[:, :, ::-1] if img.ndim == 3 else img).save(str(p), format="JPEG" if fmt == "JPG" else fmt)
+    except (OSError, ValueError, KeyError):
         return False
-    buf.tofile(str(p))
     return True

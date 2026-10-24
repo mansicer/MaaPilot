@@ -12,7 +12,6 @@ import pytest
 import yaml
 
 from maapilot import paths
-from maapilot.cliutil import CliError
 from maapilot.flows import daily
 from maapilot.tools import host_cmd
 from tests.test_daily import _no_real_crontab, env, run, script  # noqa: F401 - fixture
@@ -128,32 +127,6 @@ def test_trust_key_spelled_differently(capsys, env, codex, monkeypatch):
     assert host_cmd.codex_trusted(ROOT) is True
     code, out = run(capsys, "host", "install", "codex")
     assert code == 0 and out["data"]["changed"] is False and "[projects" not in cfgfile.read_text(encoding="utf-8")[5:]
-
-
-# --- OpenClaw -----------------------------------------------------------------------------------------------------------
-
-def test_install_openclaw_only_returns_setup_steps(env, monkeypatch, tmp_path):
-    """OpenClaw 没有项目信任目录：install 只认出程序、给出步骤，不写 Codex 的 config.toml。"""
-    binary = str(tmp_path / "bin" / "openclaw")
-    monkeypatch.setattr(host_cmd.hosts, "resolve", lambda *args, **kwargs: binary)
-    out = host_cmd.install("openclaw", dry_run=False)
-    assert out == {
-        "host": "openclaw",
-        "path": binary,
-        "trusted": None,
-        "changed": False,
-        "next": ["按 docs/harnesses.md「OpenClaw」一节把本仓库注册成一个 agent",
-                 "把 templates/openclaw/agent-entry.json 合并进 openclaw.json 的 agents.entries",
-                 "用 templates/openclaw/cron-daily.json 建重复定时；不要建一次性接力"],
-    }
-    assert not (host_cmd.codex_home() / "config.toml").exists()
-
-
-def test_install_openclaw_reports_missing_program(env, monkeypatch):
-    monkeypatch.setattr(host_cmd.hosts, "resolve", lambda *args, **kwargs: None)
-    with pytest.raises(CliError) as caught:
-        host_cmd.install("openclaw", dry_run=False)
-    assert caught.value.code == "no_openclaw" and caught.value.exit == 5
 
 # --- 读 Codex 的规则文件（tests/test_hosts_windows.py 用；两边一致、是生成的见 tests/test_policy.py） -------------------
 

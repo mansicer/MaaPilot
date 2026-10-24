@@ -57,9 +57,9 @@ codex
 
 ### 用 OpenClaw
 
-把本仓库注册成 OpenClaw agent，并把 agent 的 `workspace` 指向仓库根目录：`AGENTS.md` 和 `.agents/skills/` 必须在这个目录下。配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)，容器、模拟器和定时限制见 [`docs/harnesses.md`](docs/harnesses.md) 的「OpenClaw」一节。
+把本仓库注册成 OpenClaw agent，并把 agent 的 `workspace` 指向仓库根目录：`AGENTS.md` 和 `.agents/skills/` 必须在这个目录下。配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)，完整步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)。
 
-OpenClaw 的定时日常使用 Gateway 的重复定时。每个日常时间点建一条，任务提示里要说明“这是重复定时，不要再建下一次一次性定时”，否则 `maapilot-daily` 会按一次性接力的规则多建一条。
+定时日常使用 Gateway 的重复定时；每个 `schedule` 时间点建一条，不用一次性接力。
 
 ### 在 Windows 上
 
@@ -70,23 +70,16 @@ OpenClaw 的定时日常使用 Gateway 的重复定时。每个日常时间点�
 
 ### 从 v0.1 升级
 
-v0.2.0 起定时日常改由 agent 自己的会话内定时来跑（OpenClaw 用 Gateway 重复定时），不再用系统的定时任务：
+v0.2.0 起定时日常改由 agent 自己的会话内定时来跑，不再用系统的定时任务：
 - 旧的系统定时（macOS 的 crontab 那一行、Windows "任务计划程序"里的任务）要删掉：更新后打开会话，启动检查会提醒，跟助手说"删掉"就行（它会先给你看要删什么）。
 - 再让助手在会话里定好定时日常（"把定时日常设一下"），这个会话之后别关。
 - 更新前就开着的会话：让助手重新读一遍 AGENTS.md；它还在后台挂着的旧的"盯着日常"命令可以停掉（新版已经没有了），最好直接重开一个会话。
 - 在 Windows 上靠 Codex 命令行跑定时日常的：改用 Codex 桌面版。
+- `private/config.yaml` 里的 `agent`、`schedule_options` 用不到了，可以删（启动检查会提示）。
 
 ### 支持哪些 Agent
 
-MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接进来。
-
-1. 多模态输入（支持图片输入）
-2. 长时工具调用：bash 命令，文件访问
-3. 读取 AGENTS 文档和使用 skills
-4. 能按时唤醒 agent 并运行日常：Claude Code / Codex 用会话内定时，OpenClaw 用等价的 Gateway 定时
-5. 项目级权限（可选）：限制 Agent 直接操控模拟器（如通过 adb）
-
-1–3 是在对话里使用的前提，4 是定时日常的前提。会话内定时的结果回原会话；OpenClaw 的独立定时任务可以通过 `announce` 投递结果。
+MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能读 `AGENTS.md` 和 skills 的 agent 都能在对话里用；还能按时叫醒 agent 的，就能跑定时日常（完整要求见 [`docs/harnesses/`](docs/harnesses/)）。
 
 | Agent | 对话里用 | 定时日常 |
 |---|---|---|
@@ -95,7 +88,7 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 | Codex 命令行 | 支持 | 不支持（没有会话内定时） |
 | OpenClaw | 支持 | 支持（Gateway 重复定时） |
 
-各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses.md`](docs/harnesses.md)，接新的 agent 也看那里。
+各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses/`](docs/harnesses/)（每家一个文件），接新的 agent 看那里的 README。
 
 ## 亮点功能
 
@@ -136,11 +129,10 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 
 ## 参与开发
 
-先读 [`CLAUDE_DEV.md`](CLAUDE_DEV.md)（开发规矩）。
+先读 [`CLAUDE_DEV.md`](CLAUDE_DEV.md)（设计哲学和开发规矩）。思路是"程序薄、agent 厚"：`maapilot` 命令只做可靠的事，做法写进 skill。
 
-- 设计：[`docs/design.md`](docs/design.md)——思路是"程序薄、agent 厚"：`maapilot` 命令只做可靠的事，做法写进 skill
 - 命令与输出：[`docs/cli.md`](docs/cli.md)
-- 给用户的 agent 的说明：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 引用它）和 [`.agents/skills/`](.agents/skills/)
+- 给用户的 agent 的说明：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 只引用它）、[`.agents/skills/`](.agents/skills/) 和 [`docs/harnesses/`](docs/harnesses/)
 - 测试：`.venv/bin/python -m pytest -q`
 
 ## 致谢
@@ -149,7 +141,7 @@ MaaPilot 不绑定某个 agent：支持下面这些功能的 agent 都可以接�
 
 - 游戏自动化：[MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights)（MaaCore，干员培养等任务）、[maa-cli](https://github.com/MaaAssistantArknights/maa-cli)（日常任务）
 - 识别与操作框架：[MaaFramework](https://github.com/MaaXYZ/MaaFramework)
-- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)
+- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)
 
 ### 开源库
 

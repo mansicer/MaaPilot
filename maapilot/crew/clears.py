@@ -97,7 +97,7 @@ class StageReading:
 @lru_cache(maxsize=None)
 def _template(name: str) -> np.ndarray:
     from maapilot.oscompat import fs
-    img = fs.imread(TEMPLATES / f"{name}.png")          # 仓库在中文路径下时 cv2.imread 在 Windows 上读不了
+    img = fs.imread(TEMPLATES / f"{name}.png")          # 仓库在中文路径下也读得了
     if img is None:
         raise FileNotFoundError(TEMPLATES / f"{name}.png")
     return img
@@ -105,16 +105,52 @@ def _template(name: str) -> np.ndarray:
 
 def match(img: np.ndarray, name: str, roi=FULL_ROI) -> tuple[float, tuple[int, int, int, int]]:
     """模板 `name` 在 `roi` 里的最好匹配（TM_CCOEFF_NORMED，同 MaaCore）→ (分数, 框)。区域比模板小 → (0, 区域)。"""
-    import cv2
     tpl = _template(name)
     x, y, w, h = roi
     part = img[y:y + h, x:x + w]
     th, tw = tpl.shape[:2]
     if part.shape[0] < th or part.shape[1] < tw:
         return 0.0, roi
-    res = cv2.matchTemplate(part, tpl, cv2.TM_CCOEFF_NORMED)
-    _, score, _, loc = cv2.minMaxLoc(res)
-    return float(score), (x + loc[0], y + loc[1], tw, th)
+    res = ccoeff_normed(part, tpl)
+    dy, dx = np.unravel_index(int(np.argmax(res)), res.shape)
+    return float(res[dy, dx]), (x + int(dx), y + int(dy), tw, th)
+
+
+def ccoeff_normed(img: np.ndarray, tpl: np.ndarray) -> np.ndarray:
+    """OpenCV matchTemplate(TM_CCOEFF_NORMED) 的 numpy 版（多通道合在一起算，同 OpenCV）：
+    不用 cv2，是因为 macOS 上 cv2 和 MaaFramework 各带一份 OpenCV，一起加载时 objc 会报类重复。
+    相关项用 FFT 算，窗口内的和与平方和用积分图。→ (H-th+1, W-tw+1) 的分数，方差为 0 的窗口记 0。"""
+    img = img.astype(np.float64)
+    tpl = tpl.astype(np.float64)
+    if img.ndim == 2:
+        img, tpl = img[..., None], tpl[..., None]
+    H, W, C = img.shape
+    th, tw = tpl.shape[:2]
+    n = th * tw
+    oh, ow = H - th + 1, W - tw + 1
+    t0 = tpl - tpl.mean(axis=(0, 1))                    # 模板去均值（每个通道）
+    tnorm2 = float((t0 ** 2).sum())
+    fh, fw = H + th - 1, W + tw - 1
+    num = np.zeros((oh, ow))
+    win2 = np.zeros((oh, ow))                           # 窗口去均值后的平方和
+    for c in range(C):
+        a = img[..., c]
+        f = np.fft.irfft2(np.fft.rfft2(a, (fh, fw)) * np.fft.rfft2(t0[::-1, ::-1, c], (fh, fw)), (fh, fw))
+        num += f[th - 1:th - 1 + oh, tw - 1:tw - 1 + ow]   # Σ T'·I（T' 均值为 0，等于 Σ T'·I'）
+        s1 = _window_sum(a, th, tw)
+        s2 = _window_sum(a * a, th, tw)
+        win2 += s2 - s1 * s1 / n
+    denom = np.sqrt(np.maximum(win2, 0) * tnorm2)
+    out = np.zeros((oh, ow))
+    ok = denom > 1e-6 * max(tnorm2, 1.0)
+    out[ok] = num[ok] / denom[ok]
+    return np.clip(out, -1.0, 1.0)
+
+
+def _window_sum(a: np.ndarray, th: int, tw: int) -> np.ndarray:
+    ii = np.zeros((a.shape[0] + 1, a.shape[1] + 1))
+    ii[1:, 1:] = a.cumsum(0).cumsum(1)
+    return ii[th:, tw:] - ii[:-th, tw:] - ii[th:, :-tw] + ii[:-th, :-tw]
 
 
 def _slot(img: np.ndarray, cx: int) -> bool | None:

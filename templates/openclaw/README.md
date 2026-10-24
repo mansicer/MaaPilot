@@ -2,7 +2,7 @@
 
 把 MaaPilot 接进 [OpenClaw](https://docs.openclaw.ai) 用的片段。OpenClaw 2026.10 起使用按 agent id 索引的 `agents.entries`；旧的 `agents.list` 会由 `openclaw doctor --fix` 迁移，不要再按旧格式新增 agent。
 
-仓库不替用户改 `~/.openclaw/openclaw.json`：把片段合并进已有配置，保留其它 agent 和渠道设置。完整接入步骤、限制和实测见 [`docs/harnesses.md`](../../docs/harnesses.md) 的「OpenClaw」一节。
+仓库不替用户改 `~/.openclaw/openclaw.json`：把片段合并进已有配置，保留其它 agent 和渠道设置。完整接入步骤、限制和实测见 [`docs/harnesses/openclaw.md`](../../docs/harnesses/openclaw.md)。
 
 ## 占位符
 
@@ -36,8 +36,8 @@ openclaw gateway call cron.add --params "$(cat templates/openclaw/cron-daily.jso
 openclaw gateway call cron.list --json
 ```
 
-定时结果默认投递到 `delivery` 指定的会话；不需要外部通知时显式设置 `delivery.mode="none"`，避免宿主采用默认投递策略。模板用 `bestEffort=false` 暴露投递失败，最终简报只由 `delivery` 发送一次。收件人保留原始大小写，不从 session key 推导；任务执行成功和消息送达分别检查。完成接入后，经用户授权用不操作游戏的测试任务验证投递和去重，详见 [`OpenClaw 消息投递`](../../docs/harnesses.md#openclaw-消息投递)。
+定时结果默认投递到 `delivery` 指定的会话；不需要外部通知时显式设置 `delivery.mode="none"`，避免宿主采用默认投递策略。模板用 `bestEffort=false` 暴露投递失败，最终简报只由 `delivery` 发送一次。收件人保留原始大小写，不从 session key 推导；任务执行成功和消息送达分别检查。完成接入后，经用户授权用不操作游戏的测试任务验证投递和去重，详见 [`消息汇报与阻塞问题`](../../docs/harnesses/openclaw.md#消息汇报与阻塞问题)。
 
-如果另有主 agent 转交任务，也要将该节的交互阻塞反馈、渠道发送状态检查和重复结果静默规则加入主 agent 的说明文件；只修改 MaaPilot 的提示词无法约束主 agent 的转发行为。
+如果另有主 agent 转交任务，也要把该节的交互阻塞反馈、渠道发送状态检查和重复结果静默规则加入主 agent 的说明文件；只修改 MaaPilot 的提示词无法约束主 agent 的转发行为。
 
 不要在仓库里放 `SOUL.md`、`USER.md`、`IDENTITY.md`、`TOOLS.md`、`HEARTBEAT.md` 这些 agent 自己的 bootstrap 文件；预置 workspace 可以设 `agents.defaults.skipBootstrap: true`。

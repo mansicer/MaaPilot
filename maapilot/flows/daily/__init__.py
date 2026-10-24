@@ -1,4 +1,4 @@
-"""`maapilot daily run / done / status / unschedule`：日常。契约见 docs/cli.md「daily」，设计见 docs/design.md「运行方式」。
+"""`maapilot daily run / done / status / unschedule`：日常。契约见 docs/cli.md「daily」，做法见 AGENTS.md「定时日常」、skill maapilot-daily。
 
 agent 一直在场（用户会话或 harness 的独立任务会话；定时日常由 harness 的定时任务叫醒它）。daily run 只做编排，
 每一步都调别的命令（子进程 `python -m maapilot.cli …`，继承本进程的模拟器锁）：
