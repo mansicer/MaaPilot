@@ -23,8 +23,36 @@ OpenClaw 是一个常驻的 Gateway：agent 有独立 workspace，定时由 Gate
 4. 按 `private/config.yaml` 的 `schedule`，每个时间点建一条重复 cron；使用 [`cron-daily.json`](../../templates/openclaw/cron-daily.json) 的字段结构，把 `${...}` 换成实际值。
 5. 先确认用户能收到哪个渠道的**主动投递**。不要因为渠道显示 connected 就认定它能主动发送；用下面的「投递渠道预检」实测。没有可用渠道时把 cron 的 `delivery.mode` 设成 `none`，并明确告诉用户定时任务仍会执行，但结果只保存在 OpenClaw 会话里。
 6. 经用户同意，用不操作游戏的独立任务分别验收“最终只来一条”和“阻塞提问能回到原始会话”；测试完成后删除测试任务。
+7. 按下面的「setup 收尾确认」把整个过程中遇到的问题、自动采用的默认值和仍需决定的事项汇总给用户；用户确认后才能写 `private/setup.json`。
 
 配置格式按 OpenClaw 2026.10 及以后验证。旧配置里的 `agents.list` 先用 `openclaw doctor --fix` 迁移到 `agents.entries`。仓库不替用户修改 `~/.openclaw/openclaw.json`。
+
+### setup 收尾确认
+
+OpenClaw 的 setup 结束时，在**发起 setup 的原始会话**里发一条汇总，不要只在内部会话里写，也不要每遇到一个小问题就打断用户。汇总至少包含：
+
+- 模拟器和服务器、游戏协议选择、日常时间、日常项目、没有目标时的默认关卡、活动签到是否代领、理智液偏好。
+- 每条 cron 的时间、agent、投递渠道和目标，以及下一次执行时间。
+- 主动投递测试和阻塞提问回传测试的实际结果；失败时写清失败在哪一层。
+- setup 过程中遇到的错误、缺少的依赖、配置文件或文档缺失、Gateway 重启、agent 数据库异常等，标明“已修复 / 仍失败 / 暂时规避”。
+- 任何未经用户明确答复而采用的默认值，必须单独列出；不能把旧部署的配置静默当成新部署的确认。
+
+**重装或已有 `setup.json` 时**：逐项列出准备沿用的旧配置，先问“沿用还是修改”；用户明确说“沿用现有配置”后才能跳过问答。用户只说了“重新安装/重新配置”不等于同意沿用旧答案。
+
+建议格式：
+
+```text
+OpenClaw / MaaPilot setup 问题清单
+1. 模拟器与服务器：……（当前值，是否确认？）
+2. 游戏更新协议：……（当前值，是否确认？）
+3. 定时任务：04:40 / 12:40 / 20:40，投递到……（是否确认？）
+4. 日常项目：……（是否全做？）
+5. 默认关卡与签到：……（当前默认，是否确认？）
+6. setup 中遇到的问题：……（已处理 / 仍需你决定）
+请按编号回复“确认”，或直接写要改的值。
+```
+
+用户确认后，按答复修正 `private/config.yaml` 和 OpenClaw cron；用户明确确认的项才视为定稿，然后写 `private/setup.json`。用户尚未回复时，已完成且可回滚的环境安装和投递测试配置可以保留，但 setup 保持未完成：不写 `setup.json`，不启动会消耗游戏资源的验证日常，并把待确认事项保留到下一次用户消息。
 
 ## 定时日常
 
@@ -49,7 +77,29 @@ OpenClaw 用 Gateway 的**重复 cron**，不用一次性接力。2026-10-22 的
 
 ## 长时间任务
 
-`daily run` 通常要 20–60 分钟。用 `exec` 放后台，`timeoutSeconds` 与配置里的 `task_timeout_min` 对齐（模板为 5400 秒），再用 `process` 查看结果。给命令设置很短的超时会把进程杀掉并可能留下孤儿任务和锁。
+`daily run` 通常要 20–60 分钟。`exec` 超过当前等待时间后会返回一个后台进程；cron 的 `timeoutSeconds` 与配置里的 `task_timeout_min` 对齐（模板为 5400 秒）。给命令设置很短的超时会把进程杀掉并可能留下孤儿任务和锁。
+
+**定时日常启动后台进程后，不要结束当前 agent turn 去等待“完成时自动唤醒”。** OpenClaw 在部分 isolated/cron 会话里会把完成事件的目标落成没有原始投递来源的 `agent:<id>:main`，随后报：
+
+```text
+Session event origin is missing; start fresh authorized work instead
+```
+
+这时 `daily run` 可能已经成功，但 agent 没有被唤醒执行 `daily done` 和最终总结，QQ、微信或其他渠道都收不到报告。修复方式是在**同一个 cron turn 内**用 `process` 反复查看后台进程，直到退出：
+
+- `exec` 返回后台 `sessionId` 后，立即持续 `process` 的 `poll`；进程存活期间保持当前 turn，不用最终回复、不结束 turn、不发中间消息。
+- 进程退出后，再读取 `maapilot daily status` 和报告，完成目标部分、`daily done`，最后只输出一条总结交给 cron `delivery`。
+- 工具提示“Completion will wake this conversation automatically”时，MaaPilot 的定时日常仍按上面的轮询方式处理。只有确认当前宿主支持可靠的外部来源回传，才可以使用自动唤醒。
+- 一次性 `at` 测试任务也按同样方式工作；不要用“结束本轮，等完成通知”来测试回传。
+
+如果已经出现 `Session event origin is missing`：
+
+1. 不要重跑 `daily run`，也不要反复重试那条完成事件。
+2. 用 `maapilot daily status` 和 `report show` 核对运行状态；如果日常已是 `done/ok` 且 `open:true`，只补执行 `maapilot daily done`。
+3. 从用户当前所在的原始渠道会话重新发起一次收尾；不要从没有来源的 `agent:<id>:main` 会话恢复。
+4. 收尾成功后只发送一次报告。若无法恢复原会话来投递，保留报告，等下一次用户消息或下一次日常接手；绝不为了补消息重跑游戏任务。
+
+这是 OpenClaw 当前后台完成事件的来源归属问题。上游应让完成事件继承启动它的 cron run 的 `sessionId`、渠道和投递路由；在修复前，OpenClaw 适配用“同一轮 poll 到退出”避免走到这个回传路径。
 
 ## 消息汇报与阻塞问题
 

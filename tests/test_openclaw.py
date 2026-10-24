@@ -43,6 +43,13 @@ def test_daily_job_stays_silent_until_one_final_delivery():
     assert "message/conversations_send/sessions_send" in message
 
 
+def test_daily_job_polls_background_work_without_relying_on_completion_handoff():
+    message = _json("cron-daily.json")["payload"]["message"]
+    assert "当前 turn 内用 process 持续 poll 到退出" in message
+    assert "不要结束 turn 等待完成事件自动唤醒" in message
+    assert "Session event origin is missing" in message
+
+
 def test_daily_job_has_no_deployment_specific_delivery():
     job = _json("cron-daily.json")
     assert job["delivery"] == {"mode": "announce", "channel": "${CHANNEL}", "accountId": "${ACCOUNT_ID}",
@@ -80,3 +87,22 @@ def test_openclaw_delivery_is_channel_independent_and_tested_before_use():
     assert "原始" in main_agent and "sessions_send" in main_agent
     assert "内部" in main_agent and "一条最终结果" in main_agent
     assert "qqbot" not in readme.lower() and "weixin" not in readme.lower()
+
+
+def test_openclaw_setup_ends_with_one_issue_and_decision_summary():
+    openclaw = (ROOT / "docs" / "harnesses" / "openclaw.md").read_text(encoding="utf-8")
+    assert "setup 收尾确认" in openclaw
+    assert "setup 过程中遇到的错误" in openclaw
+    assert "未经用户明确答复而采用的默认值" in openclaw
+    assert "用户确认后才能写 `private/setup.json`" in openclaw
+    assert "用户尚未回复时" in openclaw and "setup 保持未完成" in openclaw
+    assert "沿用还是修改" in openclaw
+
+
+def test_openclaw_long_tasks_do_not_rely_on_missing_origin_wakeup():
+    openclaw = (ROOT / "docs" / "harnesses" / "openclaw.md").read_text(encoding="utf-8")
+    assert "不要结束当前 agent turn" in openclaw
+    assert "同一个 cron turn 内" in openclaw
+    assert "Session event origin is missing" in openclaw
+    assert "不要重跑 `daily run`" in openclaw
+    assert "只补执行 `maapilot daily done`" in openclaw
