@@ -1,0 +1,22 @@
+{
+  "name": "MaaPilot 日常 ${HH:MM}",
+  "agentId": "${AGENT_ID}",
+  "sessionTarget": "isolated",
+  "schedule": {
+    "kind": "cron",
+    "expr": "${MINUTE} ${HOUR} * * *",
+    "tz": "${TZ}"
+  },
+  "payload": {
+    "kind": "agentTurn",
+    "message": "定时日常（${HH:MM}）：这是重复定时，不要按 skill maapilot-daily 再建下一次一次性定时。先读 private/memory/MEMORY.md（如存在），按 skill maapilot-daily 跑 MaaPilot 日常。daily run 进入后台后，必须在当前 turn 内用 process 持续 poll 到退出；不要结束 turn 等待完成事件自动唤醒，避免 Session event origin is missing。跑完必须用 maapilot daily done 收尾。运行期间不要输出进度、commentary、完成确认或后台步骤提示；等待、轮询、旧截图和后台完成通知只内部处理，需要静默时只返回 NO_REPLY。只有 daily done 成功后，才生成且仅生成一条最终总结（结果、必要花费、失败及待决定事项），并且只交给 delivery 投递；不要调用 message/conversations_send/sessions_send，也不要请主会话重复转发同一份总结。无人值守遇到未获授权事项就跳过并写入总结，不等待答复，也不自行扩大授权。",
+    "timeoutSeconds": 5400
+  },
+  "delivery": {
+    "mode": "announce",
+    "channel": "${CHANNEL}",
+    "accountId": "${ACCOUNT_ID}",
+    "to": "${DELIVERY_TO}",
+    "bestEffort": false
+  }
+}

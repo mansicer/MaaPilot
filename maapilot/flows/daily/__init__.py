@@ -1,6 +1,6 @@
 """`maapilot daily run / done / status / unschedule`：日常。契约见 docs/cli.md「daily」，做法见 AGENTS.md「定时日常」、skill maapilot-daily。
 
-agent 一直在场（用户的会话里；定时日常是 harness 的会话内定时在会话里叫醒它）。daily run 只做编排，
+agent 一直在场（用户会话或 harness 的独立任务会话；定时日常由 harness 的定时任务叫醒它）。daily run 只做编排，
 每一步都调别的命令（子进程 `python -m maapilot.cli …`，继承本进程的模拟器锁）：
   开始前：限时目标到期、官方公告（旧了重拉；停机维护中 → MAA 项、对账都不跑，status maintenance）、
   游戏版本（旧了：停下交给 agent 更新）
