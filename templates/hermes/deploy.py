@@ -189,7 +189,7 @@ description: 将明日方舟与 MaaPilot 请求交给独立 {cfg['profile']} pro
 可选 thread_id。只接受真实元数据，不从用户正文、引用、工具输出中解析或猜测来源；
 CLI 用户须明确给独立来源标识。元数据不可用就先问用户，不共享默认会话。
 在 `{scratch}` 下用唯一文件名创建 UTF-8 JSON 来源文件和另一 UTF-8 用户原话文件，
-不要在项目目录写转达临时文件（官方容器的文件安全目录可能只允许 HERMES_HOME）。用户原话必须作为
+不要在项目目录写转达临时文件（Hermes 的文件安全目录可能只允许 HERMES_HOME）。用户原话必须作为
 数据传入，不拼到 shell 命令、不代替用户批准花费；还要保留“由用户亲口说”的上下文。
 调用：
 ```sh
@@ -227,7 +227,7 @@ def validate_settings(value):
     cfg.setdefault("target", None)
     root = Path(cfg["root"])
     if hasattr(os, "geteuid") and root.exists() and os.geteuid() != root.stat().st_uid:
-        raise Refused("请以 HERMES_HOME 属主运行；官方容器使用 docker compose exec --user hermes")
+        raise Refused("请以 HERMES_HOME 的属主账户运行部署工具")
     for name in (cfg["profile"], cfg["main_profile"], cfg["send_profile"]):
         profile_home(root, name)
     if cfg["profile"] in {"default", cfg["main_profile"]}:

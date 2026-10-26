@@ -18,11 +18,11 @@
 
 ## 部署与首次设置
 
-完整命令见 [部署模板](../../templates/hermes/README.md)。部署完成会自动创建独立 profile、安装主 agent 转达入口、预建暂停的重复任务。模型、精确报告渠道、MaaPilot 游戏 setup 和独占日常宿主确认是启用条件；“部署完成”不代表这些已全部验收。
+完整命令见 [部署工具](../../templates/hermes/README.md)。部署完成会自动创建独立 profile、安装主 agent 转达入口、预建暂停的重复任务。模型、精确报告渠道、MaaPilot 游戏 setup 和独占日常宿主确认是启用条件；“部署完成”不代表这些已全部验收。
 
 - 明确提供基础 `HERMES_HOME`、主 profile、Maa profile、发送 profile、仓库绝对路径、IANA 时区、模型和时间。不要把 named profile 的目录当基础 root；安装工具拒绝已有非受管同名 profile。
 - 默认不复制任何凭据。用户明确指定来源文件和键时，只复制选中的模型 API key。发送可使用主 profile 原有渠道：`hermes --profile <发送profile> send --to <精确目标> --file <报告> --json`。不复制 bot token，也不启动第二渠道监听器。
-- 官方 Docker 镜像运行安装工具时使用 `--user hermes`，避免 Python 写出的文件与原生 CLI 的降权用户不一致。Linux 容器需独立安装 MaaPilot/MAA 运行环境，不能复用 Windows 虚拟环境。
+- 部署工具由 Hermes agent 在自己的执行环境里运行，用 `HERMES_HOME` 的属主账户执行；该环境里要有可用的 Python 和 MaaPilot/MAA 运行环境。
 - `skills trust` 不会免除每个项目技能的扫描。核对 Maa 技能和主路由 skill 是否真的可用；被隔离时告知用户，不关闭扫描、不改缓存、不通过 external_dirs 绕过。
 - 当前首次 setup 技能被 `skills-guard-v10` 隔离，主要涉及安装脚本直接交给 shell；因此自动首次游戏设置仍受限。通用技能保持原样；本接入不宣称无人介入首次设置已通过。
 
@@ -66,15 +66,15 @@ Maa agent 随后执行任务提示附带的 `send-report --manifest … --run-id
 
 依据 Hermes 官方 [profiles/skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)、[cron](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) 文档和原生源码，参数以所部署版本为准。
 
-2026-10-27，Windows Docker Desktop，Hermes v0.22.5（`bf0203a7`），官方镜像摘要：
+开发验证环境是 Windows Docker Desktop 中的隔离测试容器，Hermes v0.22.5（`bf0203a7`），官方镜像摘要：
 `nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d`。
 
 - 已验证：空白 Maa profile、指定 OpenCode Go / DeepSeek V4.1 Flash key 的选择性复制、主 Gateway 自动纳管 Maa，原生 ensure 返回 Maa profile 路径。重复安装的两条日常 ID 相同，均保持暂停和 local；主模型/渠道配置与主 cron 文件哈希不变，主 SOUL 只增加一个受管路由块。
 - 已验证：安装的主路由 skill 在原生索引 enabled；真实主模型自动加载路由，把第一次问题交给 Maa profile，转达颜色选择问题；第二轮回到同一专长会话，正确回传选择及上一轮记号。未执行游戏或首次 setup。
 - 之前已验证：真实 agent cron 读取项目说明和日常技能、后台启动 70 秒无害进程，并通过 process_manage 同轮等待退出；这不是一小时游戏日常验收。
-- 已验证：独立 CLI 来源进入另一 Maa 会话，答复“无先前记号”，未沿用前一来源历史；最终交付脚本安装后又在新来源完成两轮主 agent 自动转达。两轮请求使用同一来源哈希，另一个来源哈希不同。请求文件改在主 profile cache 下生成，符合官方容器文件工具的安全目录要求。
+- 已验证：独立 CLI 来源进入另一 Maa 会话，答复“无先前记号”，未沿用前一来源历史；最终交付脚本安装后又在新来源完成两轮主 agent 自动转达。两轮请求使用同一来源哈希，另一个来源哈希不同。请求文件改在主 profile cache 下生成，符合验证环境的文件工具安全目录要求。
 - 已验证：一次性 agent cron 到点执行，保留上游固定 DELIVERY 前缀。工具记录证明显式执行了 send-report，mock CLI 收到指定发送 profile、精确目标、报告文件和 JSON 参数并产生 sent 回执；同一 cron 又调用原生 send，在未配置渠道的 Maa profile 本地目标解析失败、退出 1。没有外发消息、修改 guard 或关闭扫描。cron 返回成功并保存 local 报告。这验证该版本/模型能执行显式发送调用，不能据此声称真实平台送达。
-- 官方容器的 cron terminal 曾找不到 PATH 中的 hermes；部署记录保存原生 CLI 的绝对路径，send-report 不依赖该 PATH。原生失败探针也用实际二进制绝对路径确认退出码。
+- 验证容器的 cron terminal 曾找不到 PATH 中的 hermes；部署记录保存原生 CLI 的绝对路径，send-report 不依赖该 PATH。原生失败探针也用实际二进制绝对路径确认退出码。
 - 回归：最终部署单测 36 项，与说明/权限检查合计 607 passed；生成的路由 skill 通过 quick_validate。隔离 Windows 副本全量回归曾得到 1190 passed、93 skipped、3 failed；失败为原有 Windows 旧定时识别、schtasks 和符号链接权限问题，未扩大修改。后续增加的平台启用检查使用定向单测验证。
 - 外部聊天实际送达、外部渠道元数据、读图和完整游戏日常仍未验收。游戏首次 setup 技能隔离未解除。测试用合成的已收尾报告验证发送门槛，没有把它当作真实 daily done 或游戏日常通过。
 
