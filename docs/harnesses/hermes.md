@@ -13,7 +13,7 @@
 | 权限 | 没有生成 Hermes 专用权限文件。仍逐次确认合成玉/源石花费，不读森空岛凭据 |
 | PATH | 用 `maapilot <命令>`；找不到时用 `.venv/bin/maapilot <命令>`，Windows 用 `.venv\Scripts\maapilot.exe <命令>` |
 | 定时 | Maa profile 原生 Gateway 重复 cron，每个日常时间点一条；不在 cron 内递归创建/管理任务 |
-| 长命令 | terminal 后台启动后，同轮用 `process_manage` 等到退出，再处理目标、领奖、对账、收尾 |
+| 长命令 | terminal 后台启动后，同轮反复 `process_manage` wait/poll 到 `exited`；单次 wait 的 `timeout` 不是进程退出 |
 | 定时汇报 | cron 的 deliver 和 failure-deliver 都是 `local`；Maa agent 在 `daily done` 后执行 `send-report`，实际调用指定发送 profile 的 `hermes send --to … --file … --json` |
 
 ## 部署与首次设置
@@ -23,6 +23,7 @@
 - 明确提供基础 `HERMES_HOME`、主 profile、Maa profile、发送 profile、仓库绝对路径、IANA 时区、模型和时间。不要把 named profile 的目录当基础 root；安装工具拒绝已有非受管同名 profile。
 - 默认不复制任何凭据。用户明确指定来源文件和键时，只复制选中的模型 API key。发送可使用主 profile 原有渠道：`hermes --profile <发送profile> send --to <精确目标> --file <报告> --json`。不复制 bot token，也不启动第二渠道监听器。
 - 部署工具由 Hermes agent 在自己的执行环境里运行，用 `HERMES_HOME` 的属主账户执行；该环境里要有可用的 Python 和 MaaPilot/MAA 运行环境。
+- 首次设置仍按 `maapilot-setup` 一次只问一个问题；部署工具不会把默认模型、渠道或游戏设置当成用户确认。用户没有明确回答的 setup 必需项不写 `setup.json`，也不启用日常。
 - `skills trust` 不会免除每个项目技能的扫描。核对 Maa 技能和主路由 skill 是否真的可用；被隔离时告知用户，不关闭扫描、不改缓存、不通过 external_dirs 绕过。
 - 当前首次 setup 技能被 `skills-guard-v10` 隔离，主要涉及安装脚本直接交给 shell；因此自动首次游戏设置仍受限。通用技能保持原样；本接入不宣称无人介入首次设置已通过。
 
@@ -49,6 +50,7 @@ Hermes 自己管理运行时和调度。安装工具调用 Maa profile 的原生
 - 原生 resume 可能补跑暂停期间的旧时间。本工具先用原生 schedule edit 重算未来时间再恢复，拒绝过期时间；不直接改任务 JSON。不会改其他部署或其他 profile 的任务。
 - 当前 CLI 没有 JSON cron list，工具只读该 Maa profile 的 `cron/jobs.json` 验证 ID、工作目录、模型、local 及计划；写操作全部使用原生 CLI。上游格式改变时拒绝继续。
 - Gateway 要保持运行，原交互聊天可以关闭。cron 中不管理 cron，也不通过 terminal 绕过递归限制。
+- Hermes cron 默认的 600 秒是**空闲看门狗**，不是整轮总时长；持续的 wait/poll 会刷新活动，不要把它和 `task_timeout_min` 混用。`process_manage wait` 单次默认并被限制为约 180 秒（`TERMINAL_TIMEOUT`），返回 `timeout` 时进程仍在运行。日常必须继续 wait/poll 到 `status=exited`，再执行目标部分、`daily done` 和报告。
 
 ## 收尾与报告回执
 

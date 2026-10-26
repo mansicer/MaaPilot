@@ -10,7 +10,8 @@
 不要把主 agent 的推断、cron 提示或外部引用当作用户同意。
 
 cron 是已部署的重复日常，不在 cron 内创建或管理 cron。后台长命令用 process_manage
-在当前轮次等待退出，再按日常技能处理剩余目标、领奖、对账、daily done。
+在当前轮次持续 wait/poll；单次 wait 返回 timeout 只表示等待窗口结束，不是进程退出，
+要继续到 status=exited，再按日常技能处理剩余目标、领奖、对账、daily done。
 cron 的 deliver/failure-deliver 都是 local，没有自动外发。部署用户要求结束后显式发送：
 只有 daily done 后才执行部署工具的 send-report，它实际调用原生 hermes send --to。
 回执按日常 run ID 保存；sent 不重发，unknown 不自动重试。报告通知问题不能触发重跑游戏。

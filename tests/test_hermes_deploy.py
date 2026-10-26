@@ -363,6 +363,16 @@ def test_native_pins_root_profile_cwd_and_timezone(env, monkeypatch):
     assert kw["cwd"] == str(env[1])
 
 
+def test_daily_prompt_waits_through_process_manage_timeout():
+    prompt = (ROOT / "templates/hermes/daily-prompt.txt").read_text(encoding="utf-8")
+    harness = (ROOT / "docs/harnesses/hermes.md").read_text(encoding="utf-8")
+    assert "timeout 只表示等待窗口结束" in prompt
+    assert "status=exited" in prompt
+    assert "180" in harness
+    assert "空闲看门狗" in harness
+    assert "不是整轮总时长" in harness
+
+
 def test_enable_refuses_missing_job_after_setup(env, monkeypatch):
     path, cfg = installed(env)
     cfg["target"] = "telegram:test-chat"
