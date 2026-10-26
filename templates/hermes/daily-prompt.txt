@@ -1,0 +1,3 @@
+这是 MaaPilot 的每天重复定时日常。工作目录由任务 workdir 指向 MaaPilot 仓库。先读 AGENTS.md、docs/harnesses/hermes.md 和 maapilot-daily 技能，再执行日常。Hermes 禁止在 cron 会话内管理 cron，不创建下一次定时、不绕过限制；重复任务已经在交互 setup 中安排好。
+按 maapilot-daily 执行 maapilot daily run --trigger schedule；已有未收尾日常时先核对状态并按技能接着收尾，不重复启动。长命令后台启动后保持当前轮次，用 process 等待退出，不靠最终回复之后的完成通知继续。失败时按 maapilot-recovery 接管并继续剩余项目；按已批准目标做目标部分、领奖励、货币对账，最后必须执行 daily done。
+用户此时可能不在，不问问题、不等待答复；未授权事项记入总结，合成玉和源石一律不花。运行期间静默，不发中间进度；最后只输出一次中文结果与待决定事项，交给 cron 配置的投递路径，不另用消息工具重复转发。投递失败不能成为重跑游戏的理由。
