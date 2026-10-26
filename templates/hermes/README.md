@@ -1,43 +1,66 @@
-# Hermes 接入模板
+# Hermes 部署模板
 
-先读 [Hermes 接入说明](../../docs/harnesses/hermes.md)。这些模板不修改 OpenClaw、Claude Code、Codex，也不实现另一套调度器。
+先读 [Hermes 专用说明](../../docs/harnesses/hermes.md)。部署完成会建立空白 Maa profile、主 agent 转达入口和暂停的原生日常 cron；启用日常仍需模型、渠道和游戏 setup 等配置齐备。
 
-## 部署
+## 文件
 
-- `compose.yaml`：独立 Hermes Gateway 和命名数据卷，不发布端口、不挂载宿主机 Docker socket；用独立 Compose 项目名，例如 `maapilot-hermes-test`。不设置固定 container_name，避免撞名。
-- `config.example.yaml`：只合并所需字段到 Hermes profile。`external_dirs` 可用于没有项目技能发现的版本；支持项目发现时优先使用 `hermes skills trust <仓库绝对路径>`，然后从仓库目录核对技能列表。不要同时维护技能副本。
-- `daily-prompt.txt`：真实日常的提示模板，只在用户完成 MaaPilot setup 并确认切换定时宿主后使用；部署测试不要直接创建真实日常任务。
+- `deploy.py`：标准库一次性 CLI 适配工具，提供 install、dispatch、send-report，无调度器或后台服务。
+- `deployment.example.json`：独立 root、profile、模型、时区、时间和报告目标的显式参数。`target: null` 表示渠道待配置，不能启用日常；真实目标须由用户指定，例如 `telegram:<chat_id>`，可带线程 ID。
+- `maa-soul.md`、`daily-prompt.txt`：Maa 身份和 cron 指令，不改共用游戏技能。
+- `compose.yaml`：独立 Gateway/数据卷模板，使用官方入口，无第二渠道监听器。
 
-设置 `HERMES_IMAGE`（官方 `nousresearch/hermes-agent` 的明确版本或 digest）、`HERMES_TIMEZONE`、`MAAPILOT_WORKSPACE` 后执行：
+## 安装
+
+在 Hermes 执行环境内准备完整仓库和基础 `HERMES_HOME`。从示例另存一份本机 JSON，修改实际路径和用户选择的配置。示例中的时刻只是示例，真实时间应与 `private/config.yaml` 的 schedule 一致。不要把 named profile 目录当 root。
+
+```sh
+python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json
+```
+
+默认不复制主配置或任何凭据。需要复用用户明确指定的模型 key 时，显式指定文件及键，可重复 `--credential-key`；只写入 Maa profile 的所选模型 key：
+
+```sh
+python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json --credential-file /absolute/path/model.env --credential-key OPENCODE_GO_API_KEY
+```
+
+不要把密钥放在命令参数、仓库示例或聊天中。渠道不复制：设置 `send_profile` 为主 profile 后，报告通过该 profile 现有渠道发送；该配置不创建另一个 bot 监听器。
+
+输出会给出受管 `deployment.json` 的绝对位置，以及 Gateway、渠道和 setup 的待配置状态。生成文件在 `<root>/maapilot/<部署编号>/`；主 skill/SOUL 的编号也由部署身份确定，多部署不会互相替换。原生 profile 已存在但无本部署所有权时拒绝覆盖；中断后用相同命令恢复。
+
+## Docker
+
+设置明确版本/摘要的 `HERMES_IMAGE`、IANA `HERMES_TIMEZONE`、独立仓库副本绝对路径 `MAAPILOT_WORKSPACE`。副本不包含真实 private、Windows .venv 或其他 agent 数据。将本机 JSON 放到容器可读的位置，容器内路径按示例修改。
 
 ```sh
 docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml up -d
-docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml exec hermes hermes --version
+docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml exec --user hermes hermes hermes --version
+docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml exec --user hermes hermes python /workspace/maa/templates/hermes/deploy.py install --settings /workspace/maa/private/hermes-deployment.json
 ```
 
-使用官方镜像自带入口，不覆盖 `/init`。首次还需配置模型、技能和 cron 工具集；Gateway 容器启动不代表已经能跑 agent。MaaPilot 和 MAA 依赖另按 setup 安装进容器可访问的 Linux 环境。容器重建前应保留该环境或建立派生镜像。
+这里连续的 `hermes` 分别是 Compose 服务名、Hermes 命令。Python 安装工具必须与官方 Gateway 的非 root 用户一致。不要覆盖镜像 `/init`，也不要因 named profile 已被主 Gateway 纳管而强制启动第二 Gateway。
 
-## 创建日常（在 Hermes 的执行环境内）
+基础镜像仍需配置模型和 Linux MaaPilot/MAA 环境。部署工具不会关闭扫描；当前 `maapilot-setup` 被安全扫描隔离，自动首次游戏设置尚受限。不要通过 external_dirs、修改扫描缓存或关闭扫描使它进入可用列表。
 
-先确认 profile 时区，列出已有任务；下面仅用 04:40 示范，实际时间来自 MaaPilot 配置。将完整 `daily-prompt.txt` 内容作为第二个位置参数，把仓库路径和用户指定的投递目标替换为实际值。
+## 启用与升级
+
+首次安装的日常默认暂停。用户完成游戏 setup、指定精确报告目标，并明确确认只在此宿主跑该账号日常后，使用：
 
 ```sh
-hermes cron list
-hermes cron create "40 4 * * *" "<daily-prompt.txt 的完整内容>" --name "MaaPilot 日常 04:40" --workdir /absolute/path/to/MaaPilot --deliver local
-hermes cron list
-hermes cron status
+python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json --enable --confirm-exclusive
 ```
 
-`local` 只保存输出，不通知聊天。需要通知时将它替换为经过实测的 `平台:会话目标`。不要把 OpenClaw 的 JSON 字段或 `--tz`、`--session`、`--timeout-seconds` 参数套用到这里。CLI 参数以所部署版本的 `--help` 为准。
+此开关是用户确认的执行记录，不应由定时任务自动添加。工具核对项目 setup、schedule、Maa Gateway、任务绑定和发送 profile 的原生平台列表；条件不满足就拒绝启用。目标已填写也只代表待验证，不代表实际送达。游戏 setup 尚未完成或渠道未配置时仍可测试主 agent 的无游戏路由。
 
-## 无游戏测试
+重复安装不会暂停已经启用的同配置日常。升级受管提示仅更新 prompt，不动计划时间/启用状态。时间、时区、模型或目标变更须 `--replace-schedule`；它暂停并更新受管任务，随后仍需上述 enable 条件。启用前用原生 schedule edit 重算未来时间，避免 resume 补跑历史时刻。只通过原生 CLI 修改任务，不手写 jobs.json。
 
-在独立副本中测试，不挂载真实账号数据，不执行 daily-prompt：
+## 交互与回执
 
-1. 核对版本、技能发现、cron 创建/读回/暂停/删除与时区。
-2. 在 Hermes scripts 目录放只输出测试标记的脚本，用 `--no-agent`、`--deliver local` 创建短期测试任务，确认调度器确实执行且留下输出；完成后删除任务。
-3. 配置用户选定的模型后，创建普通 agent 测试：读取副本中的说明与技能，运行无害后台命令，等到退出后再输出标记。检查中途没有提前结束。
-4. 测试指定渠道的单次投递和交互问题回到原会话；没有渠道配置时明确记录未验证。
-5. 完整游戏日常需另按开发规矩确认模拟器空闲和操作授权，再验证收尾与报告。
+部署后在主 agent 正常对话，Maa 请求由受管 skill 转达。可信渠道来源不可用时由主 agent 询问，CLI 用户可明确指定独立来源标识；后续回答保持同一来源。主 agent 必须等专长退出后再转达，外部渠道的具体元数据映射需另行验收。
 
-停止测试用同一 Compose 项目的 `down`，保留数据卷作为诊断记录；只删除自己创建的测试 cron，不清理其他 profile 或容器。
+日常任务只保存 local。Maa agent 在 daily done 后调用 `send-report`，通过指定发送 profile 的 `hermes send --to … --file … --json` 发送报告。outbox 按 run ID 保存回执：sent 不重发，unknown 人工核对且不自动重试；只有明确 failed 经人工核对后可加 `--retry-failed`。通知问题不重跑游戏。
+
+## 无游戏验收
+
+仓库单元测试使用假原生 CLI，覆盖幂等、中断恢复、配置边界、来源接续、回执和启用条件。真实 Docker 验收应另外检查主 agent 自动转达两轮、独立来源、Gateway 纳管、local cron 模型与工作目录，以及固定 DELIVERY 提示下显式发送是否实际执行。
+
+无渠道时使用 mock 原生发送和原生无凭据失败路径，不声称真实送达。不执行 daily-prompt，不运行真实游戏，不复制/读取森空岛凭据。完成后删除自己的测试 cron，保留诊断数据卷；其他 Gateway/容器不动。具体实测状态见 [Hermes 专用说明](../../docs/harnesses/hermes.md)。
