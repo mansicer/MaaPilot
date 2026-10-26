@@ -12,7 +12,7 @@ OpenClaw 是一个常驻的 Gateway：agent 有独立 workspace，定时由 Gate
 | 权限 | 没有项目级规则文件；需要收紧时用 OpenClaw 的 `tools.exec` / exec approvals |
 | PATH | 已在 PATH 时写 `maapilot <命令>`；否则用 `.venv/bin/maapilot <命令>`（Windows 为 `.venv\Scripts\maapilot.exe <命令>`） |
 | 定时 | Gateway 的重复 cron；每个日常时间点一条（见下） |
-| 长命令 | `exec` 放后台，再用 `process` 查看；定时任务的 `timeoutSeconds` 设为 5400 |
+| 长命令 | `exec` 放后台，再用 `process` 查看；定时任务的 `timeoutSeconds` 覆盖整个 cron turn（模板为 10800 秒，即 3 小时） |
 | 汇报 | 先用独立任务验证渠道能否主动送达；定时结果只走一条 `delivery`，交互任务由发起它的原始会话负责回复 |
 
 ## setup 时要多做的
@@ -23,36 +23,37 @@ OpenClaw 是一个常驻的 Gateway：agent 有独立 workspace，定时由 Gate
 4. 按 `private/config.yaml` 的 `schedule`，每个时间点建一条重复 cron；使用 [`cron-daily.json`](../../templates/openclaw/cron-daily.json) 的字段结构，把 `${...}` 换成实际值。
 5. 先确认用户能收到哪个渠道的**主动投递**。不要因为渠道显示 connected 就认定它能主动发送；用下面的「投递渠道预检」实测。没有可用渠道时把 cron 的 `delivery.mode` 设成 `none`，并明确告诉用户定时任务仍会执行，但结果只保存在 OpenClaw 会话里。
 6. 经用户同意，用不操作游戏的独立任务分别验收“最终只来一条”和“阻塞提问能回到原始会话”；测试完成后删除测试任务。
-7. 按下面的「setup 收尾确认」把整个过程中遇到的问题、自动采用的默认值和仍需决定的事项汇总给用户；用户确认后才能写 `private/setup.json`。
+7. OpenClaw 部署时不得静默采用默认值。`maapilot-setup` 里需要用户决定的项目必须逐项询问，仍未得到回答的不能当成已确认；结束时按下面的「setup 结束报告」把实际采用值和待决定事项告诉用户。
 
 配置格式按 OpenClaw 2026.10 及以后验证。旧配置里的 `agents.list` 先用 `openclaw doctor --fix` 迁移到 `agents.entries`。仓库不替用户修改 `~/.openclaw/openclaw.json`。
 
-### setup 收尾确认
+### setup 结束报告
 
-OpenClaw 的 setup 结束时，在**发起 setup 的原始会话**里发一条汇总，不要只在内部会话里写，也不要每遇到一个小问题就打断用户。汇总至少包含：
+OpenClaw 的 setup 结束时，在**发起 setup 的原始会话**里发一条结果报告，不要只在内部会话里写。它不是一次性确认清单：需要用户决定的事项仍按 `maapilot-setup` 一次只问一个问题；报告汇总已经得到的回答、明确沿用的旧值和仍未解决的事项，至少包含：
 
-- 模拟器和服务器、游戏协议选择、日常时间、日常项目、没有目标时的默认关卡、活动签到是否代领、理智液偏好。
+- 模拟器和服务器、游戏更新协议、日常时间、日常项目、没有目标时的默认关卡。
 - 每条 cron 的时间、agent、投递渠道和目标，以及下一次执行时间。
 - 主动投递测试和阻塞提问回传测试的实际结果；失败时写清失败在哪一层。
 - setup 过程中遇到的错误、缺少的依赖、配置文件或文档缺失、Gateway 重启、agent 数据库异常等，标明“已修复 / 仍失败 / 暂时规避”。
-- 任何未经用户明确答复而采用的默认值，必须单独列出；不能把旧部署的配置静默当成新部署的确认。
+- 用户没有答复、仍靠默认值运行的 setup 必需项，单独列在“待决定”；不能把默认值写成用户确认，也不能把旧部署的配置静默当成新部署的确认。
 
-**重装或已有 `setup.json` 时**：逐项列出准备沿用的旧配置，先问“沿用还是修改”；用户明确说“沿用现有配置”后才能跳过问答。用户只说了“重新安装/重新配置”不等于同意沿用旧答案。
+**重装或已有 `setup.json` 时**：列出准备沿用的旧值；其中 setup 必需项必须得到用户明确答复，不能因为用户说了“重新安装/重新配置”就默认沿用。
 
 建议格式：
 
 ```text
-OpenClaw / MaaPilot setup 问题清单
-1. 模拟器与服务器：……（当前值，是否确认？）
-2. 游戏更新协议：……（当前值，是否确认？）
-3. 定时任务：04:40 / 12:40 / 20:40，投递到……（是否确认？）
-4. 日常项目：……（是否全做？）
-5. 默认关卡与签到：……（当前默认，是否确认？）
-6. setup 中遇到的问题：……（已处理 / 仍需你决定）
-请按编号回复“确认”，或直接写要改的值。
+OpenClaw / MaaPilot setup 结果
+1. 模拟器与服务器：……
+2. 游戏更新协议：……
+3. 定时任务：04:40 / 12:40 / 20:40，投递到……；下一次……
+4. 日常项目：……
+5. 默认关卡：……
+6. 投递测试与 setup 中遇到的问题：……
+待决定：……（没有就写“无”）
+如需修改，直接说编号和新值。
 ```
 
-用户确认后，按答复修正 `private/config.yaml` 和 OpenClaw cron；用户明确确认的项才视为定稿，然后写 `private/setup.json`。用户尚未回复时，已完成且可回滚的环境安装和投递测试配置可以保留，但 setup 保持未完成：不写 `setup.json`，不启动会消耗游戏资源的验证日常，并把待确认事项保留到下一次用户消息。
+报告后按用户答复修正 `private/config.yaml` 和 OpenClaw cron。`maapilot-setup` 要求用户明确回答的项目，在得到答复前仍算未确认：不写 `setup.json`，不启动会消耗游戏资源的验证日常；已完成且可回滚的环境安装和投递测试配置可以保留。报告不是批量确认，不能因为用户没有反对就把默认值当成同意。
 
 ## 定时日常
 
@@ -62,7 +63,7 @@ OpenClaw 用 Gateway 的**重复 cron**，不用一次性接力。2026-10-22 的
 
   ```sh
   openclaw cron add --cron "40 4 * * *" --tz Asia/Shanghai --agent <agent id> --session isolated \
-    --name "MaaPilot 日常 04:40" --message "<自足的提示>" --timeout-seconds 5400 \
+    --name "MaaPilot 日常 04:40" --message "<自足的提示>" --timeout-seconds 10800 \
     --announce --channel <渠道> --account <账号> --to <会话>
   ```
 
@@ -77,7 +78,7 @@ OpenClaw 用 Gateway 的**重复 cron**，不用一次性接力。2026-10-22 的
 
 ## 长时间任务
 
-`daily run` 通常要 20–60 分钟。`exec` 超过当前等待时间后会返回一个后台进程；cron 的 `timeoutSeconds` 与配置里的 `task_timeout_min` 对齐（模板为 5400 秒）。给命令设置很短的超时会把进程杀掉并可能留下孤儿任务和锁。
+`daily run` 通常要 20–60 分钟。`exec` 超过当前等待时间后会返回一个后台进程；cron 的 `timeoutSeconds` 覆盖整个定时 turn（`daily run`、目标部分、`daily done` 和最终汇报），模板用 10800 秒（3 小时）。不要把它和单个 MAA 日常项的 `task_timeout_min` 对齐；那个默认 90 分钟只限制单个任务。给命令设置很短的超时会把进程杀掉并可能留下孤儿任务和锁。
 
 **定时日常启动后台进程后，不要结束当前 agent turn 去等待“完成时自动唤醒”。** OpenClaw 在部分 isolated/cron 会话里会把完成事件的目标落成没有原始投递来源的 `agent:<id>:main`，随后报：
 
@@ -160,7 +161,7 @@ OpenClaw 或渠道升级后重跑这两项验收。遇到会话存储、Gateway 
 
 ## 实测
 
-- 10-21 至 10-22（OpenClaw 2026.10.5，Linux 容器 + Windows 宿主机 MuMu 12）：`maapilot doctor` 全绿；截图、OCR 和点击可用；重复 cron 到点唤醒并投递；长命令使用 5400 秒超时，未超时。
+- 10-21 至 10-22（OpenClaw 2026.10.5，Linux 容器 + Windows 宿主机 MuMu 12）：`maapilot doctor` 全绿；截图、OCR 和点击可用；重复 cron 到点唤醒并投递；长命令使用当时的 5400 秒超时，未超时。现模板改为 10800 秒，尚未做 3 小时上限实测。
 - 10-23：独立任务禁用全部工具后模拟阻塞问题，约 5 秒完成并只投递一次；后台完成通知没有产生额外回复。
 - 10-24：同一部署的 04:40 日常正常送达，12:40 日常执行成功但最终投递报 `prepare failed`；任务记录为 `ok (not delivered)`。同轮运行还生成了多段“正在跑”式 commentary。结论：执行成功、内部回复、平台连接都不能代替主动投递验收；定时日常必须在运行期间静默，并只保留一条最终结果路径。
 - 已实测一次性 `at` 任务到期未执行，因此本接入使用重复 cron。

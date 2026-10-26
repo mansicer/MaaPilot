@@ -29,6 +29,7 @@ def test_daily_job_is_recurring_and_does_not_build_its_own_successor():
     assert job["schedule"]["kind"] == "cron"
     assert job["schedule"]["tz"] == "${TZ}"
     assert job["sessionTarget"] == "isolated"
+    assert job["payload"]["timeoutSeconds"] == 10800
     assert "deleteAfterRun" not in job
     message = job["payload"]["message"]
     assert "重复定时" in message and "不要" in message and "下一次一次性定时" in message
@@ -89,14 +90,26 @@ def test_openclaw_delivery_is_channel_independent_and_tested_before_use():
     assert "qqbot" not in readme.lower() and "weixin" not in readme.lower()
 
 
-def test_openclaw_setup_ends_with_one_issue_and_decision_summary():
+def test_openclaw_setup_does_not_silently_accept_defaults_and_reports_results():
     openclaw = (ROOT / "docs" / "harnesses" / "openclaw.md").read_text(encoding="utf-8")
-    assert "setup 收尾确认" in openclaw
+    assert "不得静默采用默认值" in openclaw
+    assert "一次只问一个问题" in openclaw
+    assert "setup 结束报告" in openclaw
+    assert "请按编号回复" not in openclaw
+    assert "活动签到是否代领" not in openclaw
+    assert "理智液偏好" not in openclaw
     assert "setup 过程中遇到的错误" in openclaw
-    assert "未经用户明确答复而采用的默认值" in openclaw
-    assert "用户确认后才能写 `private/setup.json`" in openclaw
-    assert "用户尚未回复时" in openclaw and "setup 保持未完成" in openclaw
-    assert "沿用还是修改" in openclaw
+    assert "用户没有答复、仍靠默认值运行的 setup 必需项" in openclaw
+    assert "在得到答复前仍算未确认" in openclaw
+    assert "不写 `setup.json`" in openclaw
+    assert "报告不是批量确认" in openclaw
+
+
+def test_daily_cron_timeout_covers_whole_turn():
+    openclaw = (ROOT / "docs" / "harnesses" / "openclaw.md").read_text(encoding="utf-8")
+    assert "10800" in openclaw
+    assert "覆盖整个定时 turn" in openclaw
+    assert "不要把它和单个 MAA 日常项的 `task_timeout_min` 对齐" in openclaw
 
 
 def test_openclaw_long_tasks_do_not_rely_on_missing_origin_wakeup():
