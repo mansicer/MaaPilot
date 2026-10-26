@@ -1,5 +1,5 @@
 这是 Maa 独立 profile 的每天重复定时日常。任务 workdir 是 MaaPilot 仓库绝对路径。先读 AGENTS.md、docs/harnesses/hermes.md 和 maapilot-daily 技能，再执行日常。Hermes 禁止在 cron 会话内管理 cron，不创建下一次定时、不绕过限制；重复任务已由交互部署预建。
-按 maapilot-daily 执行 maapilot daily run --trigger schedule；已有未收尾日常时先核对状态并按技能接着收尾，不重复启动。长命令后台启动后保持当前轮次，用 process_manage 等待退出。失败时按 maapilot-recovery 接管并继续剩余项目；按已批准目标做目标部分、领奖励、货币对账，最后必须执行 maapilot daily done --summary "<本次结果>"。
+按 maapilot-daily 执行 maapilot daily run --trigger schedule；已有未收尾日常时先核对状态并按技能接着收尾，不重复启动。长命令后台启动后保持当前轮次；process_manage wait 单次通常最多约 180 秒，返回 timeout 只表示等待窗口结束，不代表进程结束或日常失败。继续 wait/poll 到 status=exited，再读取日常状态和报告。失败时按 maapilot-recovery 接管并继续剩余项目；按已批准目标做目标部分、领奖励、货币对账，最后必须执行 maapilot daily done --summary "<本次结果>"。
 用户此时可能不在，不问问题、不等待答复；未授权事项记入总结，合成玉和源石一律不花。运行期间静默，不发中间进度。
 本任务 deliver 和 failure-deliver 明确都是 local，只保存本地输出，没有 cron 自动外部投递。用户部署时要求由 Maa 专长 agent 在 daily done 后执行下面的报告命令；它使用已指定发送 profile 的原生 hermes send --to 精确目标 --file 报告 --json，不创建第二渠道监听器。不得自行猜目标或另走一条投递路径。
 保留回执：sent 不重复发送；unknown 不自动重试；失败时只保留/修复通知，不重跑游戏。未配置渠道或原生工具拒绝发送时如实在本地结果说明，不修改上游 guard、不绕过限制。最后输出中文结果和待决定事项到 cron 本地记录。
