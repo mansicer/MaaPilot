@@ -74,7 +74,7 @@ OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓
 
 > 帮我安装并配置 https://github.com/mansicer/MaaPilot.git，先阅读 AGENTS.md 和 docs/harnesses/hermes.md，按 Hermes 的接入说明完成设置。
 
-Hermes 使用独立配置和 Gateway 重复定时；任务必须绑定仓库目录，并确认能加载 MaaPilot 技能。Gateway 要保持运行，原交互聊天可以关闭。接入目前为实验支持，模型、投递与完整日常的验证状态见 [Hermes 说明](docs/harnesses/hermes.md)，Docker 与配置模板见 [templates/hermes/](templates/hermes/)。
+Hermes 部署工具自动创建空白 Maa 专长 profile、安装主 agent 的转达入口，并预建暂停的原生重复定时。平常由主 agent 转达请求和追问；定时由 Maa profile 跑日常、收尾后通过指定 profile 的原生 `hermes send --to` 报告，cron 本身只保存 local。启用日常前须完成模型、精确渠道、游戏 setup 和独占宿主确认；Gateway 要保持运行。接入仍为实验支持，首次设置扫描限制和实测边界见 [Hermes 说明](docs/harnesses/hermes.md)，部署命令见 [templates/hermes/](templates/hermes/)。
 
 当前实测版本会隔离首次设置技能中的在线脚本安装步骤；首次设置尚未通过，不应关闭扫描绕过。已有项目的说明加载、日常技能加载及无游戏的 agent 定时等待测试已通过。
 
