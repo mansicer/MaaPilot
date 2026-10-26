@@ -1,17 +1,17 @@
-# Hermes 部署模板
+# Hermes 部署工具
 
-先读 [Hermes 专用说明](../../docs/harnesses/hermes.md)。部署完成会建立空白 Maa profile、主 agent 转达入口和暂停的原生日常 cron；启用日常仍需模型、渠道和游戏 setup 等配置齐备。
+由 Hermes agent 在自己的执行环境里运行。部署完成会建立空白 Maa profile、主 agent 转达入口和暂停的原生日常 cron；启用日常仍需模型、渠道和游戏 setup 等配置齐备。先读 [Hermes 专用说明](../../docs/harnesses/hermes.md)。
 
 ## 文件
 
 - `deploy.py`：标准库一次性 CLI 适配工具，提供 install、dispatch、send-report，无调度器或后台服务。
 - `deployment.example.json`：独立 root、profile、模型、时区、时间和报告目标的显式参数。`target: null` 表示渠道待配置，不能启用日常；真实目标须由用户指定，例如 `telegram:<chat_id>`，可带线程 ID。
 - `maa-soul.md`、`daily-prompt.txt`：Maa 身份和 cron 指令，不改共用游戏技能。
-- `compose.yaml`：独立 Gateway/数据卷模板，使用官方入口，无第二渠道监听器。
+- `compose.yaml`：仅用于开发验证的隔离容器示例，不是部署入口。
 
 ## 安装
 
-在 Hermes 执行环境内准备完整仓库和基础 `HERMES_HOME`。从示例另存一份本机 JSON，修改实际路径和用户选择的配置。示例中的时刻只是示例，真实时间应与 `private/config.yaml` 的 schedule 一致。不要把 named profile 目录当 root。
+在 Hermes 执行环境内准备完整仓库和基础 `HERMES_HOME`。从示例另存一份本机 JSON，修改实际路径和用户选择的配置。示例中的时刻只是示例，真实时间应与 `private/config.yaml` 的 schedule 一致。不要把 named profile 目录当 root。用 `HERMES_HOME` 的属主账户运行，确保该环境里的 Python 和 MaaPilot 运行环境可用。
 
 ```sh
 python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json
@@ -27,19 +27,7 @@ python templates/hermes/deploy.py install --settings /absolute/path/hermes-deplo
 
 输出会给出受管 `deployment.json` 的绝对位置，以及 Gateway、渠道和 setup 的待配置状态。生成文件在 `<root>/maapilot/<部署编号>/`；主 skill/SOUL 的编号也由部署身份确定，多部署不会互相替换。原生 profile 已存在但无本部署所有权时拒绝覆盖；中断后用相同命令恢复。
 
-## Docker
-
-设置明确版本/摘要的 `HERMES_IMAGE`、IANA `HERMES_TIMEZONE`、独立仓库副本绝对路径 `MAAPILOT_WORKSPACE`。副本不包含真实 private、Windows .venv 或其他 agent 数据。将本机 JSON 放到容器可读的位置，容器内路径按示例修改。
-
-```sh
-docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml up -d
-docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml exec --user hermes hermes hermes --version
-docker compose -p maapilot-hermes-test -f templates/hermes/compose.yaml exec --user hermes hermes python /workspace/maa/templates/hermes/deploy.py install --settings /workspace/maa/private/hermes-deployment.json
-```
-
-这里连续的 `hermes` 分别是 Compose 服务名、Hermes 命令。Python 安装工具必须与官方 Gateway 的非 root 用户一致。不要覆盖镜像 `/init`，也不要因 named profile 已被主 Gateway 纳管而强制启动第二 Gateway。
-
-基础镜像仍需配置模型和 Linux MaaPilot/MAA 环境。部署工具不会关闭扫描；当前 `maapilot-setup` 被安全扫描隔离，自动首次游戏设置尚受限。不要通过 external_dirs、修改扫描缓存或关闭扫描使它进入可用列表。
+部署工具不会关闭扫描；当前 `maapilot-setup` 被安全扫描隔离，自动首次游戏设置尚受限。不要通过 external_dirs、修改扫描缓存或关闭扫描使它进入可用列表。
 
 ## 启用与升级
 
@@ -61,6 +49,6 @@ python templates/hermes/deploy.py install --settings /absolute/path/hermes-deplo
 
 ## 无游戏验收
 
-仓库单元测试使用假原生 CLI，覆盖幂等、中断恢复、配置边界、来源接续、回执和启用条件。真实 Docker 验收应另外检查主 agent 自动转达两轮、独立来源、Gateway 纳管、local cron 模型与工作目录，以及固定 DELIVERY 提示下显式发送是否实际执行。
+仓库单元测试使用假原生 CLI，覆盖幂等、中断恢复、配置边界、来源接续、回执和启用条件。真实验收还应检查主 agent 自动转达两轮、独立来源、Gateway 纳管、local cron 模型与工作目录，以及固定 DELIVERY 提示下显式发送是否实际执行。
 
-无渠道时使用 mock 原生发送和原生无凭据失败路径，不声称真实送达。不执行 daily-prompt，不运行真实游戏，不复制/读取森空岛凭据。完成后删除自己的测试 cron，保留诊断数据卷；其他 Gateway/容器不动。具体实测状态见 [Hermes 专用说明](../../docs/harnesses/hermes.md)。
+无渠道时使用 mock 原生发送和原生无凭据失败路径，不声称真实送达。不执行 daily-prompt，不运行真实游戏，不复制/读取森空岛凭据。完成后删除自己的测试 cron，保留诊断数据；其他 Gateway 和任务不动。具体实测状态见 [Hermes 专用说明](../../docs/harnesses/hermes.md)。
