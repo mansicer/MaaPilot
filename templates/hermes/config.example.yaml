@@ -1,0 +1,9 @@
+# 合并进独立 Hermes profile 的 config.yaml，不要覆盖已有模型或渠道配置。
+# 以下路径是 compose.yaml 中的容器路径；本机部署应替换为实际绝对路径。
+timezone: Asia/Shanghai
+terminal:
+  backend: local
+  cwd: /workspace/maa
+skills:
+  external_dirs:
+    - /workspace/maa/.agents/skills

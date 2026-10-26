@@ -1,0 +1,19 @@
+# 在独立目录放好完整仓库副本（不要包含真实 private/ 或宿主机 .venv）。
+# MAAPILOT_WORKSPACE 必须是副本的绝对路径；HERMES_IMAGE 用已核验的版本或 digest。
+services:
+  hermes:
+    image: ${HERMES_IMAGE:?Set HERMES_IMAGE to a verified official image tag or digest}
+    restart: "no"
+    environment:
+      HERMES_HOME: /opt/data
+      HERMES_TIMEZONE: ${HERMES_TIMEZONE:?Set the intended IANA timezone}
+    volumes:
+      - hermes-data:/opt/data
+      - type: bind
+        source: ${MAAPILOT_WORKSPACE:?Set an absolute path to the isolated checkout}
+        target: /workspace/maa
+    working_dir: /workspace/maa
+    command: ["gateway", "run"]
+
+volumes:
+  hermes-data:

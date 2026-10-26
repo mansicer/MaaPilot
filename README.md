@@ -10,6 +10,7 @@
     <img alt="Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-D97757">
     <img alt="Codex" src="https://img.shields.io/badge/agent-Codex-412991">
     <img alt="OpenClaw" src="https://img.shields.io/badge/agent-OpenClaw-2f6fed">
+    <img alt="Hermes" src="https://img.shields.io/badge/agent-Hermes-7952b3">
     <img alt="MAA" src="https://img.shields.io/badge/powered%20by-MAA-ff69b4">
     <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </div>
@@ -20,7 +21,7 @@
 
 每天按时做完日常、当场汇报；练干员、合材料、打关卡，跟它说一声就行
 
-底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 里的 agent 判断做什么
+底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai) 或 [Hermes Agent](https://hermes-agent.nousresearch.com) 里的 agent 判断做什么
 
 </div>
 
@@ -28,7 +29,7 @@
 
 ## 下载与安装
 
-需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 之一（要定时日常的话，Codex 用桌面版）。
+需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai) 或 [Hermes Agent](https://hermes-agent.nousresearch.com) 之一（要定时日常的话，Codex 用桌面版）。
 
 ### 用 Claude Code
 
@@ -67,6 +68,16 @@ OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓
 
 详细配置步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)，配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)。
 
+### 用 Hermes Agent
+
+把下面这句话发给 Hermes：
+
+> 帮我安装并配置 https://github.com/mansicer/MaaPilot.git，先阅读 AGENTS.md 和 docs/harnesses/hermes.md，按 Hermes 的接入说明完成设置。
+
+Hermes 使用独立配置和 Gateway 重复定时；任务必须绑定仓库目录，并确认能加载 MaaPilot 技能。Gateway 要保持运行，原交互聊天可以关闭。接入目前为实验支持，模型、投递与完整日常的验证状态见 [Hermes 说明](docs/harnesses/hermes.md)，Docker 与配置模板见 [templates/hermes/](templates/hermes/)。
+
+当前实测版本会隔离首次设置技能中的在线脚本安装步骤；首次设置尚未通过，不应关闭扫描绕过。已有项目的说明加载、日常技能加载及无游戏的 agent 定时等待测试已通过。
+
 ### 在 Windows 上
 
 步骤和上面一样，在 PowerShell 里 clone、打开其中一个 agent，说一句"开始"。另外注意：
@@ -93,6 +104,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 | Codex 桌面版 | 支持 | 支持 |
 | Codex 命令行 | 支持 | 不支持（没有会话内定时） |
 | OpenClaw | 支持 | 支持（Gateway 重复定时） |
+| Hermes Agent | 实验支持 | 实验支持（Gateway 重复定时，验收状态见专用说明） |
 
 各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses/`](docs/harnesses/)（每家一个文件），接新的 agent 看那里的 README。
 
@@ -111,7 +123,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 
 ### 怎么跟它说
 
-在这个文件夹里打开 Claude Code、Codex 或 OpenClaw，直接说想做的事：
+在这个文件夹里打开 Claude Code、Codex、OpenClaw 或 Hermes，直接说想做的事：
 
 - "现在跑一次日常" / "今天做了什么"
 - "把遥练到精2" / "给能天使专三" / "目标进度怎么样"
@@ -147,7 +159,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 
 - 游戏自动化：[MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights)（MaaCore，干员培养等任务）、[maa-cli](https://github.com/MaaAssistantArknights/maa-cli)（日常任务）
 - 识别与操作框架：[MaaFramework](https://github.com/MaaXYZ/MaaFramework)
-- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)
+- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)、[Hermes Agent](https://hermes-agent.nousresearch.com)
 
 ### 开源库
 
