@@ -76,6 +76,8 @@ OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓
 
 Hermes 会自己建立 Maa 专长 profile、主 agent 转达入口和默认暂停的定时日常。接好模型、报告渠道和游戏设置，并确认唯一日常宿主后再启用；Gateway 要保持运行。接入仍为实验支持，详见 [Hermes 说明](docs/harnesses/hermes.md)。
 
+> 微信对 OpenClaw 和 Hermes 的消息推送支持较差，可能收不到日常报告。建议优先使用 QQ 机器人（QQ Bot）或 Lark 等平台。
+
 ### 在 Windows 上
 
 步骤和上面一样，在 PowerShell 里 clone、打开其中一个 agent，说一句"开始"。另外注意：
