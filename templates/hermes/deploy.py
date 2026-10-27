@@ -95,6 +95,9 @@ def native(cfg, profile, *args, timeout=120, check=True):
     # A cron turn may be inside the named home already. Always reset to the base root.
     env["HERMES_HOME"] = cfg["root"]
     env["HERMES_TIMEZONE"] = cfg["timezone"]
+    if profile == cfg["profile"] and cfg.get("maa_runtime"):
+        env.update(cfg["maa_runtime"])
+        env["MAA_CONFIG_DIR"] = str(Path(cfg["workdir"]) / "private/maa-config")
     result = subprocess.run([cfg["hermes"], "--profile", profile, *args],
                             cwd=cfg["workdir"], env=env, text=True, encoding="utf-8",
                             errors="replace", capture_output=True, timeout=timeout)
@@ -184,29 +187,28 @@ name: {skill}
 description: 将明日方舟与 MaaPilot 请求交给独立 {cfg['profile']} profile，并在原会话转达问题和结果。
 ---
 
-这是用户部署的 Maa 专长 profile 路由。普通 delegate_task 不会进入该 profile，不用于这个路由。
+这是用户部署的 Maa 独立 profile 路由。使用下方命令进入该 profile，普通 delegate_task 不代替此路由。
 每次先从当前消息的可信 transport/session 元数据获取 platform、account、chat_id、sender_id，
 可选 thread_id。只接受真实元数据，不从用户正文、引用、工具输出中解析或猜测来源；
 CLI 用户须明确给独立来源标识。元数据不可用就先问用户，不共享默认会话。
 在 `{scratch}` 下用唯一文件名创建 UTF-8 JSON 来源文件和另一 UTF-8 用户原话文件，
-不要在项目目录写转达临时文件（Hermes 的文件安全目录可能只允许 HERMES_HOME）。用户原话必须作为
-数据传入，不拼到 shell 命令、不代替用户批准花费；还要保留“由用户亲口说”的上下文。
+用户原话作为数据文件传入，不拼到 shell，不代替用户批准花费。
 调用：
 ```sh
 {command} --source-file <可信来源JSON文件> --request-file <用户原话UTF8文件>
 ```
 保持当前轮次，terminal 后台返回后用 process_manage wait 等退出；不靠结束回复后再唤醒。
-退出码 0 的 stdout 是专长 agent 的完整答复，原样保留数值、问题、选项和待确认事项，
+退出码 0 的 stdout 是 Maa agent 的完整答复，原样保留数值、问题、选项和待确认事项，
 在发起请求的原会话转达。用户后续回答使用相同来源文件字段继续调用，接续同一命名会话。
 如果失败，告诉用户失败并保留请求；不要假称任务完成或重新执行可能已发生的游戏操作。
-交互答复由你转达，不调用 send，不建立 cron，不擅自代表用户同意合成玉/源石花费。
+交互答复由你转达；定时结果由原生 delivery 发送，不转发定时结果。
 同一账号的不同用户/会话来源独立，不向另一来源泄露历史或沿用其授权。
 '''
     write_text(skill_dir / "SKILL.md", body)
     managed_block(main_home / "SOUL.md", f"maapilot-route-{cfg['id']}",
                   f"明日方舟 / MaaPilot 请求和后续追问交给技能 `{skill}`。\n"
-                  f"独立专长 profile 是 `{cfg['profile']}`；原会话负责转达其问题与结果。\n"
-                  "来源必须来自可信会话元数据；不要用普通 delegate_task 代替命名 profile。")
+                  f"独立 profile 是 `{cfg['profile']}`；原会话负责转达其问题与结果。\n"
+                  "交互任务按该技能转达；定时结果由原生 cron delivery 发送，不重复转发。")
 
 
 def validate_settings(value):
@@ -249,6 +251,64 @@ def validate_settings(value):
     return cfg
 
 
+RUNTIME_KEYS = {"MAA_DATA_DIR", "MAA_CACHE_DIR", "MAA_STATE_DIR"}
+
+
+def setup_complete(work):
+    # This is the same completion marker doctor uses; there is no `done` field.
+    return (Path(work) / "private/setup.json").is_file()
+
+
+def prepare_maa_runtime(cfg, previous=None):
+    """Hermes-only directory discovery; never write MaaPilot code or private config."""
+    work = Path(cfg["workdir"])
+    runtime_root = Path(cfg["root"]) / ".maa-runtime"
+    runtime = previous
+    if runtime is None:
+        runtime = {f"MAA_{kind.upper()}_DIR": str(runtime_root / kind)
+                   for kind in ("data", "cache", "state")}
+        python = work / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+        if python.is_file():
+            # Query the existing installation in its working environment. No writes.
+            script = """import json
+from pathlib import Path
+from maapilot.crew import maa
+from maapilot.oscompat import procs
+runtime = {}
+for kind in ('data', 'cache', 'state'):
+    result = procs.run_text([maa.maa_bin(), 'dir', kind], timeout=20, env=maa.env())
+    result.check_returncode()
+    runtime['MAA_' + kind.upper() + '_DIR'] = result.stdout.strip()
+if not (Path(runtime['MAA_DATA_DIR']) / 'resource').is_dir():
+    raise RuntimeError('MAA resources not found in this environment')
+print(json.dumps(runtime))
+"""
+            result = subprocess.run([str(python), "-c", script], cwd=work,
+                                    env={**os.environ, "MAAPILOT_PRIVATE": str(work / "private")},
+                                    capture_output=True, text=True, encoding="utf-8", timeout=90)
+            if result.returncode == 0:
+                runtime = json.loads(result.stdout)
+            elif setup_complete(work):
+                raise Refused("已完成 setup 但找不到原 MAA 资源；请在原先能运行 MAA 的环境重新部署")
+        elif setup_complete(work):
+            raise Refused("已有 setup 但项目虚拟环境缺失，拒绝替换 MAA 运行目录")
+    if (not isinstance(runtime, dict) or set(runtime) != RUNTIME_KEYS
+            or any(not isinstance(v, str) or not Path(v).is_absolute() for v in runtime.values())):
+        raise Refused("MAA 运行目录记录无效；每个目录必须是绝对路径")
+    return runtime
+
+
+def install_runtime_env(cfg):
+    """Only the owned Maa profile receives these non-secret tool settings."""
+    target = profile_home(Path(cfg["root"]), cfg["profile"]) / ".env"
+    values = {**cfg["maa_runtime"], "MAA_CONFIG_DIR": str(Path(cfg["workdir"]) / "private/maa-config")}
+    old = target.read_text(encoding="utf-8") if target.exists() else ""
+    kept = [line for line in old.splitlines()
+            if not any(re.match(rf"^(?:export\s+)?{key}\s*=", line.strip()) for key in values)]
+    write_text(target, "\n".join(kept + [f"{key}={json.dumps(value, ensure_ascii=False)}"
+                                        for key, value in sorted(values.items())]) + "\n")
+
+
 def install(args):
     cfg = validate_settings(read_json(args.settings))
     cfg["hermes"] = shutil.which(args.hermes) or str(Path(args.hermes).resolve())
@@ -270,6 +330,8 @@ def install(args):
                 raise Refused("已有同名非受管 profile；请选择新的名称")
         if owner.exists() and read_json(owner).get("id") != cfg["id"]:
             raise Refused("同名 profile 属于另一个部署")
+        cfg["maa_runtime"] = prepare_maa_runtime(cfg, old.get("maa_runtime") if old else None)
+        cfg["verification"] = old.get("verification", {}) if old else {}
         spec_keys = ("times", "timezone", "target", "send_profile", "model", "provider", "base_url")
         spec = {k: cfg.get(k) for k in spec_keys}
         if old:
@@ -297,8 +359,11 @@ def install(args):
         # Script/template copies only; no user config, memory, history or bot tokens are cloned.
         source = Path(__file__).resolve().parent
         write_text(directory / "bridge.py", Path(__file__).read_text(encoding="utf-8"))
+        write_text(directory / "runtime-probe.py", (source / "runtime-probe.py").read_text(encoding="utf-8"))
         settings = {"timezone": cfg["timezone"], "terminal.backend": "local",
-                    "terminal.cwd": cfg["workdir"], "model.default": cfg["model"],
+                    "terminal.cwd": cfg["workdir"],
+                    "terminal.env_passthrough": sorted(RUNTIME_KEYS | {"MAA_CONFIG_DIR"}),
+                    "model.default": cfg["model"],
                     "model.provider": cfg["provider"], "agent.max_turns": 500,
                     "cron.catch_up_missed": False,
                     "platform_toolsets.cli": ["terminal", "file", "skills", "vision"],
@@ -310,7 +375,13 @@ def install(args):
         for key, value in settings.items():
             native(cfg, cfg["profile"], "config", "set", key,
                    value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+        install_runtime_env(cfg)
         copy_credentials(cfg, args.credential_file, args.credential_key)
+        verification = cfg.get("verification", {})
+        if verification and verification.get("fingerprint") != verification_fingerprint(cfg):
+            for job in jobs(cfg):
+                if job["id"] in cfg["jobs"].values() and job.get("enabled"):
+                    native(cfg, cfg["profile"], "cron", "pause", job["id"])
         managed_block(home / "SOUL.md", f"maapilot-specialist-{cfg['id']}",
                       (source / "maa-soul.md").read_text(encoding="utf-8").replace("{{MANIFEST}}", str(manifest)))
         install_routes(cfg, manifest, directory)
@@ -318,8 +389,9 @@ def install(args):
         # The scanner still decides whether each skill may load. No external_dirs fallback.
         native(cfg, cfg["profile"], "skills", "list")
         prompt = (source / "daily-prompt.txt").read_text(encoding="utf-8")
-        prompt += "\n本部署的报告命令（由专长 agent 收尾后执行）：\n" + shlex.join(
-            [sys.executable, str(directory / "bridge.py"), "send-report", "--manifest", str(manifest), "--run-id", "<本次日常run_id>"])
+        prompt += "\n本部署已收尾简报的只读提取命令：\n" + shlex.join(
+            [sys.executable, str(directory / "bridge.py"), "report-summary", "--manifest", str(manifest), "--run-id", "<本次日常run_id>"])
+        delivery = cfg.get("target") or "local"
         current = jobs(cfg)
         # A changed config is deliberately paused. Never implicitly pause an unchanged live job.
         expected = {}
@@ -331,8 +403,8 @@ def install(args):
                 raise Refused("发现重复受管 cron，暂停部署并人工核对")
             if not matches:
                 native(cfg, cfg["profile"], "cron", "create", expr, prompt,
-                       "--name", name, "--workdir", cfg["workdir"], "--deliver", "local",
-                       "--failure-deliver", "local", "--model", cfg["model"], "--provider", cfg["provider"], "--paused")
+                       "--name", name, "--workdir", cfg["workdir"], "--deliver", delivery,
+                       "--failure-deliver", delivery, "--model", cfg["model"], "--provider", cfg["provider"], "--paused")
                 current = jobs(cfg)
                 matches = [j for j in current if j.get("name") == name]
             if len(matches) != 1:
@@ -340,13 +412,18 @@ def install(args):
             job = matches[0]
             if changed:
                 native(cfg, cfg["profile"], "cron", "edit", job["id"], "--schedule", expr,
-                       "--prompt", prompt, "--workdir", cfg["workdir"], "--deliver", "local",
-                       "--failure-deliver", "local", "--model", cfg["model"], "--provider", cfg["provider"])
+                       "--prompt", prompt, "--workdir", cfg["workdir"], "--deliver", delivery,
+                       "--failure-deliver", delivery, "--model", cfg["model"], "--provider", cfg["provider"])
                 job = next(j for j in jobs(cfg) if j["id"] == job["id"])
-            elif job.get("prompt") != prompt:
+            elif (job.get("prompt") != prompt or job.get("deliver") not in (delivery, [delivery])
+                  or job.get("failure_deliver") not in (delivery, [delivery])):
+                # Changing notification ownership on an existing live job needs review.
+                if job.get("deliver") not in (delivery, [delivery]) or job.get("failure_deliver") not in (delivery, [delivery]):
+                    native(cfg, cfg["profile"], "cron", "pause", job["id"])
                 # Prompt-only edits do not touch schedule/next_run_at/enabled (native update).
                 # Allows a template upgrade without pausing or rearming a live task.
-                native(cfg, cfg["profile"], "cron", "edit", job["id"], "--prompt", prompt)
+                native(cfg, cfg["profile"], "cron", "edit", job["id"], "--prompt", prompt,
+                       "--deliver", delivery, "--failure-deliver", delivery)
                 job = next(j for j in jobs(cfg) if j["id"] == job["id"])
             validate_job(cfg, job, expr, prompt)
             expected[at] = job["id"]
@@ -372,14 +449,16 @@ def install(args):
         if args.enable:
             enable(cfg, manifest, args.confirm_exclusive)
         print(json.dumps({"manifest": str(manifest), "profile": cfg["profile"], "jobs": cfg["jobs"],
-                          "gateway": cfg["gateway"].get("state"), "channel": "target_set_delivery_unverified" if cfg["target"] else "pending",
+                          "gateway": cfg["gateway"].get("state"), "verification": cfg["verification"],
+                          "channel": "native_delivery_requires_verification" if cfg["target"] else "pending",
                           "setup_skill": "必须检查扫描结果；隔离时首次 setup 未完成"}, ensure_ascii=False))
 
 
 def validate_job(cfg, job, expr, prompt):
-    local = lambda value: value == "local" or value == ["local"]
-    if (job.get("workdir") != cfg["workdir"] or not local(job.get("deliver"))
-            or not local(job.get("failure_deliver")) or job.get("model") != cfg["model"]
+    delivery = cfg.get("target") or "local"
+    matches = lambda value: value == delivery or value == [delivery]
+    if (job.get("workdir") != cfg["workdir"] or not matches(job.get("deliver"))
+            or not matches(job.get("failure_deliver")) or job.get("model") != cfg["model"]
             or job.get("provider") != cfg["provider"] or job.get("prompt") != prompt
             or job.get("schedule", {}).get("expr") != expr or job.get("no_agent")):
         raise Refused("cron 绑定与预期不一致，拒绝启用/继续部署")
@@ -409,13 +488,10 @@ def enable(cfg, manifest, confirmed):
         expr = f"{int(at[3:])} {int(at[:2])} * * *"
         # The report target lives in our owned manifest, never in cron delivery.
         validate_job(cfg, job, expr, job.get("prompt"))
-    listing = native(cfg, cfg["send_profile"], "send", "--list", "--json")
-    try:
-        platforms = json.loads(listing.stdout).get("platforms", {})
-    except (ValueError, AttributeError):
-        platforms = {}
-    if not isinstance(platforms, dict) or cfg["target"].split(":", 1)[0] not in platforms:
-        raise Refused("发送 profile 尚未配置所选平台；保持日常暂停")
+    evidence = cfg.get("verification", {})
+    if (evidence.get("fingerprint") != verification_fingerprint(cfg)
+            or not all(evidence.get(lane, {}).get("ok") for lane in ("runtime", "success", "failure"))):
+        raise Refused("须先 verify --delivery：验证真实 cron 环境及原生成功/失败投递；主 profile 配好渠道不代表 Maa profile 可用")
     for job in actual_jobs:
         if job["id"] not in cfg["jobs"].values() or job.get("enabled"):
             continue
@@ -460,25 +536,124 @@ def dispatch(args):
         write_text(request.with_suffix(".response.txt"), result.stdout)
         write_json(request.with_suffix(".result.json"), {"exit_code": result.returncode, "session_key": digest})
         if result.returncode or not result.stdout.strip():
-            raise Refused("专长 agent 未成功返回；请求与输出已保留，不自动重跑")
+            raise Refused("Maa agent 未成功返回；请求与输出已保留，不自动重跑")
         print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
 
 
+def verification_fingerprint(cfg):
+    home = profile_home(Path(cfg["root"]), cfg["profile"])
+    value = {key: cfg.get(key) for key in ("root", "profile", "workdir", "target", "maa_runtime")}
+    digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode())
+    for name in ("config.yaml", ".env"):
+        path = home / name
+        digest.update(path.read_bytes() if path.exists() else b"")
+    return digest.hexdigest()
+
+
+def run_probe(cfg, manifest, lane, *, timeout=120):
+    """Ask Hermes to run one paused, script-only job in the real cron context."""
+    target = "local" if lane == "runtime" else exact_target(cfg.get("target"))
+    directory = Path(manifest).resolve().parent
+    nonce = str(time.time_ns())
+    name = f"MaaPilot-probe:{cfg['id']}:{nonce}"
+    home = profile_home(Path(cfg["root"]), cfg["profile"])
+    result_path = directory / "probes" / f"{nonce}.json"
+    spec_path = result_path.with_suffix(".spec.json")
+    spec = {"nonce": nonce, "lane": lane, "workdir": cfg["workdir"],
+            "python": str(Path(cfg["workdir"]) / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")),
+            "result": str(result_path)}
+    write_json(spec_path, spec)
+    script = home / "scripts" / f"maapilot-probe-{cfg['id']}-{nonce}.py"
+    write_text(script, "import runpy,sys\n" + f"sys.argv = {['runtime-probe.py', str(spec_path)]!r}\n"
+               + f"runpy.run_path({str(directory / 'runtime-probe.py')!r}, run_name='__main__')\n")
+    jid = None
+    try:
+        native(cfg, cfg["profile"], "cron", "create", "0 0 1 1 *", "",
+               "--name", name, "--script", script.name, "--no-agent", "--paused",
+               "--workdir", cfg["workdir"], "--deliver", target, "--failure-deliver", target)
+        matches = [j for j in jobs(cfg) if j.get("name") == name]
+        if len(matches) != 1:
+            raise Refused("无法唯一读回原生验收任务")
+        jid = matches[0]["id"]
+        # Some supported CLIs refuse manual runs of paused jobs despite create's
+        # help text. This probe's next calendar occurrence is safely in the future.
+        native(cfg, cfg["profile"], "cron", "resume", jid)
+        native(cfg, cfg["profile"], "cron", "run", jid, check=False, timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = next((j for j in jobs(cfg) if j.get("id") == jid), {})
+            if job.get("last_run_at") and not job.get("fire_claim") and not job.get("run_claim"):
+                break
+            time.sleep(0.5)
+        else:
+            raise Refused("原生验收任务未在期限内完成；不将排队当作验收成功")
+        write_json(result_path.with_suffix(".outcome.json"), {
+            "probe_id": jid, "status": job.get("last_status"), "run_at": job.get("last_run_at"),
+            "delivery_error": bool(job.get("last_delivery_error")),
+            "unverified": bool(job.get("last_delivery_unverified")),
+            "queued": bool(job.get("last_delivery_queued"))})
+        result = read_json(result_path)
+        if result.get("nonce") != nonce or not result.get("ok"):
+            raise Refused("原生 cron 环境探针失败；检查 Maa profile 的运行环境")
+        if lane == "runtime":
+            expected = {**cfg["maa_runtime"], "MAA_CONFIG_DIR": str(Path(cfg["workdir"]) / "private/maa-config")}
+            if (result.get("environment") != expected or not result.get("resource_exists")
+                    or any(result.get("directories", {}).get(kind) != expected[f"MAA_{kind.upper()}_DIR"]
+                           for kind in ("data", "cache", "state", "config"))
+                    or job.get("last_status") != "ok"):
+                raise Refused("实际 cron 环境与部署目录不一致或资源不可读；重载 Maa profile 后重试")
+        elif (job.get("last_status") != ("error" if lane == "failure" else "ok")
+              or "last_delivery_error" not in job or job.get("last_delivery_error")
+              or job.get("last_delivery_unverified") or job.get("last_delivery_queued")):
+            raise Refused("原生成功/失败通知未确认送达；检查 Maa profile 自有渠道或原生共享路由，不复制主渠道凭据")
+        return {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "probe_id": jid}
+    finally:
+        if jid is not None:
+            cleanup = native(cfg, cfg["profile"], "cron", "remove", jid, check=False)
+            if cleanup.returncode:
+                native(cfg, cfg["profile"], "cron", "pause", jid, check=False)
+                raise Refused("验收任务未能删除，已尝试暂停；请核对该 probe ID，不能计为验收通过")
+        script.unlink(missing_ok=True)
+
+
+def verify(args):
+    cfg = load_manifest(args.manifest)
+    with lock(Path(args.manifest).resolve().parent / ".verify.lock"):
+        evidence = {"fingerprint": verification_fingerprint(cfg)}
+        cfg["verification"] = evidence
+        write_json(args.manifest, cfg)  # Invalidate old evidence before doing any work.
+        for lane in (("runtime", "success", "failure") if args.delivery else ("runtime",)):
+            evidence[lane] = run_probe(cfg, args.manifest, lane)
+            write_json(args.manifest, cfg)
+        if evidence["fingerprint"] != verification_fingerprint(cfg):
+            cfg["verification"] = {}
+            write_json(args.manifest, cfg)
+            raise Refused("验收期间 Maa profile 配置发生变化，请重新验收")
+        print(json.dumps({"verification": evidence}, ensure_ascii=False))
+
+
+def report_summary(cfg, rid):
+    if not re.fullmatch(r"\d{8}-\d{4,6}", rid):
+        raise Refused("日常运行编号格式不正确")
+    stem = f"{rid[:4]}-{rid[4:6]}-{rid[6:8]}-{rid[9:]}"
+    report = read_json(Path(cfg["workdir"]) / "private/reports" / (stem + ".json"))
+    if (report.get("run_id") != rid or report.get("open") is not False
+            or report.get("closed_by") != "agent" or not report.get("closed_at")):
+        raise Refused("对应日常尚未由 agent 执行 daily done，不能提取完成简报；失败时直接说明实际进度")
+    text = (report.get("goals_summary") or {}).get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise Refused("报告缺少 agent 总结；不使用整份程序报告代替简报")
+    return text.strip()
+
+
 def send_report(args):
+    # Manual compatibility/recovery only. Cron uses native delivery exclusively.
     cfg = load_manifest(args.manifest)
     if not cfg.get("target"):
         raise Refused("报告渠道待配置；只保存本地报告")
     target = exact_target(cfg["target"])
     rid = args.run_id
-    if not re.fullmatch(r"\d{8}-\d{4,6}", rid):
-        raise Refused("日常运行编号格式不正确")
-    stem = f"{rid[:4]}-{rid[4:6]}-{rid[6:8]}-{rid[9:]}"
-    report_path = Path(cfg["workdir"]) / "private/reports" / (stem + ".json")
-    report = read_json(report_path)
-    if (report.get("run_id") != rid or report.get("open") is not False
-            or report.get("closed_by") != "agent" or not report.get("closed_at")):
-        raise Refused("对应日常尚未由 agent 执行 daily done，不能发送")
-    body = report_path.with_suffix(".md").read_text(encoding="utf-8-sig")
+    body = report_summary(cfg, rid)
     directory = Path(args.manifest).resolve().parent / "outbox" / rid
     state_path = directory / "receipt.json"
     with lock(directory / ".lock"):
@@ -548,9 +723,18 @@ def main(argv=None):
     p.add_argument("--manifest", required=True)
     p.add_argument("--run-id", required=True)
     p.add_argument("--retry-failed", action="store_true")
+    p = sub.add_parser("report-summary", help="只读提取 agent 的固定格式简报；不发送")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--run-id", required=True)
+    p = sub.add_parser("verify", help="原生无游戏 cron 环境验收；--delivery 会实际测试两条通知")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--delivery", action="store_true")
     args = parser.parse_args(argv)
     try:
-        {"install": install, "dispatch": dispatch, "send-report": send_report}[args.command](args)
+        if args.command == "report-summary":
+            print(report_summary(load_manifest(args.manifest), args.run_id))
+        else:
+            {"install": install, "dispatch": dispatch, "send-report": send_report, "verify": verify}[args.command](args)
         return 0
     except (Refused, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
         print(str(exc), file=sys.stderr)
