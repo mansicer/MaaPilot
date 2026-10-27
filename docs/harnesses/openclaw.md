@@ -22,10 +22,10 @@ OpenClaw 是一个常驻的 Gateway：agent 有独立 workspace，定时由 Gate
 3. 在这个 agent 的会话里按 skill `maapilot-setup` 完成 MaaPilot 设置。
 4. 按 `private/config.yaml` 的 `schedule`，每个时间点建一条重复 cron；使用 [`cron-daily.json`](../../templates/openclaw/cron-daily.json) 的字段结构，把 `${...}` 换成实际值。
 5. 先确认用户能收到哪个渠道的**主动投递**。不要因为渠道显示 connected 就认定它能主动发送；用下面的「投递渠道预检」实测。没有可用渠道时把 cron 的 `delivery.mode` 设成 `none`，并明确告诉用户定时任务仍会执行，但结果只保存在 OpenClaw 会话里。
-6. 经用户同意，用不操作游戏的独立任务分别验收“最终只来一条”和“阻塞提问能回到原始会话”；测试完成后删除测试任务。
+6. 按下文「部署验收」检查最终结果、失败通知与原始会话追问，完成后删除测试任务。
 7. OpenClaw 部署时不得静默采用默认值。`maapilot-setup` 里需要用户决定的项目必须逐项询问，仍未得到回答的不能当成已确认；结束时按下面的「setup 结束报告」把实际采用值和待决定事项告诉用户。
 
-配置格式按 OpenClaw 2026.10 及以后验证。旧配置里的 `agents.list` 先用 `openclaw doctor --fix` 迁移到 `agents.entries`。仓库不替用户修改 `~/.openclaw/openclaw.json`。
+配置片段以 OpenClaw 2026.10 的实测格式为基线；其他版本须验证。旧配置里的 `agents.list` 先用 `openclaw doctor --fix` 迁移到 `agents.entries`。仓库不替用户修改 `~/.openclaw/openclaw.json`。
 
 ### setup 结束报告
 
@@ -98,7 +98,7 @@ Session event origin is missing; start fresh authorized work instead
 1. 不要重跑 `daily run`，也不要反复重试那条完成事件。
 2. 用 `maapilot daily status` 和 `report show` 核对运行状态；如果日常已是 `done/ok` 且 `open:true`，只补执行 `maapilot daily done`。
 3. 从用户当前所在的原始渠道会话重新发起一次收尾；不要从没有来源的 `agent:<id>:main` 会话恢复。
-4. 收尾成功后只发送一次报告。若无法恢复原会话来投递，保留报告，等下一次用户消息或下一次日常接手；绝不为了补消息重跑游戏任务。
+4. 成功或失败都只发送一次结果报告；收尾失败也及时报告失败原因和未完成事项。若无法恢复原会话来投递，保留报告，等下一次用户消息或下一次日常接手；绝不为了补消息重跑游戏任务。
 
 这是 OpenClaw 当前后台完成事件的来源归属问题。上游应让完成事件继承启动它的 cron run 的 `sessionId`、渠道和投递路由；在修复前，OpenClaw 适配用“同一轮 poll 到退出”避免走到这个回传路径。
 
@@ -130,26 +130,32 @@ setup 时先看 `openclaw channels status --probe`，再让用户选一个接收
 
 主 agent 不在 MaaPilot 仓库里时，把 [`main-agent-delivery.md`](../../templates/openclaw/main-agent-delivery.md) 的规则并入它的说明文件。只改 MaaPilot 的 prompt 管不到主 agent 的转发。
 
+启动、工具调用、会话数据库、模型或收尾报错时，也要及时在原始会话回复失败原因、已完成和未完成事项、下一步；失败回复不以 `daily done` 成功为前提。接手方无法运行时由发起方报告，不能把内部错误或 `NO_REPLY` 当成已告知用户。
+
 ### 定时任务
 
 定时任务运行在独立会话里，**在那里写的回答不会自动出现在用户的聊天界面**。结果走 cron 的 `delivery`，并且只走一次：
 
 - 模板用 `bestEffort=false`，让投递失败进入执行记录。不要把中断进度、后台完成通知、相同状态的轮询、旧截图当成新的定时结果。
-- `cron-daily.json` 的提示在运行期间要求静默；没有最终结果时返回 `NO_REPLY`，`daily done` 成功后才生成一条总结。不要用 `message`、`conversations_send`、`sessions_send` 或主会话代发同一份总结。
+- `cron-daily.json` 只在正常等待期间静默。成功、部分失败、启动失败、超时、无法恢复、`daily done` 收尾失败都及时生成一条最终结果；失败通知不依赖收尾成功，不能用 `NO_REPLY` 隐藏异常。说明实际进度和收尾状态，不声称未完成的任务成功。不要用 `message`、`conversations_send`、`sessions_send` 或主会话代发同一份总结。
 - `status: ok` 只代表 agent turn 跑完，不代表消息送达。每次核对 `completionStatus`、`delivered` / `deliveryStatus`；`ok (not delivered)` 是失败结果，不能向用户宣称已汇报。
 - 投递失败时保留已生成的总结，修正通知路径后只重发通知。绝不为了补消息重跑日常、兑换或其它游戏操作。平台返回 sent 只说明平台接收，不代表用户已读或批准。
 - 不使用自动猜测的备用渠道。用户明确指定了备用渠道和目标时，才为同一条结果建立一条去重后的备用通知；否则让失败保持可见，等用户回来处理。
 
+提示词只有在 agent turn 能运行时才生效。会话数据库、模型或 Gateway 故障导致 turn 根本无法执行时，部署验收必须另测宿主错误通知能否通过已配置渠道送达；未通过应标明此限制，不能承诺提示词能覆盖宿主故障。
+
 ### 部署验收
 
-经用户同意，用不操作游戏、禁用所有工具的独立任务做两项验收：
+经用户同意，用不操作游戏的独立任务做三项验收（结果和提问测试禁用所有工具，失败测试仅模拟错误）：
 
 1. 最终结果测试：任务运行中故意等待一段时间并接收一次后台完成通知，确认用户最多收到一条最终结果，中间没有“正在跑”“还在等”这类消息。
 2. 阻塞提问测试：让任务只返回一个模拟问题，确认它回到发起任务的原始会话，并且只出现一次；再回复一次，确认答复送回了同一任务。
 
+3. 失败通知测试：分别模拟启动失败和收尾失败，确认没有成功的 `daily done` 也及时收到一条失败结果，且不重跑任务；另核对宿主无法启动 agent turn 时的错误通知路径。
+
 同时查看 OpenClaw 的任务执行记录和渠道消息标识。发送成功但本地没有出站记录、超时导致状态不明、或只有一条内部交回记录时，都算未验收。测试任务完成后删除，不要拿真实日常或兑换任务做投递重试。
 
-OpenClaw 或渠道升级后重跑这两项验收。遇到会话存储、Gateway 或渠道错误时先检查版本、健康状态和实际运行的二进制；不要手改会话数据库。回复窗口受限的渠道在长时间空闲后可能要求用户先发一条消息刷新状态，这种渠道不能单独承担无人值守通知。
+OpenClaw 或渠道升级后重跑这些验收。遇到会话存储、Gateway 或渠道错误时先检查版本、健康状态和实际运行的二进制；不要手改会话数据库。回复窗口受限的渠道在长时间空闲后可能要求用户先发一条消息刷新状态，这种渠道不能单独承担无人值守通知。
 
 ## 容器
 
@@ -159,10 +165,6 @@ OpenClaw 或渠道升级后重跑这两项验收。遇到会话存储、Gateway 
 - `.openclaw/` 是 OpenClaw 往 workspace 写的状态，已在 `.gitignore`。
 - 不要往仓库放 `SOUL.md`、`USER.md`、`IDENTITY.md`、`TOOLS.md`、`HEARTBEAT.md`；缺了不影响运行，要阻止生成就设 `agents.defaults.skipBootstrap`。
 
-## 实测
+## 验证与版本
 
-- 10-21 至 10-22（OpenClaw 2026.10.5，Linux 容器 + Windows 宿主机 MuMu 12）：`maapilot doctor` 全绿；截图、OCR 和点击可用；重复 cron 到点唤醒并投递；长命令使用当时的 5400 秒超时，未超时。现模板改为 10800 秒，尚未做 3 小时上限实测。
-- 10-23：独立任务禁用全部工具后模拟阻塞问题，约 5 秒完成并只投递一次；后台完成通知没有产生额外回复。
-- 10-24：同一部署的 04:40 日常正常送达，12:40 日常执行成功但最终投递报 `prepare failed`；任务记录为 `ok (not delivered)`。同轮运行还生成了多段“正在跑”式 commentary。结论：执行成功、内部回复、平台连接都不能代替主动投递验收；定时日常必须在运行期间静默，并只保留一条最终结果路径。
-- 已实测一次性 `at` 任务到期未执行，因此本接入使用重复 cron。
-- 容器缺少桌面依赖或 `crontab` 时，截图测试和 v0.1 遗留的 `legacy_schedule` 检查可能报错，先排除环境问题再判断 MaaPilot。
+接入格式以实际目标版本的 validate、CLI 帮助和 Gateway 返回为准，不承诺所有后续版本兼容。升级后重跑上述无游戏验收；历史实测和已知问题见 [OpenClaw 验证记录](validation/openclaw.md)。测试数量、连接状态和提示词字符串都不能替代行为与实际送达验收。

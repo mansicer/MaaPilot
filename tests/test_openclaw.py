@@ -39,7 +39,10 @@ def test_daily_job_stays_silent_until_one_final_delivery():
     message = _json("cron-daily.json")["payload"]["message"]
     assert "不要输出进度" in message
     assert "NO_REPLY" in message
-    assert "只有 daily done 成功后" in message
+    assert "正常等待且没有异常时才使用 NO_REPLY" in message
+    assert "失败通知不以 daily done 成功为前提" in message
+    for failure in ("部分失败", "启动失败", "超时", "无法恢复", "daily done 收尾失败"):
+        assert failure in message
     assert "仅生成一条最终总结" in message
     assert "message/conversations_send/sessions_send" in message
 
@@ -48,7 +51,9 @@ def test_daily_job_polls_background_work_without_relying_on_completion_handoff()
     message = _json("cron-daily.json")["payload"]["message"]
     assert "当前 turn 内用 process 持续 poll 到退出" in message
     assert "不要结束 turn 等待完成事件自动唤醒" in message
-    assert "Session event origin is missing" in message
+    # Historical error strings belong in the operator guide, not every cron turn.
+    assert "Session event origin is missing" not in message
+    assert "docs/harnesses/openclaw.md" in message
 
 
 def test_daily_job_has_no_deployment_specific_delivery():

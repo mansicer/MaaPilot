@@ -1,0 +1,38 @@
+# Hermes 接入验证记录
+
+以下为历史记录，不是当前部署的能力承诺。旧的 local + send-report 路径已由原生投递替代。
+
+## 实测与边界
+
+依据 Hermes 官方 [profiles/skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)、[cron](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) 文档和原生源码，参数以所部署版本为准。
+
+开发验证环境是 Windows Docker Desktop 中的隔离测试容器，Hermes v0.22.5（`bf0203a7`），官方镜像摘要：
+`nousresearch/hermes-agent@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d`。
+
+- 已验证：空白 Maa profile、指定 OpenCode Go / DeepSeek V4.1 Flash key 的选择性复制、主 Gateway 自动纳管 Maa，原生 ensure 返回 Maa profile 路径。重复安装的两条日常 ID 相同，均保持暂停和 local；主模型/渠道配置与主 cron 文件哈希不变，主 SOUL 只增加一个受管路由块。
+- 已验证：安装的主路由 skill 在原生索引 enabled；真实主模型自动加载路由，把第一次问题交给 Maa profile，转达颜色选择问题；第二轮回到同一Maa profile 会话，正确回传选择及上一轮记号。未执行游戏或首次 setup。
+- 之前已验证：真实 agent cron 读取项目说明和日常技能、后台启动 70 秒无害进程，并通过 process_manage 同轮等待退出；这不是一小时游戏日常验收。
+- 已验证：独立 CLI 来源进入另一 Maa 会话，答复“无先前记号”，未沿用前一来源历史；最终交付脚本安装后又在新来源完成两轮主 agent 自动转达。两轮请求使用同一来源哈希，另一个来源哈希不同。请求文件改在主 profile cache 下生成，符合验证环境的文件工具安全目录要求。
+- 已验证：一次性 agent cron 到点执行，保留上游固定 DELIVERY 前缀。工具记录证明显式执行了 send-report，mock CLI 收到指定发送 profile、精确目标、报告文件和 JSON 参数并产生 sent 回执；同一 cron 又调用原生 send，在未配置渠道的 Maa profile 本地目标解析失败、退出 1。没有外发消息、修改 guard 或关闭扫描。cron 返回成功并保存 local 报告。这验证该版本/模型能执行显式发送调用，不能据此声称真实平台送达。
+- 验证容器的 cron terminal 曾找不到 PATH 中的 hermes；部署记录保存原生 CLI 的绝对路径，send-report 不依赖该 PATH。原生失败探针也用实际二进制绝对路径确认退出码。
+- 回归：最终部署单测 36 项，与说明/权限检查合计 607 passed；生成的路由 skill 通过 quick_validate。隔离 Windows 副本全量回归曾得到 1190 passed、93 skipped、3 failed；失败为原有 Windows 旧定时识别、schtasks 和符号链接权限问题，未扩大修改。后续增加的平台启用检查使用定向单测验证。
+- 外部聊天实际送达、外部渠道元数据、读图和完整游戏日常仍未验收。游戏首次 setup 技能隔离未解除。测试用合成的已收尾报告验证发送门槛，没有把它当作真实 daily done 或游戏日常通过。
+
+测试只用临时仓库副本和独立容器，不挂载真实 `private/`、宿主虚拟环境或 Docker socket，不读取森空岛凭据、不操作真实模拟器。测试任务结束后删除，真实日常保持暂停。
+
+## 当前变更的验收口径
+
+- 单元/契约测试：使用假 CLI，验证部署边界、目录发现失败、agent 简报提取、通知配置和启用门槛；不能证明真实平台送达。
+- 原生无游戏验收：用 verify 在实际 cron 环境检查目录、成功投递和执行失败投递。每次部署需有自己的结果，不沿用上述旧结果。
+- 真实聊天双轮回传、读图、首次游戏设置和完整游戏日常：需在目标版本分别验收；脚本或字符串测试不计通过。
+- 扫描隔离是版本和安装状态；部署时检查实际技能列表，不能将历史 skills-guard-v10 结果写成永久限制。
+
+## 2026-10-27 本次修改验证
+
+- 公共 maapilot 包、AGENTS.md 和通用 skills 无修改。最终定向测试 619 passed。
+- 全量回归：1200 passed、93 skipped、4 failed。失败均在未改动的 Windows OS 兼容测试：旧定时识别、真实 schtasks 创建、符号链接权限与仓库链接类型；未为让测试变绿而修改公共代码。
+- 原生验证使用隔离 HERMES_HOME 和临时 profile，Hermes v0.22.5（2026.9.24，bf0203a7，Python 3.14.9）。只调用 script-only cron，MAA 目录层使用假 CLI 和假资源，不是实际 MAA 或游戏验收。
+- 原生目录探针实际执行并通过；确认测试 cron 数量归零。
+- 无渠道凭据时，成功探针得到 delivery_failed，故意失败探针得到 error 且 delivery_error=true；两者均被部署工具拒绝计为投递通过，测试 cron 均已删除。未向真实平台发送消息。
+- 发现并处理目标版本的两项行为：脚本须使用 scripts/ 下的相对文件名；暂停任务的手动 run 只返回提示而不执行，探针需在远期计划下恢复后再手动运行。
+- 真实平台成功/失败消息送达、用户已读、真实模型终端与完整游戏日常仍未验收。实际部署仍须运行自己的 verify --delivery，不能沿用隔离测试结果。
