@@ -11,7 +11,7 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
 | 权限 | 没有：pi 跑命令、改文件都不问用户。`guard allow` 不会弹确认，`private/skland.json` 也拦不住，靠你守 `AGENTS.md`；程序自己的对账照样在 |
 | PATH | 没有钩子放 `.venv/bin`：`maapilot` 提示找不到时整个会话写 `.venv/bin/maapilot <命令>`。Windows 上 pi 用 Git Bash 跑命令，写 `.venv/Scripts/maapilot.exe <命令>`（斜杠，不用反斜杠） |
 | 定时 | 扩展 pi-schedule-prompt 的 `schedule_prompt` 工具，一次性接力（见下）；定时绑在建它的会话上，pi 要开着 |
-| 长命令 | 后台命令结束时叫不醒你：前台跑、等它结束。pi 的 bash 默认不限时，**不要给 `daily run` 这类长命令设 `timeout`**；跑的时候用户说的话会排队，跑完再处理 |
+| 长命令 | 后台命令结束时叫不醒你：前台跑、等它结束。pi 的 bash 默认不限时，**跑 `daily run`、`maa fight`、`state box` 这类长命令时，bash 工具的 `timeout` 参数不要填**（不填就是不限时；填个大数如 7200 也不行：日常遇上掉线重登、刷得多，超过这个数就被中途杀掉，留下一个没收尾的日常）；跑的时候用户说的话会排队，跑完再处理 |
 | 读图 | pi 能读截图，但模型要能看图：setup 时先截一张图看看，看不了就请用户在 pi 里换一个能看图的模型 |
 
 ## setup 时要多做的
@@ -54,4 +54,8 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
   - 接力：定时醒来的那一轮里建下一个一次性定时，下一个照样准时响。
   - 关掉 pi 后 `pi -c` 回到原会话，没到点的定时照样响；开新会话不响（定时还留在 `.pi/schedule-prompts.json` 里，绑着旧会话）。
 - 同一轮比较过的另两个扩展：@pi-agents/loop（agent 刚忙完时到点，提示发送失败，一次性定时就丢了）不用；@mjakl/pi-cron 也能用，但没发到 npm、用的人少。
-- 待实测：在 MaaPilot 项目里完整走一遍 setup（信任、skills、读截图）；前台跑完一次 `daily run`；真跑一次完整的定时日常；Windows（Git Bash）。
+- 10-28（Windows 11，pi 1.4.0 + pi-schedule-prompt，模型 DeepSeek flash，在 MaaPilot 项目里）：
+  - setup 完整走通（信任、skills、读截图、问定时、装扩展、建一次性定时并核对）；前台跑完一次约 36 分钟的 `daily run`。
+  - 16:40 的定时日常准时响：先建好下一次（次日 04:40）再 `daily run --trigger schedule`，跑完对账、`daily done`、在会话里汇报，中途没问问题。
+  - 偏差（已补进上面和 skill `maapilot-daily`）：给 `daily run` 填了 `timeout: 7200`；刷理智交回后自己 `maa fight` 补刷，没用 `daily run --only farm`，汇报里刷理智一直算失败。
+- 待实测：一次性接力连着响第二次（次日 04:40）。
