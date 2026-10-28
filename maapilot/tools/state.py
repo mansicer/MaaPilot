@@ -107,6 +107,7 @@ _SANITY_TEXT = re.compile(r"^\s*(\d{1,3})\s*/\s*(\d{2,3})\s*$")
 
 
 _EDGE_JUNK = re.compile(r"^[^0-9OoDlI|]+|[^0-9OoDlI|]+$")   # 数字前后的杂字符：图标认成的"{"、"+" 号等
+_ONE_LIKE = set("{[(亻")                                      # 大号数字里读坏的"1"常见的样子
 
 
 def _number(text: str) -> int | None:
@@ -129,18 +130,24 @@ def parse_sanity(hits) -> tuple[int, int] | None:
             continue
         x, y = h.box[0], h.box[1]
         # 当前值：在"理智/上限"上方、横向挨着的纯数字里，字最大的那个
-        cands = [(c.box[3], n) for c in hits if (n := _number(c.text)) is not None and n <= 999
+        cands = [(c.box[3], c.text, n) for c in hits if (n := _number(c.text)) is not None and n <= 999
                  and c.box[1] + c.box[3] <= y + 5 and y - c.box[1] < 160 and abs(c.box[0] - x) < 120]
         if cands:
-            return max(cands)[1], mx
+            _, text, n = max(cands)
+            # 前面去掉的杂字符像"1"（112 读成"{2"）：真数多半更大，宁可读不到，不报一个偏小的数
+            m = _EDGE_JUNK.match(text.strip())
+            return None if m and _ONE_LIKE & set(m.group()) else (n, mx)
     return None
 
 
-# 理智的大号数字（深灰字，压在浅灰底和白色线框图标上）。OCR 模型认不好这种字体的"1"（读成 7、I、{、亻，或者干脆丢掉：
-# 真机 110 → 0、114 → 4、130 → 29/730、152 → 52），所以单独处理这一块：先把深色像素抠成白底黑字，按列切出每个字，
+# 理智的大号数字。面板有两种主题：浅色（深灰字，压在浅灰底和白色线框图标上）、深色（白字，压在深灰底和浅灰线框图标上，10-28 真机）。
+# OCR 模型认不好这种字体的"1"（读成 7、I、{、亻，或者干脆丢掉：真机 110 → 0、114 → 4、130 → 29/730、152 → 52、深色 112 → {2），
+# 所以单独处理这一块：按底色定字是深是浅，把字的像素抠成白底黑字，按列切出每个字，
 # 窄的（宽 / 高 < 0.45，"1" 约 0.33，别的数字 ≥ 0.54）就是"1"，其余的字交给 OCR，再按位置拼回去。见 sanity_from_image。
 SANITY_NUM_ROI = (758, 128, 140, 98)       # 左边是"+"号圆钮（到 x≈757），下面是"理智/上限"的深色底条（从 y≈232）
-SANITY_DARK = 100                          # 字的颜色约 (50,50,50)；底、图标、阴影都在 140 以上
+SANITY_DARK = 100                          # 浅色主题：字约 (50,50,50)；底、图标、阴影都在 140 以上
+SANITY_LIGHT = 200                         # 深色主题：字是纯白（≥ 250）；底约 70，图标的线最亮约 160
+SANITY_DARK_BG = 128                       # 这一块的中位亮度低于它就是深色主题（深色约 70，浅色约 190）
 ONE_RATIO = 0.45
 
 
@@ -150,14 +157,18 @@ def sanity_glyphs(img) -> tuple[object, list[bool]] | None:
     if not isinstance(img, np.ndarray) or img.ndim != 3:
         return None
     x, y, w, h = SANITY_NUM_ROI
-    dark = img[y:y + h, x:x + w].max(axis=2) < SANITY_DARK
-    rows = np.flatnonzero(dark.any(axis=1))
+    roi = img[y:y + h, x:x + w]
+    if np.median(roi) < SANITY_DARK_BG:
+        glyph = roi.min(axis=2) > SANITY_LIGHT
+    else:
+        glyph = roi.max(axis=2) < SANITY_DARK
+    rows = np.flatnonzero(glyph.any(axis=1))
     if rows.size == 0:
         return None
     height = rows[-1] - rows[0] + 1
     if height < 30:                            # 字高约 54–65；太矮的是杂点
         return None
-    cols = np.append(dark.any(axis=0), False)
+    cols = np.append(glyph.any(axis=0), False)
     runs, start = [], None
     for i, c in enumerate(cols):
         if c and start is None:
@@ -169,7 +180,7 @@ def sanity_glyphs(img) -> tuple[object, list[bool]] | None:
     if not runs or len(runs) > 3:
         return None
     clean = np.full_like(img, 255)
-    clean[y:y + h, x:x + w][dark] = 0
+    clean[y:y + h, x:x + w][glyph] = 0
     return clean, [r / height < ONE_RATIO for r in runs]
 
 

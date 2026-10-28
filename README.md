@@ -10,6 +10,7 @@
     <img alt="Claude Code" src="https://img.shields.io/badge/agent-Claude%20Code-D97757">
     <img alt="Codex" src="https://img.shields.io/badge/agent-Codex-412991">
     <img alt="OpenClaw" src="https://img.shields.io/badge/agent-OpenClaw-2f6fed">
+    <img alt="pi" src="https://img.shields.io/badge/agent-pi-111111">
     <img alt="MAA" src="https://img.shields.io/badge/powered%20by-MAA-ff69b4">
     <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </div>
@@ -20,7 +21,7 @@
 
 每天按时做完日常、当场汇报；练干员、合材料、打关卡，跟它说一声就行
 
-底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 里的 agent 判断做什么
+底下用 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 操作游戏，由 [Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai) 或 [pi](https://pi.dev) 里的 agent 判断做什么
 
 </div>
 
@@ -28,7 +29,7 @@
 
 ## 下载与安装
 
-需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex) 或 [OpenClaw](https://docs.openclaw.ai) 之一（要定时日常的话，Codex 用桌面版）。
+需要：一台 Mac 或 Windows 电脑、一个安卓模拟器（装好明日方舟并登录过）、[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai) 或 [pi](https://pi.dev) 之一（要定时日常的话，Codex 用桌面版，pi 要装一个定时扩展）。
 
 ### 用 Claude Code
 
@@ -67,6 +68,19 @@ OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓
 
 详细配置步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)，配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)。
 
+### 用 pi
+
+```sh
+git clone https://github.com/mansicer/MaaPilot.git
+cd MaaPilot
+pi
+```
+
+第一次打开时 pi 会问要不要信任这个项目，选信任（不信任就读不到项目的 skills）。模型要选能看图的（助手要看截图）。随便说一句（比如"开始"）就进入设置，步骤和上面一样。
+- pi 本身没有定时：要定时日常，设置时助手会请你装一个定时扩展（`pi install npm:pi-schedule-prompt`），装完重启 pi、用 `pi -c` 回到原来的会话。
+- 定时日常记在这个会话里：pi 要开着；关了以后用 `pi -c` 回到同一个会话，开新会话就得让助手重新定。
+- pi 跑命令不会先问你，花合成玉、源石前助手照样会在对话里问你。
+
 ### 在 Windows 上
 
 步骤和上面一样，在 PowerShell 里 clone、打开其中一个 agent，说一句"开始"。另外注意：
@@ -93,6 +107,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 | Codex 桌面版 | 支持 | 支持 |
 | Codex 命令行 | 支持 | 不支持（没有会话内定时） |
 | OpenClaw | 支持 | 支持（Gateway 重复定时） |
+| pi | 支持 | 支持（要装定时扩展 pi-schedule-prompt） |
 
 各家的说明文件、权限、定时怎么建、实测情况见 [`docs/harnesses/`](docs/harnesses/)（每家一个文件），接新的 agent 看那里的 README。
 
@@ -111,7 +126,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 
 ### 怎么跟它说
 
-在这个文件夹里打开 Claude Code、Codex 或 OpenClaw，直接说想做的事：
+在这个文件夹里打开 Claude Code、Codex、OpenClaw 或 pi，直接说想做的事：
 
 - "现在跑一次日常" / "今天做了什么"
 - "把遥练到精2" / "给能天使专三" / "目标进度怎么样"
@@ -147,7 +162,7 @@ MaaPilot 不绑定某个 agent：能看图、能跑命令和读写文件、能�
 
 - 游戏自动化：[MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights)（MaaCore，干员培养等任务）、[maa-cli](https://github.com/MaaAssistantArknights/maa-cli)（日常任务）
 - 识别与操作框架：[MaaFramework](https://github.com/MaaXYZ/MaaFramework)
-- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)
+- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)、[pi](https://pi.dev)
 
 ### 开源库
 
