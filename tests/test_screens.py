@@ -45,6 +45,15 @@ def test_home_sanity(game, value):
     assert state.home_sanity(g, img, g.ocr(state.HOME_ROI, img)) == (value, 205)
 
 
+# 深色主题的理智面板（深灰底、白字，10-28 真机）：旧读法把 112 读成 2（白字当底、整块切不出字，退回 OCR 的"{2"）
+@pytest.mark.parametrize("value", [4, 112])
+def test_home_sanity_dark(game, value):
+    from maapilot.tools import state
+    g = show(game, f"home_dark_{value}")
+    img = g.screencap()
+    assert state.home_sanity(g, img, g.ocr(state.HOME_ROI, img)) == (value, 210)
+
+
 @pytest.mark.parametrize("value, top", [
     (130, {"lmd": 9621162, "orundum": 19866, "originite": 26}),
     (110, {"lmd": 9397902, "orundum": 19066, "originite": 16}),

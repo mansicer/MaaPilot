@@ -432,6 +432,9 @@ def test_sanity_parse():
     assert parse_sanity([_Hit("终端", (0, 0, 1, 1)), _Hit("82/135", (0, 0, 1, 1))]) == (82, 135)
     assert parse_sanity([_Hit("1 / 2", (0, 0, 1, 1))]) is None
     assert parse_sanity(HOME_HITS) == (22, 205)
+    # 大号数字前面的"{"多半是读坏的"1"（10-28 真机 112 读成"{2"）：宁可读不到，不报 2
+    assert parse_sanity([_Hit("{2", (767, 138, 114, 75)), _Hit("理智/2IO", (783, 233, 95, 29))]) is None
+    assert parse_sanity([_Hit("+22", (767, 138, 114, 75)), _Hit("理智/2IO", (783, 233, 95, 29))]) == (22, 210)
 
 
 def test_sanity_merge_ones():
