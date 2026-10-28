@@ -4,7 +4,7 @@
 
 ## 文件
 
-- deploy.py：安装、交互 dispatch、定时 run-daily、只读 report-summary、daily-status / resolve-daily 运行状态核对、无游戏 verify；旧 send-report 仅人工恢复。
+- deploy.py：安装、项目环境 runtime-exec、交互 dispatch、定时 run-daily、只读 report-summary、daily-status / resolve-daily 运行状态核对、无游戏 verify；旧 send-report 仅人工恢复。
 - runtime-probe.py：无游戏目录、等待及通知探针；脚本本身不调用模型，verify --relay 的父子 agent 会调用模型。
 - deployment.example.json：用户明确选择的基础 root、profile、模型、时区、时间和精确 target。
 - maa-soul.md：Maa 身份和交互返回约定；daily-prompt.txt：Maa 的定时游戏任务；relay-prompt.txt：发送 profile 的定时转达任务。
@@ -18,7 +18,15 @@
 python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json
 ```
 
-默认不复制凭据。确需复用用户指定的模型 key 时，追加 --credential-file 与 --credential-key；渠道 token 不复制。部署输出受管 deployment.json 的位置，任务默认暂停。先由主 agent 完成需要审批的环境安装及目录验收，再通过同一来源 dispatch，让 Maa 按 maapilot-setup 完成游戏设置；具体顺序见 [部署与设置](../../docs/harnesses/hermes.md#部署与设置)。主 agent 在原会话提问并转达回答，不另做一套游戏设置。
+默认不复制凭据。确需复用用户指定的模型 key 时，追加 --credential-file 与 --credential-key；渠道 token 不复制。部署输出受管 deployment.json 的位置，任务默认暂停。主 agent 按公共 maapilot-setup 完成整个首次设置，使用 Maa 的项目环境执行安装、连接模拟器、试启动和读账号等步骤；设置完成并通过交接验收后，才把后续游戏请求交给 Maa。具体顺序见 [部署与设置](../../docs/harnesses/hermes.md#部署与设置)。
+
+创建项目虚拟环境、安装适配层后，主 agent 通过以下入口执行项目命令：
+
+```sh
+python templates/hermes/deploy.py runtime-exec --manifest /absolute/path/deployment.json -- maapilot doctor --offline
+```
+
+将 `--` 后的完整命令替换为当前获准的 setup 步骤，如 `maapilot tools install maa-cli`、`maapilot maa startup` 或 `maapilot state depot`。入口使用部署记录中的目录绑定、项目虚拟环境和 private 目录，保留调用方身份，不切换 HOME、不加载 Maa 的凭据；只保证项目运行环境一致，真实 Maa profile 仍需 verify / --relay 验收。命令不经 shell 解释，退出码与输出直接返回；入口不自动安装、写 setup.json 或启用定时，也不替代工具审批。长任务用 terminal(background=true) 启动，持续等待同一进程。
 
 已有 setup.json 时升级适配层或开启新会话不重复 setup；用户明确要求重设时才调整对应项。首次设置尚未完成就继续原问答。定时发现缺少设置只报告阻塞，不问问题或写 setup.json。检查实际 skills 扫描状态。
 

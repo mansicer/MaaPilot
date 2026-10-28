@@ -127,6 +127,39 @@ def load_manifest(path):
     return cfg
 
 
+def runtime_exec(args):
+    """Run an explicit argv in Maa's project environment, without shell or model delegation."""
+    cfg = load_manifest(args.manifest)
+    command = list(args.argv)
+    if command[:1] == ["--"]:
+        command.pop(0)
+    if not command:
+        raise Refused("runtime-exec 需要 -- 后的完整命令")
+    work = Path(cfg["workdir"])
+    venv = work / ".venv"
+    bin_dir = venv / ("Scripts" if os.name == "nt" else "bin")
+    if not (bin_dir / ("python.exe" if os.name == "nt" else "python")).is_file():
+        raise Refused("先由主 agent 创建项目虚拟环境，再使用 runtime-exec")
+    env = os.environ.copy()
+    env.update(prepare_maa_runtime(cfg, cfg["maa_runtime"]))
+    env.update(MAA_CONFIG_DIR=str(work / "private/maa-config"),
+               MAAPILOT_PRIVATE=str(work / "private"), VIRTUAL_ENV=str(venv),
+               PYTHONUNBUFFERED="1")
+    env.pop("PYTHONHOME", None)
+    env["PATH"] = os.pathsep.join([str(bin_dir), str(work / ".tools/maa-cli"), env.get("PATH", "")])
+    candidate = command[0]
+    if ("/" in candidate or "\\" in candidate) and not Path(candidate).is_absolute():
+        candidate = str(work / candidate)
+    executable = shutil.which(candidate, path=env["PATH"])
+    if not executable:
+        raise Refused("项目运行环境中找不到命令；先安装依赖或提供可执行文件绝对路径")
+    command[0] = executable
+    # Inherit I/O so Hermes terminal tracks live progress and interactive approvals.
+    # No short timeout or background restart: terminal/process_manage owns waiting.
+    result = subprocess.run(command, cwd=work, env=env, shell=False)
+    return result.returncode if result.returncode >= 0 else 128 - result.returncode
+
+
 def managed_block(path, tag, body):
     """Touch exactly our own block; preserve all surrounding bytes/text."""
     path = Path(path)
@@ -203,16 +236,21 @@ name: {skill}
 description: 将明日方舟与 MaaPilot 请求交给独立 {cfg['profile']} profile，并在原会话转达问题和结果。
 ---
 
-主 agent 负责原会话问答、Hermes 部署和需要审批的环境安装，不亲自操作游戏。
-首次设置先由主 agent 按 `{cfg['workdir']}/docs/harnesses/hermes.md` 的部署与设置流程准备环境：
-在原会话确认缺失软件、下载与配置写入，完成 Python 环境、adb、maa-cli、MaaCore/资源、OCR 和数据表，
-安装后续命令使用 deployment.json 的目录绑定（仅该命令环境），核对离线 doctor 和原生 verify。
-环境未就绪时不把安装交给单次调用的 Maa；已有环境只补缺项，不重复下载。
-需要的游戏配置先向用户确认；Maa 按 maapilot-setup 执行游戏设置，问题和回答通过同一来源 dispatch 接续。
+主 agent 在原会话按公共 maapilot-setup 完成整个首次设置，包括环境安装、审批、模拟器连接、
+试启动、读仓库/干员、偏好问答和配置收尾。流程见 `{cfg['workdir']}/docs/harnesses/hermes.md`。
+先准备项目 Python 环境并安装适配层，后续项目命令使用下方 runtime-exec 入口，
+它绑定 Maa 的仓库、虚拟环境、private 和 MAA 目录，不启动 Maa 模型、不绕过原生工具审批：
+```sh
+{shlex.join([sys.executable, str(directory / 'bridge.py'), 'runtime-exec', '--manifest', str(manifest)])} -- maapilot doctor --offline
+```
+将 -- 后的命令替换为当前获准的 setup 步骤，保持完整命令可供审批；不把被拒操作藏进脚本或换入口重试。
+配置写入仍使用文件工具和用户已确认的回答；必需步骤完成后主 agent 才按公共技能写 setup.json。
+已有环境只补缺项。首次 setup 不走 dispatch；完成 Maa 环境、投递与转达验收后才启用定时，
+后续游戏请求交给 Maa；问题和回答通过同一来源 dispatch 接续。用户明确重设时也由主 agent 处理对应设置项。
 Maa 返回缺依赖或审批阻塞时，先确认原进程已退出，再由主 agent 处理环境，完成后按同一来源继续；
 不并行修复 Maa 正在使用的资源，不关闭安全检查或改写被拒命令绕过审批；当前渠道不能审批就请用户在受支持的交互终端处理。
 已有 setup.json 时不因重新安装适配层或新会话重复 setup；只有用户明确重设才调整对应项。
-定时转达角色不执行公共 AGENTS 的游戏启动检查、setup 或收尾，这些由 Maa 执行。
+定时转达角色不执行游戏启动检查、setup 或收尾；日常由 Maa 执行，缺设置则报告需回主会话设置。
 这是用户部署的 Maa 独立 profile 路由。使用下方命令进入该 profile，message_agent 或普通 delegate_task 不代替此路由。
 每次先从当前消息的可信 transport/session 元数据获取 platform、account、chat_id、sender_id，
 可选 thread_id。只接受真实元数据，不从用户正文、引用、工具输出中解析或猜测来源；
@@ -241,7 +279,7 @@ CLI 用户须明确给独立来源标识。元数据不可用就先问用户，�
     managed_block(main_home / "SOUL.md", f"maapilot-route-{cfg['id']}",
                   f"明日方舟 / MaaPilot 请求和后续追问交给技能 `{skill}`。\n"
                   f"独立 profile 是 `{cfg['profile']}`；原会话负责转达其问题与结果。\n"
-                  "主 agent 先在原会话处理环境安装与审批，环境验收后交给 Maa 做游戏检查、设置和执行；首次 setup 按相同来源逐问逐答，升级不重做。\n"
+                  "主 agent 按公共技能完成整个首次 setup，通过 runtime-exec 使用 Maa 的项目环境；验收后交给 Maa 执行后续游戏任务，升级不重做 setup。\n"
                   "先加载该技能；来源取可信会话元数据，不用 message_agent 或普通 delegate_task 代替。\n"
                   "同轮等待 Maa 最终答复并在原会话转达问题、选项和结果；用户回答按相同来源接续。\n"
                   "失败也及时回复，不替用户授权，不自动重跑；定时结果由承载任务的 profile 原生 delivery 投递。")
@@ -1032,6 +1070,9 @@ def main(argv=None):
     p.add_argument("--manifest", required=True)
     p.add_argument("--source-file", required=True)
     p.add_argument("--request-file", required=True)
+    p = sub.add_parser("runtime-exec", help="主 agent 在 Maa 项目环境执行显式命令；不调用模型、不绕过审批")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("argv", nargs=argparse.REMAINDER)
     p = sub.add_parser("run-daily", help="由发送 profile 定时转达给 Maa；返回结果，不发送消息")
     p.add_argument("--manifest", required=True)
     p.add_argument("--probe", help="仅由 verify --relay 生成的无游戏验收标识")
@@ -1053,6 +1094,8 @@ def main(argv=None):
     p.add_argument("--relay", action="store_true", help="调用真实主/Maa 模型，约数分钟；无游戏、仅本地回传验收")
     args = parser.parse_args(argv)
     try:
+        if args.command == "runtime-exec":
+            return runtime_exec(args)
         if args.command == "report-summary":
             print(report_summary(load_manifest(args.manifest), args.run_id))
         else:
