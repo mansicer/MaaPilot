@@ -165,6 +165,52 @@ def test_deployment_keeps_runtime_settings_inside_hermes_profile(env):
     assert not (env[1] / "private").exists()
 
 
+@pytest.mark.parametrize("script_kind", ["discovery", "probe"])
+@pytest.mark.parametrize("layout", ["valid", "relative", "unexpected"])
+def test_runtime_queries_effective_log_parent_not_state_env(tmp_path, monkeypatch, capsys, script_kind, layout):
+    from maapilot.crew import maa
+    from maapilot.oscompat import procs
+
+    data = tmp_path / "data"
+    (data / "resource").mkdir(parents=True)
+    state = tmp_path / "actual-state"
+    log = {"valid": str(state / "debug"), "relative": "relative/debug",
+           "unexpected": str(state / "unknown-layout")}[layout]
+    paths = {"data": str(data), "cache": str(tmp_path / "cache"),
+             "config": str(tmp_path / "config"), "resource": str(data / "resource"), "log": log}
+    queried = []
+
+    def query(argv, **kwargs):
+        kind = argv[-1]
+        queried.append(kind)
+        # Model the real 0.7.x CLI: unsupported directory names fail.
+        return subprocess.CompletedProcess(argv, 0 if kind in paths else 2, paths.get(kind, ""), "")
+
+    monkeypatch.setattr(maa, "maa_bin", lambda: "fake-maa")
+    monkeypatch.setattr(maa, "env", lambda: {})
+    monkeypatch.setattr(procs, "run_text", query)
+    monkeypatch.setenv("MAA_STATE_DIR", str(tmp_path / "requested-but-not-effective"))
+    if script_kind == "discovery":
+        tree = ast.parse((ROOT / "templates/hermes/deploy.py").read_text(encoding="utf-8"))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "prepare_maa_runtime")
+        script = next(n.value.value for n in ast.walk(function) if isinstance(n, ast.Assign)
+                      and any(isinstance(t, ast.Name) and t.id == "script" for t in n.targets))
+    else:
+        tree = ast.parse((ROOT / "templates/hermes/runtime-probe.py").read_text(encoding="utf-8"))
+        script = next(n.value.value for n in tree.body if isinstance(n, ast.Assign)
+                      and any(isinstance(t, ast.Name) and t.id == "QUERY" for t in n.targets))
+    if layout != "valid":
+        with pytest.raises(RuntimeError, match="log directory layout"):
+            exec(script, {})
+    else:
+        exec(script, {})
+        result = json.loads(capsys.readouterr().out)
+        actual = result["MAA_STATE_DIR"] if script_kind == "discovery" else result["directories"]["state"]
+        assert actual == str(state)
+    assert "state" not in queried
+    assert "log" in queried
+
+
 def test_deployment_rejects_invalid_runtime_before_native_mutation(env):
     path, cfg = installed(env)
     cfg["maa_runtime"] = {"MAA_DATA_DIR": "relative"}

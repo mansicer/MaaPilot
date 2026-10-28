@@ -32,7 +32,7 @@ python templates/hermes/deploy.py install --settings /absolute/path/hermes-deplo
 python templates/hermes/deploy.py verify --manifest /absolute/path/deployment.json
 ```
 
-用户确认接收测试消息后，验证 Maa 环境及发送 profile 的成功/失败两条原生通知：
+先告知用户：接下来会收到成功通知和预期失败通知各一条；失败通知中的 Cron failed / exit code 1 是主动验收，不是日常故障，没有操作游戏，无需按通知建议重跑。用户确认接收测试消息后，验证 Maa 环境及发送 profile 的成功/失败两条原生通知：
 
 ```sh
 python templates/hermes/deploy.py verify --manifest /absolute/path/deployment.json --delivery
