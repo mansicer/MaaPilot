@@ -2,6 +2,22 @@
 
 以下为历史记录，不是当前部署的能力承诺。旧的 local + send-report 路径已由原生投递替代。
 
+## 2026-10-28：补全转达验收与中断处理
+
+- 新增 `verify --relay`：主 profile 的真实 agent cron 使用 run-daily 进入 Maa，Maa 运行只读目录检查和 190 秒等待探针。验收核对工具结果、子进程退出、Maa 答复及原生 cron 输出中长度分帧的主 agent 最终答复，不能用提示里的测试标识冒充成功；结果只保存在本地。转达模式启用必须同时具有该证据和原有环境、成功/失败通知证据。
+- 安装、验收和启用使用同一 root 状态锁，读取最新 manifest 后才操作；分次验收保留同配置下其他有效结果。运行调用另有持久状态与子进程 PID，失联不视为已停止，未知状态拒绝再次启动，人工核对后才能解除。
+- 主 agent 负责首次设置的原会话问答和部署，Maa 按公共技能完成游戏 setup；已完成设置不因升级或新会话重做，定时不进入 setup。错误类别可转达，原始 stderr 和结构化诊断仅保留在本地受限目录。
+- 定向测试（Hermes、OpenClaw、说明一致性）650 passed；另新增真实无害子进程中断测试 1 passed，确认父调用中断时子进程仍存活、状态记录 unknown、再次调用被拒绝，最后只清理测试自己创建的子进程。另有真实子进程正常退出和 PID 记录检查。
+- 本轮完整模型转达探针由模拟原生 CLI 验证成功/失败判定，未调用真实主/Maa 模型，未发外部消息或操作游戏。新的实际模型链路、190 秒宿主等待和目标平台送达须在部署环境执行相应验收；通过上述单测不等于这些现场验收已通过。
+
+## 2026-10-28：恢复交互约定与主渠道兼容
+
+- 恢复主 SOUL、dispatch skill 和 Maa SOUL 的完整双向约定：按可信来源接续，Maa 用最终答复返回问题和结果，主 agent 在原会话转达；长进程同轮等待到退出，失败也回复，不使用 message_agent 或普通 delegate_task 替代 profile 路由。
+- 默认由 send_profile（默认主 profile）承载原生 cron，通过 run-daily 调用 Maa 的独立 headless 会话。成功与失败共用该发送 profile 的原生 delivery；不再要求 Maa 自有聊天渠道，也不恢复 cron 内显式 send-report 的冲突路径。发送 profile 自己的模型须可用。
+- 定向回归：`tests/test_hermes_deploy.py` 与 `tests/test_docs_consistency.py` 合计 622 passed。覆盖旧任务暂停迁移、中断恢复、运行中拒绝迁移、旧任务重新启用检查、来源接续、主渠道归属、成功和失败结果、启动异常、并发调用拒绝、时区及配置变更。
+- 使用上述镜像新建无网络、无用户配置挂载的隔离容器。真实原生 CLI 通过空白 profile 创建、config 查询/设置、主 profile 暂停 cron 创建、重复安装保持任务 ID，以及无凭据 Maa chat 返回失败。测试未启动 Gateway（ensure 返回未验证），未调用模型、未发外部消息、未操作游戏；测试容器随后删除。
+- 迁移及投递结果判定已由模拟原生 CLI 的单元测试覆盖；本轮没有真实主模型到 Maa 模型的完整双轮交互、真实渠道送达或完整游戏日常实测。此前版本的模型交互记录不能代替这些新路径的验收。
+
 ## 实测与边界
 
 依据 Hermes 官方 [profiles/skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)、[cron](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) 文档和原生源码，参数以所部署版本为准。

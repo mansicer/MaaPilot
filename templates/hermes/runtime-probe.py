@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 
 QUERY = """import json, os
@@ -23,7 +24,8 @@ print(json.dumps({'directories': dirs, 'resource_exists': Path(dirs['resource'])
 
 def run(spec):
     result = {"nonce": spec["nonce"], "lane": spec["lane"], "ok": True}
-    if spec["lane"] == "runtime":
+    started = time.monotonic()
+    if spec["lane"] in {"runtime", "relay"}:
         child = subprocess.run([spec["python"], "-c", QUERY], cwd=spec["workdir"],
                                capture_output=True, text=True, encoding="utf-8", timeout=85)
         if child.returncode:
@@ -31,10 +33,18 @@ def run(spec):
             result["error"] = "maa_directory_query_failed"  # Never echo subprocess stderr.
         else:
             result.update(json.loads(child.stdout))
+    if spec["lane"] == "relay":
+        time.sleep(spec["wait_seconds"])
+        result["elapsed"] = time.monotonic() - started
     path = Path(spec["result"])
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     temp.replace(path)
+    if spec["lane"] == "relay":
+        if not result["ok"]:
+            raise SystemExit("Maa runtime probe failed; no game was run")
+        print(spec["token"])
+        return
     if spec["lane"] == "failure":
         raise SystemExit("MAAPILOT_PROBE_FAILURE: intentional failure; no game was run")
     print("MaaPilot 通知测试：成功；未操作游戏。" if spec["lane"] == "success"
