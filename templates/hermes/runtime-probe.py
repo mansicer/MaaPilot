@@ -12,10 +12,17 @@ from pathlib import Path
 from maapilot.crew import maa
 from maapilot.oscompat import procs
 dirs = {}
-for kind in ('data', 'cache', 'state', 'config', 'resource'):
+for kind in ('data', 'cache', 'config', 'resource'):
     result = procs.run_text([maa.maa_bin(), 'dir', kind], timeout=15, env=maa.env())
     result.check_returncode()
     dirs[kind] = result.stdout.strip()
+# Verify the effective CLI path instead of echoing MAA_STATE_DIR as evidence.
+result = procs.run_text([maa.maa_bin(), 'dir', 'log'], timeout=15, env=maa.env())
+result.check_returncode()
+log = Path(result.stdout.strip())
+if not log.is_absolute() or log.name != 'debug':
+    raise RuntimeError('Unexpected MAA log directory layout')
+dirs['state'] = str(log.parent)
 print(json.dumps({'directories': dirs, 'resource_exists': Path(dirs['resource']).is_dir(),
                   'environment': {k: os.environ.get(k) for k in
                     ('MAA_DATA_DIR', 'MAA_CACHE_DIR', 'MAA_STATE_DIR', 'MAA_CONFIG_DIR')}}))
@@ -46,7 +53,9 @@ def run(spec):
         print(spec["token"])
         return
     if spec["lane"] == "failure":
-        raise SystemExit("MAAPILOT_PROBE_FAILURE: intentional failure; no game was run")
+        raise SystemExit("MaaPilot 失败通知测试（预期）：这是部署验收主动触发的失败，不是日常故障；"
+                         "未操作游戏，无需重跑此任务。请以部署工具最终验收结果为准。"
+                         " MAAPILOT_PROBE_FAILURE")
     print("MaaPilot 通知测试：成功；未操作游戏。" if spec["lane"] == "success"
           else "MaaPilot runtime probe completed")
 

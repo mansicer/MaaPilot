@@ -302,10 +302,17 @@ from pathlib import Path
 from maapilot.crew import maa
 from maapilot.oscompat import procs
 runtime = {}
-for kind in ('data', 'cache', 'state'):
+for kind in ('data', 'cache'):
     result = procs.run_text([maa.maa_bin(), 'dir', kind], timeout=20, env=maa.env())
     result.check_returncode()
     runtime['MAA_' + kind.upper() + '_DIR'] = result.stdout.strip()
+# maa-cli exposes log (<state>/debug), not a state directory command.
+result = procs.run_text([maa.maa_bin(), 'dir', 'log'], timeout=20, env=maa.env())
+result.check_returncode()
+log = Path(result.stdout.strip())
+if not log.is_absolute() or log.name != 'debug':
+    raise RuntimeError('Unexpected MAA log directory layout')
+runtime['MAA_STATE_DIR'] = str(log.parent)
 if not (Path(runtime['MAA_DATA_DIR']) / 'resource').is_dir():
     raise RuntimeError('MAA resources not found in this environment')
 print(json.dumps(runtime))
@@ -752,7 +759,8 @@ def run_probe(cfg, manifest, lane, *, timeout=120):
     profile = cfg["profile"] if lane == "runtime" else scheduler_profile(cfg)
     directory = Path(manifest).resolve().parent
     nonce = str(time.time_ns())
-    name = f"MaaPilot-probe:{cfg['id']}:{nonce}"
+    label = {"runtime": "环境测试", "success": "成功通知测试", "failure": "失败通知测试（预期，无需重跑）"}[lane]
+    name = f"MaaPilot-{label}:{cfg['id']}:{nonce}"
     home = profile_home(Path(cfg["root"]), profile)
     result_path = directory / "probes" / f"{nonce}.json"
     spec_path = result_path.with_suffix(".spec.json")
@@ -842,7 +850,9 @@ def run_relay_probe(cfg, manifest, *, timeout=600):
                "本轮不执行公共游戏启动流程或技能。用 terminal 后台启动，持续 process_manage wait/poll 到 exited，"
                "单次 timeout 后继续等待；最后仅将命令 stdout 原样作为最终答复。不要读取探针文件推测结果，不自行发消息。\n" + command)
     invoke = shlex.join([sys.executable, str(directory / "bridge.py"), "run-daily", "--manifest", str(manifest), "--probe", nonce])
-    prompt = "这是无游戏验收；本轮不做游戏启动检查或 setup。\n" + (
+    prompt = ("这是无游戏验收；本轮不做游戏启动检查或 setup。\n"
+              "验收专用：转达命令成功退出且 stdout 只有一行 MAAPILOT_RELAY_OK_ 标记时，"
+              "最终答复必须原样只输出该行，不加说明、标点、列表或代码块；失败仍按下述规则报告。\n") + (
         directory / "relay-prompt.txt").read_text(encoding="utf-8").replace("{{COMMAND}}", invoke)
     profile = scheduler_profile(cfg)
     name = f"MaaPilot-relay-probe:{cfg['id']}:{nonce}"
@@ -902,6 +912,10 @@ def verify(args):
             evidence = {"fingerprint": fingerprint}
         lanes = ["runtime"]
         if args.delivery:
+            print("MaaPilot 部署验收：接下来会发送成功通知和预期失败通知各一条。"
+                  "失败测试会显示 Cron failed / exit code 1，这是主动测试，不是日常故障；"
+                  "未操作游戏，无需按通知提示重跑。工具正常结束后会清理测试任务，"
+                  "请以最终验收结果为准。", file=sys.stderr, flush=True)
             lanes += ["success", "failure"]
         if getattr(args, "relay", False):
             lanes += ["relay"]

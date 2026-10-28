@@ -58,6 +58,8 @@ cron 的 deliver 与 failure-deliver 都指向用户选定的精确 target；未
 
 ## Gateway 与 cron
 
+执行 verify --delivery 前，部署 agent 应告知用户将收到成功测试与预期失败测试各一条。失败通知中的 Cron failed / exit code 1 来自主动测试，不是日常故障；不按 Hermes 通用提示重跑探针。是否通过以部署工具最终结果为准，不能仅凭收到测试消息判断全部验收成功。工具正常结束后清理测试任务，清理失败会报告需核对的任务。
+
 安装工具用原生 gateway ensure 核对定时发送 profile 路径；版本不支持或不能确认纳管时不启用。Gateway 必须保持运行，交互聊天可以关闭。重复 cron 不使用一次性接力。
 
 发送 profile 的 timezone 必须与部署时区一致；工具查询并拒绝不一致，不修改主 profile 时区影响其他任务。
