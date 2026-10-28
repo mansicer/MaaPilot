@@ -144,6 +144,63 @@ def installed(env):
     return path, bridge.load_manifest(path)
 
 
+@pytest.mark.parametrize("relative_executable", [False, True])
+def test_runtime_exec_uses_project_environment_and_literal_arguments(env, monkeypatch, capfd, relative_executable):
+    path, cfg = installed(env)
+    capfd.readouterr()
+    bin_dir = env[1] / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir(parents=True)
+    (bin_dir / ("python.exe" if os.name == "nt" else "python")).touch()
+    monkeypatch.setenv("MAAPILOT_PRIVATE", "wrong-private")
+    monkeypatch.setenv("MAA_DATA_DIR", "wrong-data")
+    home = os.environ.get("HOME")
+    literal = "user text; echo must-not-run $(example)"
+    script = ("import json,os,sys; print(json.dumps({'cwd':os.getcwd(), 'args':sys.argv[1:], "
+              "'env':{k:os.environ.get(k) for k in ['MAAPILOT_PRIVATE','MAA_DATA_DIR',"
+              "'MAA_CACHE_DIR','MAA_STATE_DIR','MAA_CONFIG_DIR','VIRTUAL_ENV','HOME','PATH']}}))")
+    executable = "tools/python" if relative_executable else sys.executable
+    if relative_executable:
+        def resolve(candidate, *, path):
+            assert candidate == str(env[1] / "tools/python")
+            assert path.split(os.pathsep)[0] == str(bin_dir)
+            return sys.executable
+        monkeypatch.setattr(bridge.shutil, "which", resolve)
+    code = bridge.main(["runtime-exec", "--manifest", str(path), "--", executable, "-c", script, literal])
+    assert code == 0
+    out = json.loads(capfd.readouterr().out)
+    assert Path(out["cwd"]) == env[1]
+    assert out["args"] == [literal]
+    for key, value in cfg["maa_runtime"].items():
+        assert out["env"][key] == value
+    assert out["env"]["MAAPILOT_PRIVATE"] == str(env[1] / "private")
+    assert out["env"]["MAA_CONFIG_DIR"] == str(env[1] / "private/maa-config")
+    assert out["env"]["VIRTUAL_ENV"] == str(env[1] / ".venv")
+    assert out["env"]["PATH"].split(os.pathsep)[0] == str(bin_dir)
+    assert out["env"]["HOME"] == home
+    assert os.environ["MAAPILOT_PRIVATE"] == "wrong-private"
+    assert not (env[1] / "private/setup.json").exists()
+
+
+def test_runtime_exec_preserves_failure_exit_and_does_not_relaunch(env, capfd):
+    path, cfg = installed(env)
+    bin_dir = env[1] / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir(parents=True)
+    (bin_dir / ("python.exe" if os.name == "nt" else "python")).touch()
+    marker = env[1] / "attempts.txt"
+    script = "import pathlib,sys; p=pathlib.Path('attempts.txt'); p.open('a').write('once\\n'); sys.exit(7)"
+    assert bridge.main(["runtime-exec", "--manifest", str(path), "--", sys.executable, "-c", script]) == 7
+    assert marker.read_text() == "once\n"
+    assert not env[4].turns
+
+
+def test_runtime_exec_requires_command_and_project_venv(env):
+    path, cfg = installed(env)
+    with pytest.raises(bridge.Refused, match="完整命令"):
+        bridge.runtime_exec(argparse.Namespace(manifest=path, argv=["--"]))
+    with pytest.raises(bridge.Refused, match="虚拟环境"):
+        bridge.runtime_exec(argparse.Namespace(manifest=path, argv=["--", "maapilot", "doctor"]))
+
+
 def test_deployment_keeps_runtime_settings_inside_hermes_profile(env):
     path, cfg = installed(env)
     expected = {f"MAA_{kind.upper()}_DIR": str(env[0] / ".maa-runtime" / kind)

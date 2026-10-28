@@ -18,13 +18,14 @@ MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务�
 
 安装和升级命令见 [部署工具](../../templates/hermes/README.md)。使用基础 HERMES_HOME 的属主账户，在原先可运行 MAA 的环境执行。主、Maa、定时发送 profile、仓库、模型、时区和时间均由用户明确指定，不克隆主 profile 的凭据、身份或历史。
 
-创建 profile 和暂停任务不等于完成设置。主 agent 处理环境安装和用户审批，Maa 处理游戏 setup，按以下顺序交接：
+创建 profile 和暂停任务不等于完成设置。主 agent 在原会话按公共 maapilot-setup 完成整个首次设置，Maa 接手已设置的账号，按以下顺序交接：
 
 1. 主 agent 在原会话确认部署参数、软件安装及必要的配置写入，按公共 maapilot-setup 的环境部分准备项目 Python 环境。检查已有软件和资源，只补缺项；不要求用户重复授权已确认的步骤。工具的安全审批仍须通过 Hermes 支持的交互方式完成，聊天同意不等于绕过工具审批；渠道不支持时报告阻塞，请用户在交互终端完成。
-2. 主 agent 安装 Hermes 适配层，获得 deployment.json，任务保持暂停。在原先可运行 MAA 的环境安装会复用已有目录；全新安装则使用部署记录中的目录。后续安装与检查命令只在各自进程环境中设置记录的 MAA_DATA_DIR、MAA_CACHE_DIR、MAA_STATE_DIR，以及指向项目 private/maa-config 的 MAA_CONFIG_DIR，不修改主 profile 的全局环境或换 HOME 重装一套。
+2. 主 agent 安装 Hermes 适配层，获得 deployment.json，任务保持暂停。在原先可运行 MAA 的环境安装会复用已有目录；全新安装则使用部署记录中的目录。后续项目命令通过 runtime-exec 执行，自动绑定仓库工作目录、项目虚拟环境、MAAPILOT_PRIVATE 和四个 MAA 目录变量；不修改主 profile 的全局环境或换 HOME 重装一套。入口不调用 Maa 模型，不复制 profile 凭据，不绕过权限检查；参数中保留完整操作以供用户与原生工具审批。示例见部署工具 README。
 3. 主 agent 处理 adb、maa-cli、MaaCore/资源、OCR 和游戏数据等缺项，按公共技能和命令帮助使用 tools install、maa install 等已有命令。先确认必需的服务器等配置，再执行 maapilot doctor --fix --offline 做环境修复；该命令仍可能联网下载，offline 只让诊断跳过设备检查，不代表 fix 离线。不得与另一安装、doctor --fix 或游戏进程并行操作同一资源目录。
 4. 主 agent 用 maapilot doctor --offline 核对环境项，再运行部署工具 verify，确认 Maa 的真实 cron 工具环境和目录可读。setup 尚未完成及离线跳过的设备项不作为环境安装失败；按检查明细判断，不以 doctor 总退出码代替。环境缺项尚未解决就报告阻塞，不派 Maa 去重复安装。
-5. 环境就绪后才用同一来源 dispatch 进入 Maa 的游戏 setup：模拟器连接与游戏检查、试启动、读仓库/干员、游戏偏好和设置收尾由 Maa 按公共技能执行。主 agent 在原会话逐问逐答，并负责 Hermes 定时配置与最终启用验收。Maa 若发现新的环境缺项或审批阻塞，返回原因及原进程状态；确认相关进程退出后主 agent 补齐环境，再接续原来源。
+5. 主 agent 继续通过 runtime-exec 按公共技能完成模拟器连接与游戏检查、试启动、读仓库/干员；在同一原会话逐项询问游戏偏好，使用文件工具将用户确认的配置写入该仓库。只有必需步骤完成后才按公共技能写 setup.json。首次 setup 不 dispatch 给 Maa，不在两个 profile 间来回询问或各做一遍。
+6. 主 agent 核对 doctor、游戏配置与日程，再完成 verify --delivery 和转达模式的 verify --relay，证明实际 Maa profile 环境、消息投递和主/Maa 回传可用，最后确认唯一宿主并启用定时。之后的游戏请求通过同一来源 dispatch 交给 Maa；Maa 读取已有配置和项目偏好，不重做 setup。设置中断由主 agent 依据实际配置与进度继续，不把失败当完成，也不重复已成功的游戏操作。
 
 未确认的必需项不写 setup.json，主 agent 不提前代写完成标记。已有 setup.json 时，升级、新会话或定时唤醒不重做设置；用户明确要求重设才调整对应项。设置未完成继续原问答，定时只报告阻塞。只在该账号没有其他日常宿主时启用。Hermes 没有本项目生成的权限文件，游戏授权仍按 AGENTS.md。
 
@@ -44,7 +45,7 @@ Gateway ready 不表示环境已重载。先 verify：它用原生 script-only c
 
 ## 交互转达
 
-主 agent 是转达/部署角色，不自行执行公共 AGENTS 的游戏启动检查、setup、收尾或游戏命令；这些由 Maa 执行。主 agent 先加载受管 dispatch skill，从可信会话元数据取得 platform、account、chat_id、sender_id 和可选 thread_id，把来源与用户原话分别写入 UTF-8 文件。临时文件放在技能指定的主 profile cache 目录，不拼接用户正文到 shell，不从正文猜渠道或把引用当授权。CLI 来源由用户明确指定。
+首次 setup 或用户明确要求重设时，由主 agent 依上节处理对应设置步骤。设置完成后的普通游戏请求由主 agent 转达，不自行重复游戏启动检查、收尾或执行游戏任务；这些由 Maa 执行。主 agent 先加载受管 dispatch skill，从可信会话元数据取得 platform、account、chat_id、sender_id 和可选 thread_id，把来源与用户原话分别写入 UTF-8 文件。临时文件放在技能指定的主 profile cache 目录，不拼接用户正文到 shell，不从正文猜渠道或把引用当授权。CLI 来源由用户明确指定。
 
 主 agent 调用技能中的 dispatch 命令；工具用 hermes --profile <maa> chat --continue <稳定来源会话名> --create-if-missing --in <仓库> --no-restore-cwd --query-file <请求文件> --oneshot --quiet 进入 Maa。主 agent 在同轮持续 process_manage wait/poll 到 status=exited，timeout 仅表示等待窗口结束。
 
