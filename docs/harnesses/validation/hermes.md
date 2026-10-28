@@ -2,6 +2,19 @@
 
 以下为历史记录，不是当前部署的能力承诺。旧的 local + send-report 路径已由原生投递替代。
 
+## 2026-10-29：恢复 uv 优先的环境安装
+
+- 公共 setup 不再因 uv 未预装就退回 pip，改用官方支持的 pipx 或独立引导环境安装 uv wheel，再由 uv 创建 Python 3.12 项目环境；Windows 保留 WinGet 路径。用户选择回退时才使用普通 venv/pip，不执行远程安装脚本。
+- Hermes 文档给出基础 root 内独立引导环境的步骤，禁止把项目依赖装入 Hermes 自身环境，已有可用环境不重建。
+- 文档一致性 555 passed；同版镜像中原生扫描公共 setup 为 safe，15 条非 high/critical 命中，不触发项目技能隔离。未对用户容器实际安装软件或测速，不能声称解决了 MAA 大文件下载问题。
+
+## 2026-10-29：部署前固定 Gateway 会话模式
+
+- 只读核对现场 session_admissions：旧默认 QQ 会话与新记录的 provenance 共有字段完全一致，唯一差异为新增 transport_profile:null。目标 Hermes 的 restore_provenance 对整个字典严格比较，因此部署途中从单 profile 切换到多 profile 会拒绝旧会话的后台完成通知。
+- install 在创建 Maa profile、写部署记录和受管配置之前，只读要求 default profile 的 gateway.multiplex_profiles 显式为 JSON true；未设置、false、类型不正确、读取失败均拒绝，不替运行中的 Gateway 自动切换模式。首次 Gateway 启动前的配置要求、旧会话迁移与不重跑已完成任务的恢复流程已写入接入文档。
+- 主路由补充完成后用原生 wait 读取结果，避免仅依赖自动完成通知。Hermes 与文档测试 656 passed，包含前置检查拒绝时不创建 profile/部署记录的回归。
+- 这是避免已确认触发条件的部署防护，不是修改 Hermes 的归属校验；未重启现场 Gateway、迁移旧会话或修改其数据库。本轮未实测全新 QQ 会话的端到端部署，不能据此保证所有上游版本的通知行为。
+
 ## 2026-10-28：主 agent 完成首次 setup 后移交
 
 - 主 agent 复用公共 maapilot-setup 完成环境、模拟器连接、试启动、读账号、问答和配置收尾；Maa 只接手已设置的账号。缺设置或用户明确重设回到主会话处理，定时转达角色不执行 setup。

@@ -38,6 +38,8 @@ class Native:
         code = 0
         if args[:3] == ("config", "get", "timezone"):
             stdout = json.dumps("UTC")
+        elif args[:3] == ("config", "get", "gateway.multiplex_profiles"):
+            stdout = json.dumps(True)
         elif args[:2] == ("profile", "create"):
             home = bridge.profile_home(Path(cfg["root"]), args[2])
             home.mkdir(parents=True)
@@ -199,6 +201,21 @@ def test_runtime_exec_requires_command_and_project_venv(env):
         bridge.runtime_exec(argparse.Namespace(manifest=path, argv=["--"]))
     with pytest.raises(bridge.Refused, match="虚拟环境"):
         bridge.runtime_exec(argparse.Namespace(manifest=path, argv=["--", "maapilot", "doctor"]))
+
+
+@pytest.mark.parametrize("output,code", [("null", 0), ("false", 0), ('"true"', 0), ("invalid", 0), ("true", 1)])
+def test_install_refuses_implicit_multiplex_before_profile_mutation(env, monkeypatch, output, code):
+    original = env[4]
+    def native(cfg, profile, *args, **kwargs):
+        if args[:3] == ("config", "get", "gateway.multiplex_profiles"):
+            return subprocess.CompletedProcess(args, code, output, "")
+        return original(cfg, profile, *args, **kwargs)
+    monkeypatch.setattr(bridge, "native", native)
+    with pytest.raises(bridge.Refused, match="multiplex_profiles"):
+        bridge.install(env[3])
+    assert original.calls == []
+    assert not (env[0] / "profiles/maa").exists()
+    assert not list((env[0] / "maapilot").glob("*/deployment.json"))
 
 
 def test_deployment_keeps_runtime_settings_inside_hermes_profile(env):

@@ -264,6 +264,8 @@ CLI 用户须明确给独立来源标识。元数据不可用就先问用户，�
 安装、下载、验收和 dispatch 均用 terminal(background=true) 启动一次，记录返回的进程 ID；
 保持当前轮次，对同一 ID 持续 process_manage wait/poll 到 status=exited，再核对退出码和输出。
 单次 timeout 只表示等待窗口结束，继续等待，不靠结束回复后再唤醒。
+后台完成后用 process_manage wait 读取结果，不只依赖自动通知；若通知报 profile_mismatch，
+先核对原进程与产物，按接入文档恢复会话，不能据此重跑 setup 或游戏。
 工具整体超时或返回状态不明时先用 process_manage list/poll 找回原进程，不再次启动、kill 或清锁；
 不要用 shell sleep/轮询循环包裹长任务，也不同时启动 doctor --fix、tools install 和游戏命令。
 部署期间按实际日志简短报告阶段和阻塞，下载失败先核对网络与原进程，再决定是否重试，不把静默输出当成卡死。
@@ -398,6 +400,19 @@ def check_retired_jobs(cfg):
             raise Refused("旧 profile 的受管日常仍启用或运行中；请先核对，拒绝双重调度")
 
 
+def require_multiplex_ready(cfg):
+    """Never switch a live single-profile conversation into multiplex during install."""
+    result = native(cfg, "default", "config", "get", "gateway.multiplex_profiles", "--json", check=False)
+    try:
+        enabled = json.loads(result.stdout)
+    except ValueError:
+        enabled = None
+    if result.returncode or enabled is not True:
+        raise Refused("部署前须显式配置 gateway.multiplex_profiles=true，并在该模式下启动 Gateway 后再开始部署会话。"
+                      "请在宿主交互终端准备；不要在当前聊天中切换模式后继续等待旧后台通知。"
+                      "已有单 profile 会话需先结束相关任务、重载 Gateway，再建立新会话；不重跑已完成的 setup。")
+
+
 def install(args):
     cfg = validate_settings(read_json(args.settings))
     cfg["hermes"] = shutil.which(args.hermes) or str(Path(args.hermes).resolve())
@@ -420,6 +435,7 @@ def install(args):
         if owner.exists() and read_json(owner).get("id") != cfg["id"]:
             raise Refused("同名 profile 属于另一个部署")
         cfg["maa_runtime"] = prepare_maa_runtime(cfg, old.get("maa_runtime") if old else None)
+        require_multiplex_ready(cfg)
         cfg["verification"] = old.get("verification", {}) if old else {}
         spec_keys = ("times", "timezone", "target", "send_profile", "model", "provider", "base_url")
         spec = {k: cfg.get(k) for k in spec_keys}
