@@ -24,9 +24,9 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 启动检查里是 `no_env`（项目里还没有 `.venv/bin/maapilot`）：`maapilot` 命令都用不了，先装好。命令都在仓库根目录跑。
 1. 跟用户说一次：要在这个文件夹里建一个 Python 运行环境，默认用 uv 装（uv 会自己准备 Python 3.12，一两分钟）。问用户同不同意。
 2. **同意**：
-   - 没有 uv（`uv --version` 跑不了）：`curl -LsSf https://astral.sh/uv/install.sh | sh`（官方安装脚本，装在 `~/.local/bin`，之后用 `~/.local/bin/uv`）。
+   - 没有 uv（`uv --version` 跑不了）：转到第 3 步，使用用户提供的 Python 创建环境，不下载并执行安装脚本。
    - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
-3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
+3. **不用 uv 或 uv 不可用**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
    再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
 4. 装好后 `maapilot doctor --offline`（提示找不到命令就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
    你所在的 harness 装东西有额外要求的（例如要用户批准联网），见你所在 harness 的文件（AGENTS.md「你所在的 harness」）。
