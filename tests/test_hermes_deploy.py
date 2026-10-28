@@ -5,6 +5,10 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
+import re
+import sys
+import time
 from pathlib import Path
 import subprocess
 
@@ -32,7 +36,9 @@ class Native:
         home = bridge.profile_home(Path(cfg["root"]), profile)
         stdout = ""
         code = 0
-        if args[:2] == ("profile", "create"):
+        if args[:3] == ("config", "get", "timezone"):
+            stdout = json.dumps("UTC")
+        elif args[:2] == ("profile", "create"):
             home = bridge.profile_home(Path(cfg["root"]), args[2])
             home.mkdir(parents=True)
             (home / "profile.yaml").write_text("description: " + args[-1], encoding="utf-8")
@@ -56,14 +62,25 @@ class Native:
                              "enabled": False, "next_run_at": None})
             elif action == "run":
                 job = next(j for j in jobs if j["id"] == args[2])
-                tree = ast.parse((home / "scripts" / job["script"]).read_text(encoding="utf-8"))
-                argv = ast.literal_eval(next(n.value for n in tree.body if isinstance(n, ast.Assign)))
-                spec = bridge.read_json(argv[1])
+                if job.get("no_agent"):
+                    tree = ast.parse((home / "scripts" / job["script"]).read_text(encoding="utf-8"))
+                    argv = ast.literal_eval(next(n.value for n in tree.body if isinstance(n, ast.Assign)))
+                    spec = bridge.read_json(argv[1])
+                else:
+                    nonce = re.search(r"--probe ([0-9a-f]{32})", job["prompt"])[1]
+                    folder = Path(cfg["root"]) / "maapilot" / cfg["id"] / "relay-probes" / nonce
+                    spec = bridge.read_json(folder / "spec.json")
+                    bridge.write_json(folder / "result.json", {"exit_code": 0})
+                    bridge.write_text(folder / "response.txt", spec["token"])
+                    body = self.probe_faults.get("relay", {}).get("answer", spec["token"])
+                    archive = (f"**Prompt Characters:** {len(job['prompt'])}\n## Prompt\n\n{job['prompt']}\n\n"
+                               f"**Response Characters:** {len(body)}\n## Response\n\n{body}\n")
+                    bridge.write_text(home / "cron/output" / job["id"] / "test.md", archive)
                 lane = spec["lane"]
                 expected = {**cfg["maa_runtime"], "MAA_CONFIG_DIR": str(Path(cfg["workdir"]) / "private/maa-config")}
                 probe = {"nonce": spec["nonce"], "ok": True, "environment": expected,
                          "directories": {kind: expected[f"MAA_{kind.upper()}_DIR"] for kind in ("data", "cache", "state", "config")},
-                         "resource_exists": True}
+                         "resource_exists": True, "elapsed": spec.get("wait_seconds", 0)}
                 fault = self.probe_faults.get(lane, {})
                 probe.update(fault.get("result", {}))
                 bridge.write_json(spec["result"], probe)
@@ -226,7 +243,7 @@ def test_profile_environment_change_invalidates_native_verification(env):
     path, cfg = installed(env)
     bridge.verify(argparse.Namespace(manifest=path, delivery=False))
     before = bridge.verification_fingerprint(cfg)
-    cron = env[0] / "profiles/maa/cron/jobs.json"
+    cron = env[0] / "cron/jobs.json"
     records = bridge.read_json(cron)
     for job in records["jobs"]:
         job["enabled"] = True
@@ -243,7 +260,7 @@ def test_legacy_local_delivery_upgrade_pauses_only_owned_jobs(env):
     value["target"] = "telegram:test-chat"
     bridge.write_json(env[2], value)
     _, cfg = installed(env)
-    cron = env[0] / "profiles/maa/cron/jobs.json"
+    cron = env[0] / "cron/jobs.json"
     records = bridge.read_json(cron)
     for job in records["jobs"]:
         job.update(enabled=True, deliver="local", failure_deliver="local")
@@ -268,7 +285,7 @@ def test_probe_cleanup_failure_is_not_recorded_as_verified(env, monkeypatch):
 
 def test_redeploy_preserves_active_job_and_main_config(env):
     path, cfg = installed(env)
-    cron = env[0] / "profiles/maa/cron/jobs.json"
+    cron = env[0] / "cron/jobs.json"
     content = bridge.read_json(cron)
     for job in content["jobs"]:
         job.update(enabled=True, next_run_at="2999-01-01T00:00:00+00:00")
@@ -299,7 +316,9 @@ def test_recover_after_native_profile_created_before_owner_write(env):
     original = fake.__call__
     def interrupted(cfg, profile, *args, **kwargs):
         result = original(cfg, profile, *args, **kwargs)
-        if args[:2] == ("profile", "create"):
+        if args[:3] == ("config", "get", "timezone"):
+            stdout = json.dumps("UTC")
+        elif args[:2] == ("profile", "create"):
             raise bridge.Refused("killed")
         return result
     with pytest.MonkeyPatch.context() as patch:
@@ -345,7 +364,7 @@ def test_route_preserves_main_soul_original_bytes(env):
 
 def test_template_upgrade_keeps_enabled_and_next_run(env):
     _, cfg = installed(env)
-    cron = env[0] / "profiles/maa/cron/jobs.json"
+    cron = env[0] / "cron/jobs.json"
     content = bridge.read_json(cron)
     for job in content["jobs"]:
         job.update(prompt="previous template", enabled=True, next_run_at="2999-01-01T00:00:00+00:00")
@@ -514,6 +533,7 @@ def test_enable_refuses_without_setup_confirmation_and_target(env):
     with pytest.raises(bridge.Refused, match="confirm-exclusive"):
         bridge.enable(cfg, path, False)
     cfg["target"] = "telegram:test-chat"
+    bridge.write_json(path, cfg)
     with pytest.raises(bridge.Refused, match="setup"):
         bridge.enable(cfg, path, True)
 
@@ -558,13 +578,14 @@ def test_daily_prompt_waits_through_process_manage_timeout():
 def test_enable_refuses_missing_job_after_setup(env, monkeypatch):
     path, cfg = installed(env)
     cfg["target"] = "telegram:test-chat"
+    bridge.write_json(path, cfg)
     bridge.write_json(env[1] / "private/setup.json", {"done_at": "2026-10-27T14:00:00+08:00", "version": 1})
     python = env[1] / (".venv/Scripts/python.exe" if bridge.os.name == "nt" else ".venv/bin/python")
     python.parent.mkdir(parents=True)
     python.touch()
     monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **kw:
                         subprocess.CompletedProcess(a, 0, json.dumps(cfg["times"]), ""))
-    bridge.write_json(env[0] / "profiles/maa/cron/jobs.json", {"jobs": []})
+    bridge.write_json(env[0] / "cron/jobs.json", {"jobs": []})
     with pytest.raises(bridge.Refused, match="cron 缺失"):
         bridge.enable(cfg, path, True)
     assert "exclusive_confirmed_at" not in bridge.read_json(path)
@@ -581,15 +602,16 @@ def test_enable_reanchors_overdue_job_before_resume(env, monkeypatch):
     python.touch()
     monkeypatch.setattr(bridge.subprocess, "run", lambda *a, **kw:
                         subprocess.CompletedProcess(a, 0, json.dumps(cfg["times"]), ""))
-    cron = env[0] / "profiles/maa/cron/jobs.json"
+    cron = env[0] / "cron/jobs.json"
     content = bridge.read_json(cron)
     for job in content["jobs"]:
         job["next_run_at"] = "2000-01-01T00:00:00+00:00"
     bridge.write_json(cron, content)
-    bridge.verify(argparse.Namespace(manifest=path, delivery=True))
+    bridge.verify(argparse.Namespace(manifest=path, delivery=True, relay=True))
     cfg = bridge.load_manifest(path)
     bridge.enable(cfg, path, True)
-    calls = [a for _, a in env[4].calls if a[:2] in {("cron", "resume"), ("cron", "edit")}
+    calls = [a for p, a in env[4].calls if p == bridge.scheduler_profile(cfg)
+             and a[:2] in {("cron", "resume"), ("cron", "edit")}
              and a[2] in cfg["jobs"].values()]
     assert len(calls) == 4
     assert calls[0][1] == "edit" and calls[1][1] == "resume"
@@ -623,3 +645,402 @@ def test_run_receipts_are_isolated(env):
     bridge.send_report(args)
     assert sum(a[0] == "send" for _, a in env[4].calls) == 2
     assert len(list((path.parent / "outbox").glob("*/receipt.json"))) == 2
+
+
+def test_main_profile_owns_relay_and_both_delivery_lanes(env):
+    path, cfg = installed(env)
+    assert bridge.scheduler_profile(cfg) == "default"
+    assert not bridge.jobs(cfg, "maa")
+    for job in bridge.jobs(cfg):
+        assert "run-daily" in job["prompt"]
+        assert "status=exited" in job["prompt"]
+        assert job["model"] is None and job["provider"] is None
+    skill = next((env[0] / "skills").glob("maapilot-dispatch-*/SKILL.md")).read_text(encoding="utf-8")
+    soul = (env[0] / "profiles/maa/SOUL.md").read_text(encoding="utf-8")
+    assert "相同来源" in skill and "message_agent" in skill and "timeout" in skill
+    assert "最终答复就是 CLI 返回通路" in soul
+    assert "不要在 Maa 内等待用户直接回答" in soul
+    assert "不接续任何交互来源" in soul
+
+
+def legacy_deployment(env):
+    path, cfg = installed(env)
+    records = bridge.read_json(env[0] / "cron/jobs.json")
+    for job in records["jobs"]:
+        job.update(enabled=True, model=cfg["model"], provider=cfg["provider"], prompt="legacy daily")
+    records["jobs"].append({"id": "unrelated", "name": "other user's job", "enabled": True})
+    bridge.write_json(env[0] / "profiles/maa/cron/jobs.json", records)
+    bridge.write_json(env[0] / "cron/jobs.json", {"jobs": []})
+    del cfg["scheduler_profile"]
+    bridge.write_json(path, cfg)
+    return path, cfg
+
+
+def test_upgrade_moves_cron_to_sender_without_rearming_old_jobs(env):
+    path, old = legacy_deployment(env)
+    _, cfg = installed(env)
+    assert bridge.scheduler_profile(cfg) == "default"
+    assert len(cfg["retired_jobs"]) == 2
+    assert all(not j["enabled"] for j in bridge.jobs(cfg))
+    old_jobs = bridge.jobs(cfg, "maa")
+    assert all(not j["enabled"] for j in old_jobs if j["id"] != "unrelated")
+    assert next(j for j in old_jobs if j["id"] == "unrelated")["enabled"]
+    assert "run-daily" in bridge.jobs(cfg)[0]["prompt"]
+    assert cfg["verification"] == {}
+    installed(env)
+    assert len(bridge.jobs(cfg)) == 2
+    assert len(bridge.load_manifest(path)["retired_jobs"]) == 2
+
+
+def test_migration_interruption_recovers_without_duplicate_schedules(env):
+    path, _ = legacy_deployment(env)
+    env[4].fail = ("cron", "create")
+    with pytest.raises(bridge.Refused):
+        installed(env)
+    _, cfg = installed(env)
+    assert len(bridge.jobs(cfg)) == 2
+    assert len(cfg["retired_jobs"]) == 2
+    assert all(not j["enabled"] for j in bridge.jobs(cfg, "maa") if j["id"] != "unrelated")
+
+
+def test_migration_blocks_inflight_daily_and_retired_reactivation(env):
+    path, _ = legacy_deployment(env)
+    cron = env[0] / "profiles/maa/cron/jobs.json"
+    records = bridge.read_json(cron)
+    records["jobs"][0]["fire_claim"] = {"owner": "still-running"}
+    bridge.write_json(cron, records)
+    with pytest.raises(bridge.Refused, match="仍在运行"):
+        installed(env)
+    assert not bridge.read_json(env[0] / "cron/jobs.json")["jobs"]
+    records["jobs"][0].pop("fire_claim")
+    bridge.write_json(cron, records)
+    _, cfg = installed(env)
+    records = bridge.read_json(cron)
+    records["jobs"][0]["enabled"] = True
+    bridge.write_json(cron, records)
+    with pytest.raises(bridge.Refused, match="双重调度"):
+        bridge.check_retired_jobs(cfg)
+
+
+@pytest.mark.parametrize("code,body", [(0, "日常成功：测试简报"), (0, "部分失败：未收尾，等待修复")])
+def test_run_daily_returns_success_or_failure_summary_without_done(env, monkeypatch, capsys, code, body):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / "private/setup.json", {"done_at": "test", "version": 1})
+    capsys.readouterr()
+    calls = []
+    def chat(cfg, profile, *args, **kwargs):
+        calls.append((profile, args, kwargs))
+        return subprocess.CompletedProcess(args, code, body, "")
+    monkeypatch.setattr(bridge, "native", chat)
+    bridge.run_daily(argparse.Namespace(manifest=path))
+    assert capsys.readouterr().out.strip() == body
+    profile, args, kwargs = calls[0]
+    assert profile == "maa" and "--continue" not in args
+    assert "--oneshot" in args and kwargs["timeout"] is None
+    assert "无人值守" in Path(args[args.index("--query-file") + 1]).read_text(encoding="utf-8")
+    assert not (env[1] / "private/reports").exists()
+    assert len(list((path.parent / "daily-requests").glob("*/result.json"))) == 1
+
+
+@pytest.mark.parametrize("outcome", ["nonzero", "empty", "launch"])
+def test_run_daily_failure_is_visible_without_retry_or_secret_output(env, monkeypatch, capsys, outcome):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / "private/setup.json", {"done_at": "test", "version": 1})
+    capsys.readouterr()
+    calls = []
+    def chat(*a, **kw):
+        calls.append(a)
+        if outcome == "launch":
+            raise OSError("secret-provider-details")
+        return subprocess.CompletedProcess(a, 7 if outcome == "nonzero" else 0,
+                                           "secret-provider-details" if outcome == "nonzero" else "", "secret")
+    monkeypatch.setattr(bridge, "native", chat)
+    assert bridge.main(["run-daily", "--manifest", str(path)]) == 1
+    output = capsys.readouterr()
+    assert "失败" in output.err or "未成功返回" in output.err
+    assert "secret" not in output.err + output.out
+    assert len(calls) == 1
+
+
+def test_selected_sender_probe_and_fingerprint_cover_main_configuration(env):
+    value = bridge.read_json(env[2])
+    value["target"] = "telegram:test-chat"
+    bridge.write_json(env[2], value)
+    path, cfg = installed(env)
+    env[4].calls.clear()
+    bridge.verify(argparse.Namespace(manifest=path, delivery=True))
+    creates = [(p, a) for p, a in env[4].calls if a[:2] == ("cron", "create")]
+    assert [p for p, a in creates] == ["maa", "default", "default"]
+    fingerprint = bridge.verification_fingerprint(cfg)
+    (env[0] / "config.yaml").write_text("timezone: UTC\nchanged: true\n")
+    assert bridge.verification_fingerprint(cfg) != fingerprint
+
+
+def test_sender_timezone_mismatch_refuses_without_changing_main_config(env, monkeypatch):
+    original = env[4]
+    def native(cfg, profile, *args, **kwargs):
+        if args[:3] == ("config", "get", "timezone"):
+            return subprocess.CompletedProcess(args, 0, '"Asia/Shanghai"', "")
+        return original(cfg, profile, *args, **kwargs)
+    monkeypatch.setattr(bridge, "native", native)
+    with pytest.raises(bridge.Refused, match="timezone"):
+        installed(env)
+    assert not (env[0] / "cron/jobs.json").exists()
+    assert (env[0] / "config.yaml").read_text() == "existing: true\n"
+
+
+def test_direct_maa_delivery_remains_available_without_main_cron(env):
+    value = bridge.read_json(env[2])
+    value['send_profile'] = 'maa'
+    bridge.write_json(env[2], value)
+    path, cfg = installed(env)
+    assert bridge.scheduler_profile(cfg) == 'maa'
+    assert not bridge.jobs(cfg, 'default')
+    for job in bridge.jobs(cfg):
+        assert 'run-daily' not in job['prompt']
+        assert job['model'] == 'test' and job['provider'] == 'custom'
+
+
+def test_run_daily_rejects_concurrent_call_before_starting_child(env):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / "private/setup.json", {"done_at": "test", "version": 1})
+    count = len(env[4].turns)
+    with bridge.lock(path.parent / '.daily.lock'):
+        with pytest.raises(bridge.Refused, match='正在执行'):
+            bridge.run_daily(argparse.Namespace(manifest=path))
+    assert len(env[4].turns) == count
+
+
+def test_verify_and_install_share_lock_and_preserve_latest_manifest(env, monkeypatch):
+    path, cfg = installed(env)
+    original = bridge.run_probe
+    def probe(cfg, manifest, lane):
+        before = Path(manifest).read_bytes()
+        with pytest.raises(bridge.Refused, match='正在执行'):
+            bridge.install(env[3])
+        assert Path(manifest).read_bytes() == before
+        return original(cfg, manifest, lane)
+    monkeypatch.setattr(bridge, 'run_probe', probe)
+    bridge.verify(argparse.Namespace(manifest=path, delivery=False))
+    before = path.read_bytes()
+    with bridge.lock(path.parent.parent / '.install.lock'):
+        with pytest.raises(bridge.Refused, match='正在执行'):
+            bridge.verify(argparse.Namespace(manifest=path, delivery=False))
+        with pytest.raises(bridge.Refused, match='正在执行'):
+            bridge.enable(cfg, path, True)
+    assert path.read_bytes() == before
+
+
+def test_verify_relay_requires_both_agents_tool_wait_and_final_reply(env):
+    path, cfg = installed(env)
+    bridge.verify(argparse.Namespace(manifest=path, delivery=False, relay=True))
+    proof = bridge.load_manifest(path)['verification']['relay']
+    assert proof['ok'] and proof['wait_seconds'] == 190
+    creates = [(p, a) for p, a in env[4].calls if a[:2] == ('cron', 'create') and a[a.index('--name') + 1].startswith('MaaPilot-relay-probe:')]
+    assert len(creates) == 1 and creates[0][0] == 'default'
+    assert '--no-agent' not in creates[0][1]
+    spec = bridge.read_json(path.parent / 'relay-probes' / proof['nonce'] / 'spec.json')
+    assert spec['active'] is False
+    assert len(bridge.jobs(cfg)) == 2
+    # Independent environment-only rechecks must not erase valid relay proof.
+    bridge.verify(argparse.Namespace(manifest=path, delivery=False))
+    assert bridge.load_manifest(path)['verification']['relay'] == proof
+
+
+@pytest.mark.parametrize('fault', [
+    {'answer': 'I started it; wait for a later turn'},
+    {'result': {'elapsed': 1}},
+    {'result': {'environment': {}}},
+    {'job': {'last_status': 'error'}},
+])
+def test_relay_probe_rejects_early_return_wrong_environment_and_failed_parent(env, fault):
+    path, cfg = installed(env)
+    env[4].probe_faults['relay'] = fault
+    with pytest.raises(bridge.Refused):
+        bridge.verify(argparse.Namespace(manifest=path, delivery=False, relay=True))
+    assert not bridge.load_manifest(path)['verification'].get('relay')
+    assert len(bridge.jobs(cfg)) == 2
+
+
+def test_response_parser_never_accepts_token_from_prompt():
+    prompt, answer = 'MAAPILOT_RELAY_OK_test', 'not executed'
+    archive = (f'**Prompt Characters:** {len(prompt)}\n## Prompt\n\n{prompt}\n\n'
+               f'**Response Characters:** {len(answer)}\n## Response\n\n{answer}\n')
+    assert bridge.cron_response(archive) == answer
+    with pytest.raises(bridge.Refused):
+        bridge.cron_response(archive[:-3])
+    with pytest.raises(bridge.Refused):
+        bridge.cron_response(prompt)
+
+
+def test_daily_setup_missing_reports_blocker_without_starting_agent(env):
+    path, cfg = installed(env)
+    with pytest.raises(bridge.Refused, match='setup'):
+        bridge.run_daily(argparse.Namespace(manifest=path))
+    assert not env[4].turns
+    assert not (env[1] / 'private/setup.json').exists()
+
+
+def test_daily_interruption_persists_unknown_until_explicit_reconciliation(env, monkeypatch, capsys):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    def interrupted(*a, **kw):
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(bridge, 'native', interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        bridge.run_daily(argparse.Namespace(manifest=path))
+    assert bridge.read_json(path.parent / 'daily-active.json')['state'] == 'unknown'
+    with pytest.raises(bridge.Refused, match='状态未确认'):
+        bridge.run_daily(argparse.Namespace(manifest=path))
+    capsys.readouterr()
+    bridge.daily_status(argparse.Namespace(manifest=path))
+    assert json.loads(capsys.readouterr().out)['state'] == 'unknown'
+    with pytest.raises(bridge.Refused, match='人工核对'):
+        bridge.resolve_daily(argparse.Namespace(manifest=path, confirm_stopped=False))
+    bridge.resolve_daily(argparse.Namespace(manifest=path, confirm_stopped=True))
+    assert bridge.read_json(path.parent / 'daily-active.json')['state'] == 'resolved'
+
+
+def test_stale_running_record_is_not_treated_as_stopped_or_replayed(env, capsys):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    bridge.write_json(path.parent / 'daily-active.json', {'state': 'running', 'child_pid': 999999})
+    capsys.readouterr()
+    bridge.daily_status(argparse.Namespace(manifest=path))
+    assert json.loads(capsys.readouterr().out)['state'] == 'unknown'
+    with pytest.raises(bridge.Refused, match='状态未确认'):
+        bridge.run_daily(argparse.Namespace(manifest=path))
+    assert not env[4].turns
+
+
+@pytest.mark.parametrize('stderr,category,summary', [
+    ('401 Unauthorized Bearer sk-secret', 'authentication', '认证'),
+    ('429 too many requests sk-secret', 'rate_limit', '限流'),
+    ('Connection refused https://secret.invalid', 'network', '网络'),
+    ('Permission denied /private/secret', 'permission', '权限'),
+    ('ModuleNotFoundError: missing secret', 'environment', '环境'),
+])
+def test_failure_diagnostic_is_local_and_user_output_is_allowlisted(env, monkeypatch, capsys, stderr, category, summary):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    monkeypatch.setattr(bridge, 'native', lambda *a, **kw: subprocess.CompletedProcess(a, 1, '', stderr))
+    capsys.readouterr()
+    assert bridge.main(['run-daily', '--manifest', str(path)]) == 1
+    output = capsys.readouterr()
+    assert summary in output.err and 'secret' not in output.err + output.out
+    diagnostic = next((path.parent / 'daily-requests').glob('*/diagnostic.json'))
+    assert bridge.read_json(diagnostic)['category'] == category
+    assert diagnostic.with_name('stderr.txt').read_text(encoding='utf-8') == stderr
+
+
+def test_real_child_pid_is_recorded_before_wait_and_finishes_cleanly(env, monkeypatch):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    monkeypatch.undo()
+    observed = []
+    real_popen = subprocess.Popen
+    def popen(argv, **kw):
+        # Substitute only the executable with a harmless real child; exercise native's pipes/state.
+        child = real_popen([sys.executable, '-c', 'import time; time.sleep(0.1); print("test result")'], **kw)
+        real_communicate = child.communicate
+        def communicate(*a, **kwargs):
+            state = bridge.read_json(path.parent / 'daily-active.json')
+            observed.append(state['child_pid'] == child.pid and state['state'] == 'running')
+            return real_communicate(*a, **kwargs)
+        child.communicate = communicate
+        return child
+    monkeypatch.setattr(bridge.subprocess, 'Popen', popen)
+    bridge.run_daily(argparse.Namespace(manifest=path))
+    assert observed == [True]
+    state = bridge.read_json(path.parent / 'daily-active.json')
+    assert state['state'] == 'exited' and state['exit_code'] == 0
+
+
+def test_enable_rejects_script_only_evidence_for_relay_mode(env, monkeypatch):
+    value = bridge.read_json(env[2]); value['target'] = 'telegram:test-chat'
+    bridge.write_json(env[2], value)
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    python = env[1] / ('.venv/Scripts/python.exe' if os.name == 'nt' else '.venv/bin/python')
+    python.parent.mkdir(parents=True); python.touch()
+    monkeypatch.setattr(bridge.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a, 0, json.dumps(cfg['times']), ''))
+    bridge.verify(argparse.Namespace(manifest=path, delivery=True))
+    with pytest.raises(bridge.Refused, match='relay'):
+        bridge.enable(cfg, path, True)
+    assert all(not j['enabled'] for j in bridge.jobs(cfg))
+
+
+def test_enable_ignores_stale_caller_snapshot(env):
+    path, cfg = installed(env)
+    cfg['target'] = 'telegram:stale-recipient'
+    cfg['verification'] = {'fake': True}
+    with pytest.raises(bridge.Refused, match='confirm-exclusive'):
+        bridge.enable(cfg, path, True)
+    assert bridge.load_manifest(path)['target'] is None
+
+
+def test_relay_probe_entry_never_uses_daily_prompt_or_setup(env, capsys):
+    path, cfg = installed(env)
+    nonce = 'a' * 32
+    folder = path.parent / 'relay-probes' / nonce
+    bridge.write_json(folder / 'spec.json', {'nonce': nonce, 'active': True})
+    bridge.write_text(folder / 'maa-prompt.txt', 'Harmless probe only')
+    bridge.run_daily(argparse.Namespace(manifest=path, probe=nonce))
+    call = env[4].turns[-1]
+    request = Path(call[call.index('--query-file') + 1]).read_text(encoding='utf-8')
+    assert request == 'Harmless probe only'
+    assert not (env[1] / 'private/setup.json').exists()
+    bridge.write_json(folder / 'spec.json', {'nonce': nonce, 'active': False})
+    with pytest.raises(bridge.Refused, match='重放'):
+        bridge.run_daily(argparse.Namespace(manifest=path, probe=nonce))
+
+
+def test_probe_runtime_waits_and_records_actual_tool_environment(tmp_path, monkeypatch, capsys):
+    module_spec = importlib.util.spec_from_file_location('runtime_probe_test', ROOT / 'templates/hermes/runtime-probe.py')
+    probe = importlib.util.module_from_spec(module_spec); module_spec.loader.exec_module(probe)
+    clock = iter([10.0, 200.0])
+    sleeps = []
+    monkeypatch.setattr(probe.time, 'monotonic', lambda: next(clock))
+    monkeypatch.setattr(probe.time, 'sleep', sleeps.append)
+    monkeypatch.setattr(probe.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a, 0,
+                        json.dumps({'environment': {'MAA_DATA_DIR': 'fixture'}, 'resource_exists': True}), ''))
+    path = tmp_path / 'result.json'
+    probe.run({'nonce': 'test', 'lane': 'relay', 'python': sys.executable, 'workdir': str(tmp_path),
+               'result': str(path), 'wait_seconds': 190, 'token': 'test-token'})
+    assert sleeps == [190]
+    assert bridge.read_json(path)['elapsed'] == 190
+    assert capsys.readouterr().out.strip() == 'test-token'
+
+
+def test_interrupted_wrapper_marks_live_child_unknown_without_killing_or_relaunch(env, monkeypatch, capsys):
+    path, cfg = installed(env)
+    bridge.write_json(env[1] / 'private/setup.json', {'done_at': 'test', 'version': 1})
+    monkeypatch.undo()
+    children = []
+    real_popen = subprocess.Popen
+    def popen(argv, **kw):
+        child = real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kw)
+        children.append(child)
+        def interrupted_wait(*a, **kwargs):
+            raise KeyboardInterrupt()
+        child.communicate = interrupted_wait
+        return child
+    monkeypatch.setattr(bridge.subprocess, 'Popen', popen)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            bridge.run_daily(argparse.Namespace(manifest=path))
+        assert children[0].poll() is None
+        state = bridge.read_json(path.parent / 'daily-active.json')
+        assert state['state'] == 'unknown' and state['child_pid'] == children[0].pid
+        with pytest.raises(bridge.Refused, match='状态未确认'):
+            bridge.run_daily(argparse.Namespace(manifest=path))
+        assert len(children) == 1
+        capsys.readouterr()
+        bridge.daily_status(argparse.Namespace(manifest=path))
+        assert json.loads(capsys.readouterr().out)['state'] == 'unknown'
+    finally:
+        for child in children:
+            child.terminate()
+            child.wait(timeout=10)
+            child.stdout.close()
+            child.stderr.close()
