@@ -18,7 +18,7 @@
 python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json
 ```
 
-默认不复制凭据。确需复用用户指定的模型 key 时，追加 --credential-file 与 --credential-key；渠道 token 不复制。部署输出受管 deployment.json 的位置，任务默认暂停。主 agent 可以边询问边部署：先确认 Hermes 参数，安装独立 profile 和路由；再通过同一来源 dispatch，让 Maa 按 maapilot-setup 逐项完成首次游戏设置。主 agent 在原会话提问并转达回答，不另做一套游戏设置。
+默认不复制凭据。确需复用用户指定的模型 key 时，追加 --credential-file 与 --credential-key；渠道 token 不复制。部署输出受管 deployment.json 的位置，任务默认暂停。先由主 agent 完成需要审批的环境安装及目录验收，再通过同一来源 dispatch，让 Maa 按 maapilot-setup 完成游戏设置；具体顺序见 [部署与设置](../../docs/harnesses/hermes.md#部署与设置)。主 agent 在原会话提问并转达回答，不另做一套游戏设置。
 
 已有 setup.json 时升级适配层或开启新会话不重复 setup；用户明确要求重设时才调整对应项。首次设置尚未完成就继续原问答。定时发现缺少设置只报告阻塞，不问问题或写 setup.json。检查实际 skills 扫描状态。
 
