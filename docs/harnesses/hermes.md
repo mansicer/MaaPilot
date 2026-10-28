@@ -18,7 +18,21 @@ MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务�
 
 安装和升级命令见 [部署工具](../../templates/hermes/README.md)。使用基础 HERMES_HOME 的属主账户，在原先可运行 MAA 的环境执行。主、Maa、定时发送 profile、仓库、模型、时区和时间均由用户明确指定，不克隆主 profile 的凭据、身份或历史。
 
-创建 profile 和暂停任务不等于完成设置。首次 setup 可由主 agent 边询问边部署：主 agent 负责原会话问答、Hermes 部署参数及安装，Maa 按 maapilot-setup 执行游戏设置；同一来源逐问逐答，未确认的必需项不写 setup.json。已有 setup.json 时，适配层升级、新会话或定时唤醒不重做设置；用户明确要求重设才调整对应项。设置未完成则继续原问答，定时只报告阻塞，不重新发起 setup。只在该账号没有其他日常宿主时启用。Hermes 没有本项目生成的权限文件，游戏授权仍按 AGENTS.md。
+创建 profile 和暂停任务不等于完成设置。主 agent 处理环境安装和用户审批，Maa 处理游戏 setup，按以下顺序交接：
+
+1. 主 agent 在原会话确认部署参数、软件安装及必要的配置写入，按公共 maapilot-setup 的环境部分准备项目 Python 环境。检查已有软件和资源，只补缺项；不要求用户重复授权已确认的步骤。工具的安全审批仍须通过 Hermes 支持的交互方式完成，聊天同意不等于绕过工具审批；渠道不支持时报告阻塞，请用户在交互终端完成。
+2. 主 agent 安装 Hermes 适配层，获得 deployment.json，任务保持暂停。在原先可运行 MAA 的环境安装会复用已有目录；全新安装则使用部署记录中的目录。后续安装与检查命令只在各自进程环境中设置记录的 MAA_DATA_DIR、MAA_CACHE_DIR、MAA_STATE_DIR，以及指向项目 private/maa-config 的 MAA_CONFIG_DIR，不修改主 profile 的全局环境或换 HOME 重装一套。
+3. 主 agent 处理 adb、maa-cli、MaaCore/资源、OCR 和游戏数据等缺项，按公共技能和命令帮助使用 tools install、maa install 等已有命令。先确认必需的服务器等配置，再执行 maapilot doctor --fix --offline 做环境修复；该命令仍可能联网下载，offline 只让诊断跳过设备检查，不代表 fix 离线。不得与另一安装、doctor --fix 或游戏进程并行操作同一资源目录。
+4. 主 agent 用 maapilot doctor --offline 核对环境项，再运行部署工具 verify，确认 Maa 的真实 cron 工具环境和目录可读。setup 尚未完成及离线跳过的设备项不作为环境安装失败；按检查明细判断，不以 doctor 总退出码代替。环境缺项尚未解决就报告阻塞，不派 Maa 去重复安装。
+5. 环境就绪后才用同一来源 dispatch 进入 Maa 的游戏 setup：模拟器连接与游戏检查、试启动、读仓库/干员、游戏偏好和设置收尾由 Maa 按公共技能执行。主 agent 在原会话逐问逐答，并负责 Hermes 定时配置与最终启用验收。Maa 若发现新的环境缺项或审批阻塞，返回原因及原进程状态；确认相关进程退出后主 agent 补齐环境，再接续原来源。
+
+未确认的必需项不写 setup.json，主 agent 不提前代写完成标记。已有 setup.json 时，升级、新会话或定时唤醒不重做设置；用户明确要求重设才调整对应项。设置未完成继续原问答，定时只报告阻塞。只在该账号没有其他日常宿主时启用。Hermes 没有本项目生成的权限文件，游戏授权仍按 AGENTS.md。
+
+### 长任务等待
+
+安装、下载、verify（包括 190 秒 relay）、dispatch 和游戏读数均用 terminal 的 background=true 启动一次，保存进程 ID；在当前轮次对同一 ID 持续 process_manage wait/poll，直到 status=exited，再核对退出码和结果。单次等待超时只结束等待窗口，不结束原进程；整体工具调用超时或 ID 丢失时先用 process_manage list/poll 核对，不重复启动、kill 或清锁，也不用 shell sleep/轮询循环代替原生进程管理。
+
+部署中依据真实日志简短报告当前阶段、进度或阻塞；无输出不等于卡死。下载失败先核对原进程及网络，再决定是否重试；只有原进程已退出且失败原因已处理，才重试相应步骤。用户明确取消或必须人工终止时先说明影响，核对相关子进程和锁后再恢复。无人值守日常仍遵循自己的运行期间静默约定。
 
 ## MAA 运行目录与 HOME
 

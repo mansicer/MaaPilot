@@ -2,6 +2,12 @@
 
 以下为历史记录，不是当前部署的能力承诺。旧的 local + send-report 路径已由原生投递替代。
 
+## 2026-10-28：环境安装与游戏 setup 分工
+
+- 主路由、受管 SOUL 和 dispatch 请求约定主 agent 在原会话处理环境安装与审批，环境检查及原生 verify 后才交给 Maa 做游戏 setup；Maa 缺依赖或遇审批要求时返回缺项与原进程状态，不在单次调用内反复安装。
+- 明确 terminal(background=true) 启动一次、同轮按进程 ID 持续 wait/poll；工具超时先找回原进程，不重跑、kill、清锁或用 shell 等待循环。环境修复不与游戏操作并行，目录绑定仅作用于安装命令进程。
+- Hermes 与文档测试 647 passed；同版镜像的无网络临时容器对生成的主路由 skill 原生扫描为 clean，零命中。本轮未重启用户容器、调用模型或执行环境安装与游戏 setup，真实模型遵循新分工的效果仍须部署验收。
+
 ## 2026-10-28：maa-cli 目录查询兼容与 relay 标记
 
 - 修正 Hermes 目录发现和运行探针调用不存在的 `maa dir state`：查询 `maa dir log`，确认绝对路径及末级 debug 后取 parent 作为 state。不能取 parents[1]，也不能把 MAA_STATE_DIR 环境变量直接当作实际目录证据。
