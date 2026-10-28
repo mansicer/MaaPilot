@@ -12,7 +12,19 @@
 
 ## 安装
 
+首次启动 Hermes Gateway、连接 QQBot 并开始部署聊天之前，在基础 HERMES_HOME 的属主终端运行：
+
+```sh
+hermes --profile default config set gateway.multiplex_profiles true
+```
+
+新容器应在首次启动 Gateway 前将 `gateway.multiplex_profiles: true` 写入主配置，再启用 Gateway；不能先聊完安装步骤，再依赖创建 Maa profile 自动切换模式。install 会只读检查该配置，未显式开启就拒绝创建 profile，不替正在运行的会话切换模式。
+
+已有单 profile 会话的迁移与后台通知恢复见 [会话模式与完成通知](../../docs/harnesses/hermes.md#会话模式与完成通知)。仅修改配置文件不代表当前 Gateway 或旧会话已安全迁移。
+
 用基础 HERMES_HOME 的属主账户，在原先可运行 MAA 的环境准备仓库和本机 settings JSON。不要把 named profile 目录当基础 root，也不要把凭据写入参数或仓库示例。时间须与 private/config.yaml 的 schedule 一致，发送 profile 的 timezone 须与部署时区一致。
+
+项目环境默认仍用 uv + Python 3.12。缺少 uv 时先按 [Python 环境与 uv](../../docs/harnesses/hermes.md#python-环境与-uv) 在独立引导环境安装，不默认退回 pip，不把项目依赖装入 Hermes 自身环境。
 
 ```sh
 python templates/hermes/deploy.py install --settings /absolute/path/hermes-deployment.json

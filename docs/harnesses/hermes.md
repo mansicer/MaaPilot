@@ -16,6 +16,8 @@ MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务�
 
 ## 部署与设置
 
+先完成下节“会话模式与完成通知”的启动前准备；主 Gateway 从第一条部署消息起就须使用显式多 profile 模式。
+
 安装和升级命令见 [部署工具](../../templates/hermes/README.md)。使用基础 HERMES_HOME 的属主账户，在原先可运行 MAA 的环境执行。主、Maa、定时发送 profile、仓库、模型、时区和时间均由用户明确指定，不克隆主 profile 的凭据、身份或历史。
 
 创建 profile 和暂停任务不等于完成设置。主 agent 在原会话按公共 maapilot-setup 完成整个首次设置，Maa 接手已设置的账号，按以下顺序交接：
@@ -28,6 +30,32 @@ MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务�
 6. 主 agent 核对 doctor、游戏配置与日程，再完成 verify --delivery 和转达模式的 verify --relay，证明实际 Maa profile 环境、消息投递和主/Maa 回传可用，最后确认唯一宿主并启用定时。之后的游戏请求通过同一来源 dispatch 交给 Maa；Maa 读取已有配置和项目偏好，不重做 setup。设置中断由主 agent 依据实际配置与进度继续，不把失败当完成，也不重复已成功的游戏操作。
 
 未确认的必需项不写 setup.json，主 agent 不提前代写完成标记。已有 setup.json 时，升级、新会话或定时唤醒不重做设置；用户明确要求重设才调整对应项。设置未完成继续原问答，定时只报告阻塞。只在该账号没有其他日常宿主时启用。Hermes 没有本项目生成的权限文件，游戏授权仍按 AGENTS.md。
+
+### Python 环境与 uv
+
+主 agent 优先复用可运行的 uv，并用 uv 创建 Python 3.12 项目环境；不要直接拿 Hermes 镜像自带的最新 Python 创建项目环境，也不要往 Hermes 自身虚拟环境安装 MaaPilot 依赖。已有能正常运行的项目 .venv 不因升级指导而重建。
+
+缺少 uv 时，由主 agent 在获得安装与联网授权后，使用可用的 Python 在基础 root 下创建独立引导环境。以下为 Linux 容器示例，路径以实际部署为准；每个命令分别执行并核对成功，安装命令按长任务规则等待：
+
+```sh
+python3 -m venv <基础root>/.local/share/maapilot-bootstrap/uv
+<基础root>/.local/share/maapilot-bootstrap/uv/bin/python -m pip install --only-binary=:all: uv
+<基础root>/.local/share/maapilot-bootstrap/uv/bin/uv --version
+<基础root>/.local/share/maapilot-bootstrap/uv/bin/uv venv --python 3.12 .venv
+<基础root>/.local/share/maapilot-bootstrap/uv/bin/uv pip install --python .venv/bin/python -e .
+```
+
+后两条在项目根目录执行。先检查引导环境和 uv 是否已存在，存在就复用；不要覆盖已有虚拟环境。若 Python 不支持 venv/ensurepip，或目标平台没有 uv wheel，就说明缺项，请用户采用官方包管理器安装，不编译 Rust 或转执行远程脚本。网络失败先核对原进程、代理和源；代理须由用户确认，不自行改全局网络设置。uv/Python 下载失败不等于整个 setup 失败，保留成功步骤；只有用户选择回退才改用普通 venv/pip。
+
+此路径使用 [uv 官方 PyPI 安装方式](https://docs.astral.sh/uv/getting-started/installation/#pypi)，避免直接执行远程安装脚本，同时保留 uv 的依赖安装流程。它不能解决 MAA Release、MaaResource 或游戏数据下载慢的问题，相关下载须单独诊断。
+
+### 会话模式与完成通知
+
+主 profile 在首次启动 Gateway 和接收部署聊天之前，显式配置 gateway.multiplex_profiles=true。Docker 新数据卷须在 Gateway 自动启动前准备该配置。不要依赖安装途中创建 Maa profile 自动开启多 profile：目标 Hermes 版本中，旧单 profile 会话的归属记录没有 transport_profile，而多 profile 模式的默认会话包含 transport_profile:null；原生完成通知严格比较两者，会报 profile_mismatch，即使原进程已成功退出也可能无法接续。install 对该配置做只读前置检查，不自动改模式、重启 Gateway 或修改会话记录。
+
+已有单 profile 会话不能仅设置 true 后原地继续：先核对并等原后台进程结束，保存部署进度，在宿主终端配置模式并正常重载 Gateway，再在 QQ 开始新会话接续已有部署。新会话读取同一项目配置、setup.json 和验收记录，只补未完成步骤；不要重装、删除项目或伪造旧会话的归属信息。已出现 profile_mismatch 时也先按此流程恢复；不要反复等待旧完成通知，不关闭隔离校验。普通新消息未必能消除已经排队的旧归属记录。
+
+配置前置检查不能证明旧会话已迁移，也不能保证上游所有版本没有通知问题。部署期间仍须同轮 process_manage wait 读取原进程结果，不能将后台自动通知作为唯一接续手段；若只用了 poll，完成后再用 wait 读取结果。通知异常不代表命令失败，先核对退出码和产物，禁止因此重跑游戏或 setup。
 
 ### 长任务等待
 
