@@ -501,6 +501,7 @@ def install(args):
                     "model.default": cfg["model"],
                     "model.provider": cfg["provider"], "agent.max_turns": 500,
                     "cron.catch_up_missed": False,
+                    "cron.wrap_response": False,
                     "platform_toolsets.cli": ["terminal", "file", "skills", "vision"],
                     "platform_toolsets.cron": ["terminal", "file", "skills", "vision"]}
         if cfg.get("base_url"):

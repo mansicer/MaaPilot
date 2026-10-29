@@ -231,6 +231,9 @@ def test_deployment_keeps_runtime_settings_inside_hermes_profile(env):
     assert "MAA_CONFIG_DIR=" in contents
     assert ("maa", ("config", "set", "terminal.env_passthrough",
                     json.dumps(sorted(bridge.RUNTIME_KEYS | {"MAA_CONFIG_DIR"})))) in env[4].calls
+    assert ("maa", ("config", "set", "cron.wrap_response", "false")) in env[4].calls
+    assert not any(profile != "maa" and args[:3] == ("config", "set", "cron.wrap_response")
+                   for profile, args in env[4].calls)
     repaired = {key: str(env[0] / "repaired" / key) for key in expected}
     cfg["maa_runtime"] = repaired
     bridge.write_json(path, cfg)
