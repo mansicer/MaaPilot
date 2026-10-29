@@ -1,6 +1,6 @@
 # Hermes Agent
 
-MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务默认由主 profile 的原生 Gateway cron 转达给 Maa profile 执行。游戏流程、授权、用户偏好和简报格式只遵循 AGENTS.md 与项目 skills。
+MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务默认由主 profile 的原生 Gateway cron 转达给 Maa profile 执行。游戏流程、授权、用户偏好和简报字段遵循 AGENTS.md 与项目 skills；聊天排版见下文“日常汇报样式”。
 
 | 项 | Hermes 做法 |
 |---|---|
@@ -98,6 +98,42 @@ send_profile 默认是 main_profile，直接兼容原来只有主 profile 配置
 cron 的 deliver 与 failure-deliver 都指向用户选定的精确 target；未配置时仅 local 保存、保持暂停。成功使用与 daily done 相同的固定格式 agent 简报；只读 report-summary 从 goals_summary.text 提取，不发送整份程序报告。部分失败、启动失败、无法恢复或收尾失败也及时返回真实结果，不以 daily done 成功作为通知前提。Maa 进程启动失败、非零退出或空答复由转达任务报告；承载任务的 agent 根本无法运行时由原生 failure-deliver 处理。任务内不调用 send-report、hermes send、message_agent 或消息工具另行发送。
 
 原生投递使用 send_profile 已有的渠道；Maa 不需要另配聊天渠道。工具不复制 bot token、不建立第二个渠道监听器、不改变聊天入口归属。发送 profile 渠道列表或手动发送成功仍不能代替 cron 的实际投递验收。
+
+### 关闭原生通知包装
+
+Hermes 的 Cronjob Response、job_id 和末尾管理提示来自原生 cron 包装，不是 Maa 的简报。支持该配置的版本可用 cron.wrap_response=false 关闭包装；这不会关闭成功或失败投递，也不会美化宿主生成的错误正文。
+
+install 为独立 Maa profile 设置该项。默认由主 profile 发送时，还需在实际 send_profile 上设置；只改 Maa 不会去掉主 profile 的包装。在基础 HERMES_HOME 下执行（将 <send_profile> 换成部署中实际的发送 profile）：
+
+```sh
+hermes --profile <send_profile> config set cron.wrap_response false
+```
+
+此开关影响该发送 profile 的所有 cron 通知，不限 MaaPilot。部署 agent 先说明作用范围；若用户需要保留其他任务的包装，则保留原设置并说明 MaaPilot 通知仍有系统外框。install 不擅自修改主 profile 的这一全局偏好。配置完成后按宿主要求重载，再运行投递验收，确认收到的正文没有包装；配置变更需重新验收。旧版本不支持时保留原生投递并说明限制，不通过另发消息规避。
+
+### 日常汇报样式
+
+沿用 maapilot-daily 的结果首行、标签名称和顺序，用下面的纯文本样式排版；每段空一行，不用 Markdown 标题、表格或代码块。写入 daily done 的总结与最终答复使用同一份正文。以下仅为格式示例，内容与数字必须换成本轮已核实的事实：
+
+```text
+✅ 10 月 29 日 16:40｜定时日常完成
+
+📋 做了什么：公招、基建、信用商店与好友访问、任务奖励已完成；剿灭本周已满，跳过。
+
+🎯 目标进度：暂无进行中的目标。理智不足，未刷 AP-5。
+
+💰 花了什么：赤金 7 个；未用理智液，未花合成玉和源石。
+
+🎁 签到奖励：领取今日活动签到奖励：龙门币 1 万。
+
+💬 要你决定的事：无。
+```
+
+- 首行用部署时区和本轮实际开始时间，区分“定时日常 / 手动日常”。无法确认时间就不填，不直接把 UTC 当本地时间，也不拿计划时间冒充实际开始时间。
+- 完成用 ✅；部分失败或仍有阻塞用 ⚠️，明确“部分完成 / 未完成 / 状态待确认”。正常跳过不算失败，但须说明原因。失败也用相同标签交代已做、未做、花费和下一步；不能等收尾成功才回复。
+- 每个标签一两句；相近的成功项合并，失败项不省略。没有签到可领且本轮未领取时省略“签到奖励”，不罗列已经领过的页面。没有目标、没有待决定事项分别写明“暂无进行中的目标”“无”。
+- 数值未知写“未核实”，不能写成零消耗或未花费。未获授权的操作继续跳过；待决定事项写选项及影响，不等待回答，不重复询问用户已记录的偏好。
+- 正文只保留玩家需要的信息，不加英文系统标题、任务 ID、命令、路径、日志或定时管理尾注。技术诊断留在运行记录；用户主动排查时再提供。宿主自动附加内容由宿主配置控制，不能靠提示词保证消失。
 
 ## Gateway 与 cron
 

@@ -9,7 +9,7 @@
   },
   "payload": {
     "kind": "agentTurn",
-    "message": "定时日常（${HH:MM}）：这是重复定时，不要创建下一次一次性定时。先读 AGENTS.md、docs/harnesses/openclaw.md，再按 skill maapilot-daily 执行。后台进程必须在当前 turn 内用 process 持续 poll 到退出；不要结束 turn 等待完成事件自动唤醒。正常运行期间不要输出进度、commentary 或后台完成提示；正常等待且没有异常时才使用 NO_REPLY。按技能接管、做目标、领奖、对账并尝试 daily done。成功时使用与 daily done 相同的固定格式简报；部分失败、启动失败、超时、无法恢复或 daily done 收尾失败时也及时生成且仅生成一条最终总结，说明实际进度、失败原因和下一步。失败通知不以 daily done 成功为前提。最终结果只交给 delivery 投递；不要调用 message/conversations_send/sessions_send 或让主会话重复转发。无人值守不等待授权，未授权事项按技能跳过并记入简报；通知失败不重跑游戏。",
+    "message": "定时日常（${HH:MM}）：这是重复定时，不要创建下一次一次性定时。先读 AGENTS.md、docs/harnesses/openclaw.md，再按 skill maapilot-daily 执行。后台进程必须在当前 turn 内用 process 持续 poll 到退出；不要结束 turn 等待完成事件自动唤醒。正常运行期间不要输出进度、commentary 或后台完成提示；正常等待且没有异常时才使用 NO_REPLY。按技能接管、做目标、领奖、对账并尝试 daily done。按 docs/harnesses/openclaw.md 的“日常汇报样式”组织正文并写入 daily done；成功时使用与 daily done 相同的固定格式简报；部分失败、启动失败、超时、无法恢复或 daily done 收尾失败时也及时生成且仅生成一条最终总结，说明实际进度、失败原因和下一步。失败通知不以 daily done 成功为前提。最终结果只交给 delivery 投递；不要调用 message/conversations_send/sessions_send 或让主会话重复转发。无人值守不等待授权，未授权事项按技能跳过并记入简报；通知失败不重跑游戏。",
     "timeoutSeconds": 10800
   },
   "delivery": {

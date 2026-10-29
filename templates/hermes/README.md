@@ -46,6 +46,8 @@ python templates/hermes/deploy.py runtime-exec --manifest /absolute/path/deploym
 
 验收前确认 send_profile（默认 main_profile）的模型和渠道、Maa 的模型均可用。主 profile 转达与 Maa 直接承载两种模式的返回路径见 [结果与投递](../../docs/harnesses/hermes.md#结果与投递)。
 
+验收前按 [关闭原生通知包装](../../docs/harnesses/hermes.md#关闭原生通知包装) 配置实际发送 profile，避免英文标题、任务 ID 和管理尾注；该设置影响此 profile 的全部 cron 通知。正文样式见同一文档的“日常汇报样式”。已有部署需重新 install 更新任务提示。
+
 先验证 Maa 的真实 cron 工具环境（不发外部消息、不操作游戏）：
 
 ```sh
