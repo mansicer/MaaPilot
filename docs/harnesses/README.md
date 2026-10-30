@@ -9,6 +9,7 @@ MaaPilot 只做和游戏相关的部分（`AGENTS.md`、skills、`maapilot` 工�
 | Claude Code（命令行、桌面版） | [`claude-code.md`](claude-code.md) |
 | Codex（桌面版、命令行） | [`codex.md`](codex.md) |
 | OpenClaw | [`openclaw.md`](openclaw.md) |
+| Hermes Agent | [`hermes.md`](hermes.md) |
 
 ## 要 harness 提供什么
 

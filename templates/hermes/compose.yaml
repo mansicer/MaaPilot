@@ -1,0 +1,21 @@
+# 仅用于开发验证；不是 Hermes 的部署入口。在独立目录放好完整仓库副本（不要包含真实 private/ 或宿主机 .venv）。
+# MAAPILOT_WORKSPACE 必须是副本的绝对路径；HERMES_IMAGE 用已核验的版本或 digest。
+# 第一次 up 前，先用无 Gateway 的临时容器向 hermes-data/config.yaml 写入
+# gateway.multiplex_profiles: true；必须先准备配置再接收部署聊天，详见 README.md。
+services:
+  hermes:
+    image: ${HERMES_IMAGE:?Set HERMES_IMAGE to a verified official image tag or digest}
+    restart: "no"
+    environment:
+      HERMES_HOME: /opt/data
+      HERMES_TIMEZONE: ${HERMES_TIMEZONE:?Set the intended IANA timezone}
+    volumes:
+      - hermes-data:/opt/data
+      - type: bind
+        source: ${MAAPILOT_WORKSPACE:?Set an absolute path to the isolated checkout}
+        target: /workspace/maa
+    working_dir: /workspace/maa
+    command: ["gateway", "run"]
+
+volumes:
+  hermes-data:
