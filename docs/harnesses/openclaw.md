@@ -183,13 +183,18 @@ setup 时先看 `openclaw channels status --probe`，再让用户选一个接收
 
 OpenClaw 或渠道升级后重跑这些验收。遇到会话存储、Gateway 或渠道错误时先检查版本、健康状态和实际运行的二进制；不要手改会话数据库。回复窗口受限的渠道在长时间空闲后可能要求用户先发一条消息刷新状态，这种渠道不能单独承担无人值守通知。
 
-## 容器
+## 工作目录
+
 
 - agent 的 workspace **必须**是仓库根目录，`AGENTS.md` 和 `.agents/skills` 都在那里。
-- 模拟器在宿主机、agent 在容器里时，adb 用 `host.docker.internal:<端口>`（MuMu 12 默认 16384，每多开一个实例加 32），模拟器里要打开 ADB 调试。
-- 容器重建或宿主机重启后，先确认 `daily run` 前设备仍能连接。
 - `.openclaw/` 是 OpenClaw 往 workspace 写的状态，已在 `.gitignore`。
 - 不要往仓库放 `SOUL.md`、`USER.md`、`IDENTITY.md`、`TOOLS.md`、`HEARTBEAT.md`；缺了不影响运行，要阻止生成就设 `agents.defaults.skipBootstrap`。
+
+### 容器部署时的额外检查
+
+- workspace 填容器内可访问的仓库路径，并持久化项目配置与运行状态；不要照抄宿主机路径。
+- 模拟器在宿主机时，使用容器能访问的宿主地址和模拟器实际 ADB 端口，并开启 ADB 调试。host.docker.internal 仅在当前容器能解析且能连接时使用，不能假定所有 Docker 环境都提供此名称；否则核对实际网络或显式配置宿主映射。原生部署不需要此名称。
+- 容器重建或宿主机重启后，在 daily run 前重新确认设备连接；不要因为旧地址曾成功就跳过检查。
 
 ## 验证与版本
 
