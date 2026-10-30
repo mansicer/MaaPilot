@@ -33,9 +33,9 @@ MaaPilot 使用独立的 Maa profile；交互由主 agent 转达，定时任务�
 
 ### Python 环境与 uv
 
-主 agent 优先复用可运行的 uv，并用 uv 创建 Python 3.12 项目环境；不要直接拿 Hermes 镜像自带的最新 Python 创建项目环境，也不要往 Hermes 自身虚拟环境安装 MaaPilot 依赖。已有能正常运行的项目 .venv 不因升级指导而重建。
+主 agent 优先复用可运行的 uv，并用 uv 创建 Python 3.12 项目环境；不要未经版本核对就拿宿主或 Hermes 自带的 Python 创建项目环境，也不要往 Hermes 自身虚拟环境安装 MaaPilot 依赖。已有能正常运行的项目 .venv 不因升级指导而重建。
 
-缺少 uv 时，由主 agent 在获得安装与联网授权后，使用可用的 Python 在基础 root 下创建独立引导环境。以下为 Linux 容器示例，路径以实际部署为准；每个命令分别执行并核对成功，安装命令按长任务规则等待：
+缺少 uv 时，由主 agent 在获得安装与联网授权后，使用可用的 Python 在基础 root 下创建独立引导环境。以下适用于 Linux/macOS 的 POSIX shell，原生和容器环境均可；将 <基础root> 替换为实际路径，路径含空格时须正确引用。每个命令分别执行并核对成功，安装命令按长任务规则等待：
 
 ```sh
 python3 -m venv <基础root>/.local/share/maapilot-bootstrap/uv
@@ -51,9 +51,9 @@ python3 -m venv <基础root>/.local/share/maapilot-bootstrap/uv
 
 ### 会话模式与完成通知
 
-主 profile 在首次启动 Gateway 和接收部署聊天之前，显式配置 gateway.multiplex_profiles=true。Docker 新数据卷须在 Gateway 自动启动前准备该配置。不要依赖安装途中创建 Maa profile 自动开启多 profile：目标 Hermes 版本中，旧单 profile 会话的归属记录没有 transport_profile，而多 profile 模式的默认会话包含 transport_profile:null；原生完成通知严格比较两者，会报 profile_mismatch，即使原进程已成功退出也可能无法接续。install 对该配置做只读前置检查，不自动改模式、重启 Gateway 或修改会话记录。
+主 profile 在首次启动 Gateway 和接收部署聊天之前，显式配置 gateway.multiplex_profiles=true；原生安装、系统服务和容器部署都遵循此顺序。容器自动启动 Gateway 时，先在其实际使用的数据卷或挂载目录中准备配置。不要依赖安装途中创建 Maa profile 自动开启多 profile：目标 Hermes 版本中，旧单 profile 会话的归属记录没有 transport_profile，而多 profile 模式的默认会话包含 transport_profile:null；原生完成通知严格比较两者，会报 profile_mismatch，即使原进程已成功退出也可能无法接续。install 对该配置做只读前置检查，不自动改模式、重启 Gateway 或修改会话记录。
 
-已有单 profile 会话不能仅设置 true 后原地继续：先核对并等原后台进程结束，保存部署进度，在宿主终端配置模式并正常重载 Gateway，再在 QQ 开始新会话接续已有部署。新会话读取同一项目配置、setup.json 和验收记录，只补未完成步骤；不要重装、删除项目或伪造旧会话的归属信息。已出现 profile_mismatch 时也先按此流程恢复；不要反复等待旧完成通知，不关闭隔离校验。普通新消息未必能消除已经排队的旧归属记录。
+已有单 profile 会话不能仅设置 true 后原地继续：先核对并等原后台进程结束，保存部署进度，在 Hermes 所在运行环境的终端配置模式并正常重载 Gateway，再在原聊天渠道开始新会话接续已有部署。新会话读取同一项目配置、setup.json 和验收记录，只补未完成步骤；不要重装、删除项目或伪造旧会话的归属信息。已出现 profile_mismatch 时也先按此流程恢复；不要反复等待旧完成通知，不关闭隔离校验。普通新消息未必能消除已经排队的旧归属记录。
 
 配置前置检查不能证明旧会话已迁移，也不能保证上游所有版本没有通知问题。部署期间仍须同轮 process_manage wait 读取原进程结果，不能将后台自动通知作为唯一接续手段；若只用了 poll，完成后再用 wait 读取结果。通知异常不代表命令失败，先核对退出码和产物，禁止因此重跑游戏或 setup。
 

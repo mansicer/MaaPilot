@@ -12,17 +12,19 @@
 
 ## 安装
 
-首次启动 Hermes Gateway、连接 QQBot 并开始部署聊天之前，在基础 HERMES_HOME 的属主终端运行：
+首次启动 Hermes Gateway、连接聊天渠道并开始部署聊天之前，在基础 HERMES_HOME 的属主终端运行（确保该终端使用的基础 HERMES_HOME 与 Gateway 一致）：
 
 ```sh
 hermes --profile default config set gateway.multiplex_profiles true
 ```
 
-新容器应在首次启动 Gateway 前将 `gateway.multiplex_profiles: true` 写入主配置，再启用 Gateway；不能先聊完安装步骤，再依赖创建 Maa profile 自动切换模式。install 会只读检查该配置，未显式开启就拒绝创建 profile，不替正在运行的会话切换模式。
+先配置 `gateway.multiplex_profiles: true`，再启动 Gateway 并接收部署聊天；不能依赖安装途中创建 Maa profile 自动切换模式。install 会只读检查该配置，未显式开启就拒绝创建 profile，不替正在运行的会话切换模式。容器或系统服务若自动启动 Gateway，须在首次启动前准备实际使用的配置文件。
 
 已有单 profile 会话的迁移与后台通知恢复见 [会话模式与完成通知](../../docs/harnesses/hermes.md#会话模式与完成通知)。仅修改配置文件不代表当前 Gateway 或旧会话已安全迁移。
 
 用基础 HERMES_HOME 的属主账户，在原先可运行 MAA 的环境准备仓库和本机 settings JSON。不要把 named profile 目录当基础 root，也不要把凭据写入参数或仓库示例。时间须与 private/config.yaml 的 schedule 一致，发送 profile 的 timezone 须与部署时区一致。
+
+复制 deployment.example.json 后，必须替换 root 和 workdir 两个占位路径：root 是现有 Hermes 的基础 HERMES_HOME，workdir 是该运行环境中 MaaPilot 仓库的绝对路径。不要把示例路径当默认目录，也不要在容器内填写只能由宿主机访问的路径。profile、模型、时区、日常时间和 target 也按实际部署填写；target 为 null 时任务保持暂停，不向外投递。
 
 项目环境默认仍用 uv + Python 3.12。缺少 uv 时先按 [Python 环境与 uv](../../docs/harnesses/hermes.md#python-环境与-uv) 在独立引导环境安装，不默认退回 pip，不把项目依赖装入 Hermes 自身环境。
 
