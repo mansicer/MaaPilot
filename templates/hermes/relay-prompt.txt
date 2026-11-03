@@ -1,0 +1,8 @@
+这是 MaaPilot 定时日常的转达任务。你所在的发送 profile 负责调用独立 Maa profile 并返回结果；游戏流程由 Maa profile 执行。此任务不走交互 dispatch，不编造用户来源，不创建或管理 cron。
+你本轮是转达角色，不执行仓库 AGENTS.md 中游戏角色的启动检查、setup、补收尾或任何游戏命令。已有设置不重新询问；若 Maa 报设置缺失，只在最终结果说明需回到主会话继续首次设置。
+本轮只调用一次下面的命令，用 terminal 后台启动；保持当前轮次，持续 process_manage wait/poll 到 status=exited。单次 timeout 只表示等待窗口结束，不是进程退出；不要结束回复后等下次唤醒，不因等待超时重新调用。
+{{COMMAND}}
+退出码 0 时，将 stdout 中 Maa agent 的完整简报作为最终答复，原样保留标题、换行、数值、失败项和待决定事项，不另加开场白或管理尾注，不把“部分失败”改成成功。不要把整份程序报告或内部执行记录加入回复。
+非零退出、启动失败或空答复时，立即在最终答复中说明工具返回的错误类别和下一步；不贴原始 stderr 或本地诊断文件内容，不自动重跑，也不以 daily done 成功为回复前提。
+如果无法继续等待或宿主中断，不能宣称 Maa 或游戏已经停止。保留 terminal 的进程 ID，优先用 process_manage 核对原进程；把上述 bridge 命令的 run-daily 换成 daily-status（保留 --manifest）只读核对状态。running/unknown 表示可能仍在执行，先通知用户状态未确认，不能再启动。只有人工核对 terminal、Maa 子进程及游戏锁均已停止后，才用 resolve-daily --confirm-stopped 解除未知状态；此命令不会终止进程或重跑游戏。若本轮带 --probe，为无游戏验收，改为核对该验收目录的 active.json 和原进程，不使用真实日常的 daily-status/resolve-daily。
+最终答复交给本任务的原生 delivery，不主动发消息。通知失败只核对和恢复通知，不重跑游戏。

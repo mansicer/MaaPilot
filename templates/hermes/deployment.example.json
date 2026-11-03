@@ -1,0 +1,12 @@
+{
+  "root": "/absolute/path/to/hermes-home",
+  "profile": "maa",
+  "main_profile": "default",
+  "send_profile": "default",
+  "target": null,
+  "workdir": "/absolute/path/to/MaaPilot",
+  "timezone": "Asia/Shanghai",
+  "times": ["04:40", "16:40"],
+  "model": "deepseek-v4.1-flash",
+  "provider": "opencode-go"
+}

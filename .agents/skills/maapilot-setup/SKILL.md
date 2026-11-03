@@ -22,17 +22,18 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 ## 装运行环境
 
 启动检查里是 `no_env`（项目里还没有 `.venv/bin/maapilot`）：`maapilot` 命令都用不了，先装好。命令都在仓库根目录跑。
-1. 跟用户说一次：要在这个文件夹里建一个 Python 运行环境，默认用 uv 装（uv 会自己准备 Python 3.12，一两分钟）。问用户同不同意。
+1. 跟用户说一次：要在这个文件夹里建一个 Python 运行环境，默认用 uv 装并准备 Python 3.12；首次下载耗时取决于网络。问用户同不同意。
 2. **同意**：
-   - 没有 uv（`uv --version` 跑不了）：`curl -LsSf https://astral.sh/uv/install.sh | sh`（官方安装脚本，装在 `~/.local/bin`，之后用 `~/.local/bin/uv`）。
+   - 没有 uv（`uv --version` 跑不了）：先按所在 harness 的环境安装指导准备 uv，不因为没预装就直接退回 pip。没有专用指导时，已有 pipx 可用 `pipx install uv`；否则用可用 Python 创建独立的 uv 引导虚拟环境，再以其中的 Python 执行 `-m pip install --only-binary=:all: uv`。这是 [uv 官方支持的 PyPI 安装方式](https://docs.astral.sh/uv/getting-started/installation/#pypi)，不下载并执行远程安装脚本，也不修改 agent 自身的 Python 环境。安装软件及联网仍按用户授权与 harness 审批执行。
+   - 核对 uv 可执行文件的绝对路径和 `--version`，后续使用同一个路径；引导环境只安装 uv，项目依赖装在下面的项目 .venv。没有可用 Python/pipx 时请用户先安装 uv 或 Python，不循环重试。
    - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv/bin/python -e .`。
-3. **不同意**：请用户给一个 Python 3.12 或更新版本的路径（例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
+3. **用户选择不用 uv，或 uv 安装失败后明确选择回退**：请用户给一个 Python 3.12 或更新版本的路径（优先 3.12，例如 `/usr/local/bin/python3.12`），先 `<路径> --version` 确认版本，
    再 `<路径> -m venv .venv`、`.venv/bin/pip install -e .`。用户没有合适的 Python，就告诉用户可以从 https://www.python.org/downloads/ 装。
 4. 装好后 `maapilot doctor --offline`（提示找不到命令就写 `.venv/bin/maapilot`，见 AGENTS.md「命令约定」）。能出结果就接着往下做。
    你所在的 harness 装东西有额外要求的（例如要用户批准联网），见你所在 harness 的文件（AGENTS.md「你所在的 harness」）。
 
 **Windows**（上面是 macOS / Linux 的写法；Windows 上程序在 `.venv\Scripts\` 下，不是 `.venv/bin/`）：
-- 没有 uv：征得同意后 `winget install astral-sh.uv`；没有 winget 就在 PowerShell 里 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`。装完要重开终端（或 agent）才找得到 `uv`。
+- 没有 uv：征得同意后 `winget install astral-sh.uv`；没有 winget 时沿用上面的 pipx / 独立引导环境方式，环境内的程序位于 Scripts 下。新装命令不在 PATH 时使用已核实的绝对路径。
 - `uv venv --python 3.12 .venv`，再 `uv pip install --python .venv -e .`；不用 uv 时是 `<python.exe 路径> -m venv .venv`、`.venv\Scripts\python.exe -m pip install -e .`。
 - 之后命令写成 `.venv\Scripts\maapilot.exe <命令> …`（`maapilot` 提示找不到时；见 AGENTS.md「命令约定」）。
 - 仓库最好用 `git clone -c core.symlinks=true …` 拿（`.claude/skills` 是指向 `.agents/skills` 的链接）；已经普通 clone 了，`maapilot doctor --fix` 会把这个链接补上。

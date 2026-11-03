@@ -1,0 +1,64 @@
+"""Harmless native cron probe. No model calls, game access or credential output."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+
+QUERY = """import json, os
+from pathlib import Path
+from maapilot.crew import maa
+from maapilot.oscompat import procs
+dirs = {}
+for kind in ('data', 'cache', 'config', 'resource'):
+    result = procs.run_text([maa.maa_bin(), 'dir', kind], timeout=15, env=maa.env())
+    result.check_returncode()
+    dirs[kind] = result.stdout.strip()
+# Verify the effective CLI path instead of echoing MAA_STATE_DIR as evidence.
+result = procs.run_text([maa.maa_bin(), 'dir', 'log'], timeout=15, env=maa.env())
+result.check_returncode()
+log = Path(result.stdout.strip())
+if not log.is_absolute() or log.name != 'debug':
+    raise RuntimeError('Unexpected MAA log directory layout')
+dirs['state'] = str(log.parent)
+print(json.dumps({'directories': dirs, 'resource_exists': Path(dirs['resource']).is_dir(),
+                  'environment': {k: os.environ.get(k) for k in
+                    ('MAA_DATA_DIR', 'MAA_CACHE_DIR', 'MAA_STATE_DIR', 'MAA_CONFIG_DIR')}}))
+"""
+
+
+def run(spec):
+    result = {"nonce": spec["nonce"], "lane": spec["lane"], "ok": True}
+    started = time.monotonic()
+    if spec["lane"] in {"runtime", "relay"}:
+        child = subprocess.run([spec["python"], "-c", QUERY], cwd=spec["workdir"],
+                               capture_output=True, text=True, encoding="utf-8", timeout=85)
+        if child.returncode:
+            result["ok"] = False
+            result["error"] = "maa_directory_query_failed"  # Never echo subprocess stderr.
+        else:
+            result.update(json.loads(child.stdout))
+    if spec["lane"] == "relay":
+        time.sleep(spec["wait_seconds"])
+        result["elapsed"] = time.monotonic() - started
+    path = Path(spec["result"])
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    temp.replace(path)
+    if spec["lane"] == "relay":
+        if not result["ok"]:
+            raise SystemExit("Maa runtime probe failed; no game was run")
+        print(spec["token"])
+        return
+    if spec["lane"] == "failure":
+        raise SystemExit("MaaPilot 失败通知测试（预期）：这是部署验收主动触发的失败，不是日常故障；"
+                         "未操作游戏，无需重跑此任务。请以部署工具最终验收结果为准。"
+                         " MAAPILOT_PROBE_FAILURE")
+    print("MaaPilot 通知测试：成功；未操作游戏。" if spec["lane"] == "success"
+          else "MaaPilot runtime probe completed")
+
+
+if __name__ == "__main__":
+    run(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")))
