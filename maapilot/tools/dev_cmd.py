@@ -25,7 +25,7 @@ from maapilot.tools import common
 
 DEFAULT_DAYS = 3
 SHORTCUTS = ("op upgrade", "op mastery", "craft", "state op")
-MANUAL = ("input tap", "input swipe", "input back", "input text")
+MANUAL = ("input tap", "input swipe", "input drag", "input press", "input seq", "input back", "input text")
 MANUAL_WINDOW_MIN = 30          # 快捷操作失败后多久内的手动点击算"接着手动做"
 DENIED = ("Permission for this tool use was denied", "Permission for this action was denied",
           "The user doesn't want to proceed with this tool use", "auto mode classifier gave no verdict")
