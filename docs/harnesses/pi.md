@@ -58,4 +58,4 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
   - setup 完整走通（信任、skills、读截图、问定时、装扩展、建一次性定时并核对）；前台跑完一次约 36 分钟的 `daily run`。
   - 16:40 的定时日常准时响：先建好下一次（次日 04:40）再 `daily run --trigger schedule`，跑完对账、`daily done`、在会话里汇报，中途没问问题。
   - 偏差（已补进上面和 skill `maapilot-daily`）：给 `daily run` 填了 `timeout: 7200`；刷理智交回后自己 `maa fight` 补刷，没用 `daily run --only farm`，汇报里刷理智一直算失败。
-- 待实测：一次性接力连着响第二次（次日 04:40）。
+  - 次日 04:40 那一次（16:40 醒来时建的）也准时响了，接力在项目里连着跑通（用户 11-04 确认）。
