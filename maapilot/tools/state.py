@@ -130,10 +130,10 @@ def parse_sanity(hits) -> tuple[int, int] | None:
             continue
         x, y = h.box[0], h.box[1]
         # 当前值：在"理智/上限"上方、横向挨着的纯数字里，字最大的那个
-        cands = [(c.box[3], c.text, n) for c in hits if (n := _number(c.text)) is not None and n <= 999
+        cands = [(c.box[3], n, c.text) for c in hits if (n := _number(c.text)) is not None and n <= 999
                  and c.box[1] + c.box[3] <= y + 5 and y - c.box[1] < 160 and abs(c.box[0] - x) < 120]
         if cands:
-            _, text, n = max(cands)
+            _, n, text = max(cands)
             # 前面去掉的杂字符像"1"（112 读成"{2"）：真数多半更大，宁可读不到，不报一个偏小的数
             m = _EDGE_JUNK.match(text.strip())
             return None if m and _ONE_LIKE & set(m.group()) else (n, mx)
