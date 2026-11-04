@@ -68,6 +68,8 @@ OpenClaw 会按仓库说明装运行环境、把 agent 的 `workspace` 指向仓
 
 详细配置步骤和限制见 [`docs/harnesses/openclaw.md`](docs/harnesses/openclaw.md)，配置片段和定时模板见 [`templates/openclaw/`](templates/openclaw/)。
 
+> 微信对 OpenClaw 的消息推送支持较差，可能收不到日常报告。建议优先使用 QQ 机器人（QQ Bot）或 Lark 等平台。
+
 ### 用 pi
 
 ```sh
