@@ -56,6 +56,8 @@ harness 的定时到点给你一句"定时日常（04:40）：按 skill maapilot
   被登出 / 掉线按 `maapilot-recovery`「掉线、被登出」；游戏要更新（任务是 `game_update`）按 `maapilot-events`「维护结束」。
   处理好后 `maapilot daily run --only <rest 用逗号连起来>` 接着跑。处理不了的项就不再跑，写进总结，`rest` 里后面的照样接着跑（`--only` 去掉这一项）。
 - `failed` 里有失败的项：同样按 `maapilot-recovery` 处理，处理完 `daily run --only <这几项>` 补跑。
+  刷理智（`farm`）超时、失败也一样用 `daily run --only farm` 补跑，不要自己 `maa fight` 代替：自己刷的不算进这次日常，汇报里刷理智会一直算失败。
+  （有进行中的目标时刷理智本来就交给你，按「目标部分」用 `maa fight`，不在此列。）
 - `goals_pending: true`：程序把刷理智交回给你，按下面「目标部分」做；`award_pending: true` 时领奖励也留给你。
 - 结果里有官方日程的消息（新公告、维护、活动开始）：按 `maapilot-events` 跟用户说，说完 `news told`。
 - 正在维护：日常什么都没跑。告诉用户维护到几点、那之后的下一次日常会照常跑；维护结束后按 `maapilot-events`「维护结束」更新游戏。照样 `daily done` 收尾。
