@@ -245,8 +245,10 @@ class Game:
     def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
         self._writable()
         self._touch(self.ctrl.post_touch_down(int(x), int(y)), "down")
-        time.sleep(duration_ms / 1000)
-        self._touch(self.ctrl.post_touch_up(), "up")
+        try:
+            time.sleep(duration_ms / 1000)
+        finally:
+            self._touch(self.ctrl.post_touch_up(), "up")
         time.sleep(delay)
 
     def drag(self, x1, y1, x2, y2, hold_ms: int = 200, duration_ms: int = 300, delay: float = 0.5) -> None:
@@ -262,8 +264,10 @@ class Game:
                 self._touch(self.ctrl.post_touch_move(x1 + (x2 - x1) * i // n, y1 + (y2 - y1) * i // n), "move")
                 time.sleep(duration_ms / 1000 / n)
             time.sleep(DRAG_REST_MS / 1000)
-        finally:
-            self._touch(self.ctrl.post_touch_up(), "up")
+        except BaseException:
+            self.ctrl.post_touch_up().wait()            # 中途失败、被打断也要松手；报的是原来那个错
+            raise
+        self._touch(self.ctrl.post_touch_up(), "up")
         time.sleep(delay)
 
     def key_back(self, delay: float = 0) -> None:

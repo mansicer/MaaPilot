@@ -489,6 +489,27 @@ def test_core_drag_holds_moves_and_releases(monkeypatch):
         g.long_press(1, 2, 10)
 
 
+def test_core_touch_always_released(monkeypatch):
+    from maapilot.crew import core
+    g = core.Game.__new__(core.Game)
+    g.readonly, g.ctrl = False, _Ctrl()
+    move = g.ctrl.post_touch_move
+    g.ctrl.post_touch_move = lambda x, y: (move(x, y), _Ctrl(ok=False)._job())[1]
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="move"):           # 报的是挪动失败，不是松手
+        g.drag(0, 0, 100, 0, duration_ms=40, delay=0)
+    assert g.ctrl.log[-1] == ("up",)
+
+    def interrupted(s):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(core.time, "sleep", interrupted)
+    for call in (lambda: g.long_press(1, 2, 500), lambda: g.drag(1, 2, 3, 4)):
+        g.ctrl = _Ctrl()
+        with pytest.raises(KeyboardInterrupt):
+            call()
+        assert g.ctrl.log == [("down", 1, 2), ("up",)]
+
+
 class _Hit:
     def __init__(self, text, box):
         self.text, self.box = text, box

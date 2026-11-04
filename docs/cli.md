@@ -208,12 +208,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 `seq`：每条 `input` 命令都要重连模拟器（1–2 秒），几步要紧接着做、中间不用看屏幕时用它。每步一个引号，写法：
 `"tap X Y"`、`"swipe X1 Y1 X2 Y2 [毫秒]"`、`"drag X1 Y1 X2 Y2 [hold] [毫秒]"`、`"press X Y [毫秒]"`、`"back"`、`"wait 毫秒"`（≤ 10000）；
 毫秒的范围和单条命令一样。先检查完每一步再动手：哪步写错了退出码 2（`bad_arguments` / `bad_point`，消息里说第几步），一步也不做。
-做到一半没做成退出码 1（`input_failed`），`data` 说做完了几步：
-
-```json
-{"done": true, "steps": 3}
-{"steps": 3, "done": 1}
-```
+成功时 `data` 是 `{"done": true, "steps": 3}`（`steps` 是一共几步）；做到一半没做成退出码 1（`input_failed`），`data` 是 `{"steps": 3, "done": 1}`（`done` 是做完了几步）。
 
 例：`maapilot input seq "tap 640 360" "wait 500" "back"`。
 
