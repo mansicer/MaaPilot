@@ -46,7 +46,7 @@
 |---|---|---|---|
 | `doctor [--brief] [--offline] [--fix]` | 除 `--brief`/`--offline` 外只读 | 放行 | A |
 | `screen shot / ocr` | 只读，**不拿锁** | 放行 | A |
-| `input tap / swipe / back / text / home` | 操作 | 放行 | A |
+| `input tap / swipe / drag / press / seq / back / text / home` | 操作 | 放行 | A |
 | `maa <任务>` | 操作 | 放行 | A |
 | `maa why` | 否（只读 MAA 的日志） | 放行 | A |
 | `copilot find / show / strip` | 否（联网查作业站） | 放行 | A |
@@ -192,12 +192,29 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 |---|---|
 | `input tap X Y` | 点一下 |
 | `input swipe X1 Y1 X2 Y2 [--ms 毫秒]` | 滑动（默认 500 ms） |
+| `input drag X1 Y1 X2 Y2 [--hold 毫秒] [--ms 毫秒]` | 拖动：起点按住 `--hold`（默认 200 ms）、`--ms`（默认 300 ms）里分步挪到终点、停 100 ms 再松开 |
+| `input press X Y [--ms 毫秒]` | 长按（默认 1000 ms） |
+| `input seq "<步>" …` | 一次连接里按顺序做几步（1–20 步），步与步之间不停 |
 | `input back` | 安卓返回键 |
 | `input text "<文字>"` | 往当前输入框输入 |
 | `input home` | 回首页（只导航），截一张首页 |
 
 `data`：`{"done": true}`。操作之后不自动截图：要看结果就 `screen shot`。坐标超出 1280×720 退出码 2（`bad_point`）；
 设备上没做成退出码 1（`input_failed`）。
+
+`drag` 和 `swipe` 的区别：`swipe` 按下就走、到了就松，游戏常当成划列表；部署干员、拖道具要先按住让游戏"拿起来"，用 `drag`。
+`drag`、`press` 要设备上的 MaaTouch（平时连的就是它）；只连上 adb input 时做不成，报 `input_failed`，不会悄悄当成做了。
+
+`seq`：每条 `input` 命令都要重连模拟器（1–2 秒），几步要紧接着做、中间不用看屏幕时用它。每步一个引号，写法：
+`"tap X Y"`、`"swipe X1 Y1 X2 Y2 [毫秒]"`、`"drag X1 Y1 X2 Y2 [hold] [毫秒]"`、`"press X Y [毫秒]"`、`"back"`、`"wait 毫秒"`（≤ 10000）；
+毫秒的范围和单条命令一样。先检查完每一步再动手：哪步写错了退出码 2（`bad_arguments` / `bad_point`，消息里说第几步），一步也不做。
+成功时 `data` 是 `{"done": true, "steps": 3}`（`steps` 是一共几步）；做到一半没做成退出码 1（`input_failed`），`data` 是 `{"steps": 3, "done": 1}`（`done` 是做完了几步）。
+
+例：`maapilot input seq "tap 640 360" "wait 500" "back"`。
+
+部署干员（11-04 在 TR-1 实测，默认时长就行）：一点卡片镜头就倾斜，格子在屏幕上的位置和平时不一样，所以先 `input tap` 卡片、`screen shot`，
+量绿色格子（能放的位置）的坐标，再 `input drag <卡片> <格子>`；放下后游戏停着等你选朝向，`screen shot` 看干员在哪，从干员身上朝要的方向 `input swipe` 约 200 像素。
+每一步都要看截图，用不上 `seq`。有剧情对话开着时，第一下只会关掉对话。
 
 `input home`：和 `maa startup` 之后回首页同一套（`nav.ensure_home`）：关掉认得的弹窗（表在 `maapilot/crew/overlays.py`：连接故障、公告、月签到、
 登录活动页、获得物资、设置页……，点的都是关闭按钮或空白处）、左上菜单"首页"、返回键，最多 3 轮；不点会花东西的按钮。到了之后截一张首页（同 `screen shot --name home`）。

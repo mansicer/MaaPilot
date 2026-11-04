@@ -348,6 +348,12 @@ class FakeGame:
     def swipe(self, *a, duration_ms=400, delay=0.8):
         self.calls.append(("swipe", *a, duration_ms))
 
+    def drag(self, *a, hold_ms=200, duration_ms=300, delay=0.5):
+        self.calls.append(("drag", *a, hold_ms, duration_ms))
+
+    def long_press(self, x, y, duration_ms, delay=0.5):
+        self.calls.append(("press", x, y, duration_ms))
+
     def key_back(self, delay=0):
         self.calls.append(("back",))
 
@@ -400,7 +406,7 @@ def test_readonly_game_refuses_input():
     g = Game.__new__(Game)
     g.readonly = True
     for call in (lambda: g.tap(1, 2), lambda: g.swipe(1, 2, 3, 4), lambda: g.key_back(), lambda: g.input_text("a"),
-                 lambda: g.long_press(1, 2, 10)):
+                 lambda: g.long_press(1, 2, 10), lambda: g.drag(1, 2, 3, 4)):
         with pytest.raises(RuntimeError):
             call()
 
@@ -413,6 +419,95 @@ def test_input_commands(game, capsys):
     assert game.calls == [("tap", 10, 20), ("swipe", 1, 2, 3, 4, 300), ("back",), ("text", "abc")]
     code, env = run(capsys, "input", "tap", "1280", "5")
     assert code == 2 and env["error"]["code"] == "bad_point"
+
+
+def test_input_drag_press_seq(game, capsys, monkeypatch):
+    from maapilot.tools import input as inp
+    monkeypatch.setattr(inp.time, "sleep", lambda s: game.calls.append(("wait", s)))
+    assert run(capsys, "input", "drag", "100", "600", "640", "360")[0] == 0
+    assert run(capsys, "input", "drag", "1", "2", "3", "4", "--hold", "0", "--ms", "500")[0] == 0
+    assert run(capsys, "input", "press", "5", "6")[0] == 0
+    assert game.calls == [("drag", 100, 600, 640, 360, 200, 300), ("drag", 1, 2, 3, 4, 0, 500), ("press", 5, 6, 1000)]
+    game.calls.clear()
+    code, env = run(capsys, "input", "seq", "drag 100 600 640 360", "wait 200", "swipe 640 360 840 360 150",
+                    "tap 1 2", "press 3 4 500", "back")
+    assert code == 0 and env["data"] == {"done": True, "steps": 6}
+    assert game.calls == [("drag", 100, 600, 640, 360, 200, 300), ("wait", 0.2), ("swipe", 640, 360, 840, 360, 150),
+                          ("tap", 1, 2), ("press", 3, 4, 500), ("back",)]
+    game.calls.clear()
+    for steps, code_ in ((["tap 1"], "bad_arguments"), (["fly 1 2"], "bad_arguments"), (["wait"], "bad_arguments"),
+                         (["tap 1 2", "tap 1 x"], "bad_arguments"), (["swipe 1 2 3 4 20"], "bad_arguments"),
+                         (["tap 1 2", "drag 1 2 3 800"], "bad_point")):
+        code, env = run(capsys, "input", "seq", *steps)
+        assert code == 2 and env["error"]["code"] == code_, steps
+    assert run(capsys, "input", "drag", "1", "2", "3", "4", "--hold", "9000")[0] == 2
+    assert game.calls == []                    # 写错了一步也不做
+
+
+def test_input_seq_reports_where_it_stopped(game, capsys, monkeypatch):
+    def broken(*a, **k):
+        raise RuntimeError("touch down failed")
+    monkeypatch.setattr(game, "drag", broken, raising=False)
+    code, env = run(capsys, "input", "seq", "tap 1 2", "drag 1 2 3 4", "tap 5 6")
+    assert code == 1 and env["error"]["code"] == "input_failed" and "第 2 步" in env["error"]["message"]
+    assert env["data"] == {"steps": 3, "done": 1} and game.calls == [("tap", 1, 2)]
+
+
+class _Ctrl:
+    def __init__(self, ok=True):
+        self.ok, self.log = ok, []
+
+    def _job(self, *rec):
+        self.log.append(rec)
+        ok = self.ok
+
+        class Job:
+            def wait(self):
+                return type("R", (), {"succeeded": ok})()
+        return Job()
+
+    def post_touch_down(self, x, y):
+        return self._job("down", x, y)
+
+    def post_touch_move(self, x, y):
+        return self._job("move", x, y)
+
+    def post_touch_up(self):
+        return self._job("up")
+
+
+def test_core_drag_holds_moves_and_releases(monkeypatch):
+    from maapilot.crew import core
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    g = core.Game.__new__(core.Game)
+    g.readonly, g.ctrl = False, _Ctrl()
+    g.drag(100, 600, 200, 400, hold_ms=200, duration_ms=100, delay=0)
+    assert g.ctrl.log == [("down", 100, 600), ("move", 120, 560), ("move", 140, 520), ("move", 160, 480),
+                          ("move", 180, 440), ("move", 200, 400), ("up",)]
+    g.ctrl = _Ctrl(ok=False)                   # 只有 adb input、没有 MaaTouch：按住做不成，要报错
+    with pytest.raises(RuntimeError):
+        g.long_press(1, 2, 10)
+
+
+def test_core_touch_always_released(monkeypatch):
+    from maapilot.crew import core
+    g = core.Game.__new__(core.Game)
+    g.readonly, g.ctrl = False, _Ctrl()
+    move = g.ctrl.post_touch_move
+    g.ctrl.post_touch_move = lambda x, y: (move(x, y), _Ctrl(ok=False)._job())[1]
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="move"):           # 报的是挪动失败，不是松手
+        g.drag(0, 0, 100, 0, duration_ms=40, delay=0)
+    assert g.ctrl.log[-1] == ("up",)
+
+    def interrupted(s):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(core.time, "sleep", interrupted)
+    for call in (lambda: g.long_press(1, 2, 500), lambda: g.drag(1, 2, 3, 4)):
+        g.ctrl = _Ctrl()
+        with pytest.raises(KeyboardInterrupt):
+            call()
+        assert g.ctrl.log == [("down", 1, 2), ("up",)]
 
 
 class _Hit:

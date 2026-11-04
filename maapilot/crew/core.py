@@ -48,6 +48,8 @@ class OcrHit:
 
 RECENT_OCR = 12        # 取证 .json 里记最近几次识别
 DEBUG_KEEP = 300       # private/debug 里带时间的取证截图最多留几张（连同 .json）
+DRAG_STEP_MS = 20      # 拖动时每隔多久挪一步
+DRAG_REST_MS = 100     # 拖到终点停多久再松开
 _STAMPED = re.compile(r"_\d{8}-\d{6}(-\d+)?\.png$")
 
 
@@ -235,11 +237,37 @@ class Game:
         self.ctrl.post_swipe(int(x1), int(y1), int(x2), int(y2), duration_ms).wait()
         time.sleep(delay)
 
+    def _touch(self, job, what: str) -> None:
+        # 按住 / 移动 / 松开要 MaaTouch；只连上 adb input 时做不成，不能当成做了
+        if not job.wait().succeeded:
+            raise RuntimeError(f"touch {what} failed (needs MaaTouch; adb input can only tap and swipe)")
+
     def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
         self._writable()
-        self.ctrl.post_touch_down(int(x), int(y)).wait()
-        time.sleep(duration_ms / 1000)
-        self.ctrl.post_touch_up().wait()
+        self._touch(self.ctrl.post_touch_down(int(x), int(y)), "down")
+        try:
+            time.sleep(duration_ms / 1000)
+        finally:
+            self._touch(self.ctrl.post_touch_up(), "up")
+        time.sleep(delay)
+
+    def drag(self, x1, y1, x2, y2, hold_ms: int = 200, duration_ms: int = 300, delay: float = 0.5) -> None:
+        """Press, hold so the game picks the thing up, move in steps, rest on the target, release.
+        swipe 按下就走，游戏当成划底栏；部署干员、拖道具要先按住一会儿（MAA 部署也是这样做的）。"""
+        self._writable()
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        self._touch(self.ctrl.post_touch_down(x1, y1), "down")
+        try:
+            time.sleep(hold_ms / 1000)
+            n = max(1, duration_ms // DRAG_STEP_MS)
+            for i in range(1, n + 1):
+                self._touch(self.ctrl.post_touch_move(x1 + (x2 - x1) * i // n, y1 + (y2 - y1) * i // n), "move")
+                time.sleep(duration_ms / 1000 / n)
+            time.sleep(DRAG_REST_MS / 1000)
+        except BaseException:
+            self.ctrl.post_touch_up().wait()            # 中途失败、被打断也要松手；报的是原来那个错
+            raise
+        self._touch(self.ctrl.post_touch_up(), "up")
         time.sleep(delay)
 
     def key_back(self, delay: float = 0) -> None:
@@ -349,6 +377,9 @@ class ImageGame(Game):
 
     def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
         self.actions.append(("long_press", int(x), int(y), int(duration_ms)))
+
+    def drag(self, x1, y1, x2, y2, hold_ms: int = 200, duration_ms: int = 300, delay: float = 0.5) -> None:
+        self.actions.append(("drag", int(x1), int(y1), int(x2), int(y2)))
 
     def key_back(self, delay: float = 0) -> None:
         self.actions.append(("back",))
