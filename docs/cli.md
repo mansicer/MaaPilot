@@ -114,7 +114,7 @@
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
 | `legacy_schedule` | 系统里（crontab / Windows 任务计划程序）还留着 v0.1 的定时日常没有（同 `daily unschedule` 删的那些；`times`、`entries`）：留着会到点自己跑 `daily run`，不通过。更旧的 MaaPilot 的定时（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务）列在 `old_entries`，不算。读不了时不通过（`detail` 写原因）；这台电脑上没有系统定时（Windows 上找不到 schtasks.exe）算通过。`required: false` | 用户同意后 `daily unschedule`，再用 harness 的定时在会话里定好（`maapilot-setup`） |
-| `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接） |
+| `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接，并标上 `skip-worktree`：不然 `git restore`、`git reset --hard`、`git stash` 会穿过联接清空 `.agents/skills`） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
 
 `--offline` 跳过 `emulator`、`screen`、`input`、`game`（其余几项只跑本机命令）。
@@ -973,12 +973,12 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 `maa-cli` 的 `update` 只在用的是 `.tools/` 里装的时才为真；用别处装的（Homebrew 等）落后时带 `note`。
 
 `update apply maapilot`：先重查；从 `https://github.com/mansicer/MaaPilot.git` 拉发布标签，`git merge --ff-only` 快进（不看 origin 指到哪）；
-`pyproject.toml` / `uv.lock` 变了就同步环境（有 uv 用 uv，否则 pip）；再起一个新进程确认版本对、命令能载入。这两步失败就退回原来的提交，退出码 1（`update_failed`），用户手里还是能用的旧版本。
+`pyproject.toml` / `uv.lock` 变了就同步环境（有 uv 用 uv，PATH 里没有时也看 `~/.local/bin`；否则 pip，环境里没有 pip 先 `ensurepip`）；Windows 上先把运行中的 `maapilot.exe` 挪开放副本，才换得掉；再起一个新进程确认版本对、命令能载入。这两步失败就退回原来的提交，退出码 1（`update_failed`），用户手里还是能用的旧版本。
 没新版本 `{updated: false}`。不能快进时什么都不改，退出码 3，`hint` 写明出路（`update check` 的 `maapilot.blocked` 也提前写明）：
 
 | 错误码 | 情形 |
 |---|---|
-| `dirty` | 入库的文件被改过（没入库的文件和 `private/` 不算） |
+| `dirty` | 入库的文件被改过（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
 | `not_on_main` | 不在 main 分支 |
 | `diverged` | main 上有发布标签里没有的提交 |
 | `not_git` / `no_git` / `git_failed` | 不是 git 下载的 / 没有 git / git 读不了 |

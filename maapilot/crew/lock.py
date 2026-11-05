@@ -226,12 +226,3 @@ def _try_acquire(owner, job, run_id, ttl_s) -> Lock | str:
     else:
         _write(data, exclusive=False)
     return Lock(data)
-
-
-@contextmanager
-def hold(owner: str, **kw):
-    lk = acquire(owner, **kw)
-    try:
-        yield lk
-    finally:
-        lk.release()

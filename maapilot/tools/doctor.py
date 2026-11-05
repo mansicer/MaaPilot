@@ -18,7 +18,7 @@ from pathlib import Path
 
 from maapilot import cliutil, paths
 from maapilot.cliutil import ENVIRONMENT, CliError
-from maapilot.oscompat import fs, hints
+from maapilot.oscompat import fs, hints, procs
 from maapilot.tools import common
 
 OCR_FILES = ("det.onnx", "rec.onnx", "keys.txt")
@@ -429,6 +429,19 @@ def fix_skills_link(root: Path | None = None) -> str:
     return fs.make_dir_link(root / ".claude" / "skills", root / ".agents" / "skills")
 
 
+def keep_skills_link(root: Path | None = None) -> None:
+    """.claude/skills 在 git 里是符号链接。现在不是真的符号链接（Windows 的目录联接、复制的一份）时让 git 别管它：
+    不然 git 认为它被删了，更新被判成改过文件，git restore、git reset --hard、git stash 还会穿过联接清空 .agents/skills。"""
+    root = Path(root or paths.ROOT)
+    link = root / ".claude" / "skills"
+    if link.is_symlink() or not link.is_dir():
+        return
+    try:
+        procs.run_text(["git", "-C", str(root), "update-index", "--skip-worktree", ".claude/skills"], timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def check_skills_link(ctx: Ctx) -> dict:
     state = skills_link()
     if state == "ok":
@@ -478,6 +491,7 @@ def fix(probe: Probe | None = None) -> list[dict]:
             done.append({"name": "skills_link", "done": [how], "detail": ".claude/skills → .agents/skills"})
         except OSError as e:
             done.append({"name": "skills_link", "done": [], "detail": f"建不了链接：{type(e).__name__}: {e}"})
+    keep_skills_link()
     copied = maa.install_config()
     done.append({"name": "maa_config", "done": copied, "detail": f"复制了 {'、'.join(copied)}" if copied else "已经有了"})
     missing = [f for f in OCR_FILES if not (paths.OCR_MODEL / f).exists()]

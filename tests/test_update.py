@@ -11,6 +11,7 @@ import pytest
 from maapilot import __version__, cli, paths, toolchain
 from maapilot.cliutil import BUSY, NEEDS_USER, CliError
 from maapilot.knowledge import sources, updates
+from maapilot.oscompat import fs
 from maapilot.tools import doctor, update_cmd
 
 FIX = Path(__file__).parent / "fixtures" / "upstream"
@@ -267,6 +268,116 @@ def test_apply_refused_during_daily(capsys, monkeypatch):
     monkeypatch.setattr(daily, "open_daily", lambda: {"run_id": "20261105-0440"})
     code, out = run(capsys, "update", "apply", "maapilot")
     assert code == BUSY and out["error"]["code"] == "daily_open"
+
+
+def test_apply_says_busy_when_emulator_is_taken(capsys, monkeypatch):
+    from maapilot.crew import lock
+
+    def taken(*a, **kw):
+        raise lock.LockBusy("被占用")
+    monkeypatch.setattr(lock, "acquire", taken)
+    monkeypatch.setattr(lock, "holder", lambda: {"pid": 1, "token": "x"})
+    for what in ("maapilot", "maa-resource"):
+        code, out = run(capsys, "update", "apply", what)
+        assert code == BUSY and out["error"]["code"] == "busy" and out["data"]["holder"] == {"pid": 1}
+
+
+def link_tracked_but_a_folder(repo):
+    """Windows 上 doctor --fix 之后的样子：git 里是符号链接，本地是目录（联接）。"""
+    blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input="../.agents/skills",
+                          check=True, capture_output=True, encoding="utf-8").stdout.strip()
+    git(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},.claude/skills")
+    git(repo, "commit", "-qm", "link")
+    (repo / ".claude" / "skills").mkdir(parents=True)
+    (repo / ".claude" / "skills" / "SKILL.md").write_text("x", encoding="utf-8")
+
+
+def test_skills_link_folder_does_not_block_update(repo):
+    link_tracked_but_a_folder(repo)
+    assert "D .claude/skills" in git(repo, "status", "--porcelain")
+    assert update_cmd.blocked() is None
+    assert git(repo, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+@pytest.mark.parametrize("args", [("restore", ".claude/skills"), ("reset", "--hard"), ("stash",), ("checkout", "-f", "main")])
+def test_skills_link_folder_survives_git_cleanups(repo, args):
+    link_tracked_but_a_folder(repo)
+    doctor.keep_skills_link()
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], capture_output=True)   # 拒绝也行
+    assert (repo / ".claude" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "x"
+
+
+@pytest.mark.skipif(update_cmd.WINDOWS, reason="建符号链接要开发者模式")
+def test_real_skills_symlink_left_alone(repo):
+    link = repo / ".claude" / "skills"
+    link.parent.mkdir()
+    link.symlink_to(repo, target_is_directory=True)
+    doctor.keep_skills_link()
+    assert not git(repo, "ls-files", "-t", "-v", ".claude").startswith("S")
+
+
+def env_sync(monkeypatch, tmp_path, uv=None, pip=True, ensurepip=True):
+    """假的 uv / pip：记下 _sync_env 跑了什么。"""
+    calls = []
+
+    def fake(argv, **kw):
+        calls.append(argv)
+        ok = {"--version": pip, "ensurepip": ensurepip}
+        code = 0 if ok.get(argv[-1], True) else 1
+        return subprocess.CompletedProcess(argv, code, "", "")
+    monkeypatch.setattr(update_cmd.procs, "run_text", fake)
+    monkeypatch.setattr("shutil.which", lambda name: uv)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    return calls
+
+
+def test_sync_env_prefers_uv(monkeypatch, tmp_path):
+    calls = env_sync(monkeypatch, tmp_path, uv="/bin/uv")
+    update_cmd._sync_env()
+    assert [c[0] for c in calls] == ["/bin/uv"]
+
+
+def test_sync_env_finds_uv_outside_path(monkeypatch, tmp_path):
+    calls = env_sync(monkeypatch, tmp_path)
+    home = tmp_path / ".local" / "bin" / ("uv.exe" if update_cmd.WINDOWS else "uv")
+    home.parent.mkdir(parents=True)
+    home.write_text("", encoding="utf-8")
+    update_cmd._sync_env()
+    assert [c[0] for c in calls] == [str(home)]
+
+
+def test_sync_env_bootstraps_missing_pip(monkeypatch, tmp_path):
+    calls = env_sync(monkeypatch, tmp_path, pip=False)
+    update_cmd._sync_env()
+    assert ["ensurepip" in c for c in calls] == [False, True, False] and calls[-1][-3:] == ["install", "-e", "."]
+
+
+def test_sync_env_says_why_without_uv_or_pip(monkeypatch, tmp_path):
+    env_sync(monkeypatch, tmp_path, pip=False, ensurepip=False)
+    with pytest.raises(OSError, match="先装 uv"):
+        update_cmd._sync_env()
+
+
+def test_running_exe_moved_aside_and_copied_back(monkeypatch, tmp_path):
+    monkeypatch.setattr(fs, "WINDOWS", True)
+    exe = tmp_path / "maapilot.exe"
+    exe.write_text("old", encoding="utf-8")
+    stale = tmp_path / "maapilot.exe.old1"
+    stale.write_text("stale", encoding="utf-8")
+    fs.release_running_exe(exe)
+    assert exe.read_text(encoding="utf-8") == "old" and not stale.exists()
+    assert len(list(tmp_path.glob("maapilot.exe.old*"))) == 1
+    exe.write_text("new", encoding="utf-8")                    # 回滚时再来一次：挪开的还是原来跑着的那个，不动它
+    fs.release_running_exe(exe)
+    assert exe.read_text(encoding="utf-8") == "new" and len(list(tmp_path.glob("maapilot.exe.old*"))) == 1
+
+
+def test_running_exe_untouched_elsewhere(monkeypatch, tmp_path):
+    monkeypatch.setattr(fs, "WINDOWS", False)
+    exe = tmp_path / "maapilot.exe"
+    exe.write_text("old", encoding="utf-8")
+    fs.release_running_exe(exe)
+    assert [f.name for f in tmp_path.iterdir()] == ["maapilot.exe"]
 
 
 def test_verify_loads_real_code():

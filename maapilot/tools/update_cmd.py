@@ -12,10 +12,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
+from pathlib import Path
+
 from maapilot import __version__, paths
-from maapilot.cliutil import BUSY, FAILED, NEEDS_USER, CliError
+from maapilot.cliutil import BUSY, FAILED, NEEDS_USER, CliError, holding
 from maapilot.knowledge import updates
-from maapilot.oscompat import procs
+from maapilot.oscompat import WINDOWS, fs, procs
 from maapilot.tools import common
 
 BRANCH = "main"
@@ -44,6 +46,8 @@ def blocked() -> dict | None:
             return {"code": "git_failed", "message": "git 读不了这个文件夹", "hint": "先修好 git（doctor）"}
     except (OSError, subprocess.SubprocessError):
         return {"code": "no_git", "message": "这台电脑上跑不了 git", "hint": "先装 git"}
+    from maapilot.tools import doctor
+    doctor.keep_skills_link()                          # 不然 Windows 的目录联接在 git 眼里是"文件被删了"
     branch = _out("symbolic-ref", "--short", "HEAD")
     if branch != BRANCH:
         return {"code": "not_on_main", "message": f"现在不在 {BRANCH} 分支（{branch or '没有分支'}）",
@@ -73,12 +77,29 @@ def _idle() -> None:
                        hint="等日常收尾（daily done）后再更新", data={"run_id": run.get("run_id")})
 
 
+def _uv() -> str | None:
+    """uv 的路径：不在 PATH 里时看官方安装脚本的默认位置（setup 可能就是这样装的）。"""
+    import shutil
+    home = Path.home() / ".local" / "bin" / ("uv.exe" if WINDOWS else "uv")
+    return shutil.which("uv") or (str(home) if home.is_file() else None)
+
+
+def _pip_argv() -> list[str]:
+    """用 pip 装；uv 建的环境里默认没有 pip，先用 Python 自带的 ensurepip 补上。"""
+    python = sys.executable
+    if procs.run_text([python, "-m", "pip", "--version"], timeout=60).returncode != 0:
+        p = procs.run_text([python, "-m", "ensurepip"], timeout=SYNC_TIMEOUT_S)
+        if p.returncode != 0:
+            raise OSError("这个运行环境没有 pip，也找不到 uv，装不了新依赖：先装 uv 再更新")
+    return [python, "-m", "pip", "install", "-e", "."]
+
+
 def _sync_env() -> None:
     """新版本的依赖装进当前环境（setup 时是 uv 或 pip 建的）。"""
-    import shutil
-    uv = shutil.which("uv")
-    argv = [uv, "pip", "install", "--python", sys.executable, "-e", "."] if uv \
-        else [sys.executable, "-m", "pip", "install", "-e", "."]
+    uv = _uv()
+    argv = [uv, "pip", "install", "--python", sys.executable, "-e", "."] if uv else _pip_argv()
+    # 重装会换掉入口程序；Windows 上它就是正在跑的这个，删不掉
+    fs.release_running_exe(Path(sys.executable).with_name("maapilot.exe"))
     p = procs.run_text(argv, timeout=SYNC_TIMEOUT_S, cwd=str(paths.ROOT))
     if p.returncode != 0:
         raise OSError((p.stderr or p.stdout or "装依赖失败").strip()[-300:])
@@ -155,13 +176,12 @@ def apply_maa_cli() -> dict:
 
 def apply_maa_core() -> dict:
     from maapilot import config
-    from maapilot.crew import lock
     from maapilot.crew import maa as crew_maa
     st = check(refresh=True)
     e = st["maa-core"]
     if not e["update"]:
         return {"what": "maa-core", "updated": False, "version": e["current"], "latest": e["latest"]}
-    with lock.hold("update apply maa-core", job="update apply"):
+    with holding("update apply maa-core", job="update apply"):
         p = procs.run_text([config.tool("maa"), "update"], timeout=MAA_UPDATE_TIMEOUT_S, env=crew_maa.env())
     if p.returncode != 0:
         raise CliError("maa_update_failed", f"maa update 没成功（退出码 {p.returncode}）：{(p.stderr or p.stdout or '').strip()[-300:]}",
@@ -173,8 +193,7 @@ def apply_maa_core() -> dict:
 
 def apply_resource() -> dict:
     """资源的更新不问用户（日常开头自己做），这里给 agent 手动重试。"""
-    from maapilot.crew import lock
-    with lock.hold("update apply maa-resource", job="update apply"):
+    with holding("update apply maa-resource", job="update apply"):
         r = updates.hot_update()
     if r.get("error"):
         raise CliError("resource_update_failed", f"MAA 资源没更新成：{r['error']}", exit=FAILED, data=r,
@@ -195,8 +214,7 @@ def cmd_told(args) -> dict:
 def cmd_apply(args) -> dict:
     _idle()
     if args.what == "maapilot":
-        from maapilot.crew import lock
-        with lock.hold("update apply maapilot", job="update apply"):
+        with holding("update apply maapilot", job="update apply"):
             return apply_maapilot()
     return {"maa-cli": apply_maa_cli, "maa-core": apply_maa_core, "maa-resource": apply_resource}[args.what]()
 

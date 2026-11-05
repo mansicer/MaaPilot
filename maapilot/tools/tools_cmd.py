@@ -10,7 +10,7 @@ import re
 import subprocess
 
 from maapilot import config
-from maapilot.cliutil import FAILED, CliError
+from maapilot.cliutil import FAILED, CliError, holding
 from maapilot.tools import common
 
 NAMES = {"maa-cli": "maa", "maa": "maa", "adb": "adb"}
@@ -57,9 +57,8 @@ def _maa_core(maa: str) -> str | None:
 
 def install(what: str, version: str | None = None) -> dict:
     from maapilot import toolchain
-    from maapilot.crew import lock
     name = NAMES[what]
-    with lock.hold(f"tools install {what}", job="tools install"):
+    with holding(f"tools install {what}", job="tools install"):
         r = toolchain.install(name, version)
         if name == "maa":
             core = _maa_core(r["path"])
