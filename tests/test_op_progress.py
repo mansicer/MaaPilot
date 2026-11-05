@@ -383,3 +383,36 @@ def test_single_recognition_failure_without_trainee_warning_is_still_locating(op
         op.progress_result("能天使", steps, core_run(detail("Failed", "RecognitionFailed"), summary(failed=1),
                                                      warnings=[NOT_FOUND]))
     assert e.value.data["steps"][0]["step"] == "找干员"
+
+
+def _cached_core(version: str) -> Path:
+    d = maacore.root() / version / "rt"
+    d.mkdir(parents=True)
+    (d / maacore.LIB_NAMES[0]).write_text("", encoding="utf-8")
+    return d
+
+
+def test_find_prefers_the_core_shared_with_maa_cli(monkeypatch, tmp_path):
+    _cached_core("v6.25.0")
+    monkeypatch.setattr(maacore, "cli_core", lambda: ("v6.21.4", tmp_path / "lib"))
+    assert maacore.find() == ("v6.21.4", tmp_path / "lib")
+
+
+def test_find_falls_back_when_shared_core_is_too_old(monkeypatch, tmp_path):
+    cached = _cached_core("v6.19.0")
+    monkeypatch.setattr(maacore, "cli_core", lambda: ("v6.17.5", tmp_path / "lib"))
+    assert maacore.find() == ("v6.19.0", cached)
+
+
+def test_find_reports_old_shared_core_when_nothing_else(monkeypatch, tmp_path):
+    monkeypatch.setattr(maacore, "cli_core", lambda: ("v6.17.5", tmp_path / "lib"))
+    version, _ = maacore.find()
+    assert version == "v6.17.5" and not maacore.at_least(version, maacore.MIN_CORE)
+
+
+def test_base_resource_for_both_layouts(monkeypatch, tmp_path):
+    cached = tmp_path / "rt"
+    (cached / "resource").mkdir(parents=True)
+    monkeypatch.setattr(maacore, "_maa_dir", lambda w: tmp_path / "data" / "resource")
+    assert maacore.base_resource(cached) == cached
+    assert maacore.base_resource(tmp_path / "data" / "lib") == tmp_path / "data"

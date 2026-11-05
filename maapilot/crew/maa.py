@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maapilot import paths
-from maapilot.oscompat import procs
+from maapilot.oscompat import fs, procs
 
 TASK_PREFIX = "maapilot-"
 KILL_GRACE_S = 10
@@ -81,8 +81,27 @@ def install_config(force: bool = False) -> list[str]:
         shutil.copyfile(src / f, dest)
         done.append(f)
     (config_dir() / "tasks").mkdir(parents=True, exist_ok=True)
+    ensure_auto_update()
     sync_adb_path()
     return done
+
+
+def ensure_auto_update() -> None:
+    """cli.toml 里打开资源自动更新（已有的配置文件不覆盖，只改这一项）：资源旧了 MAA 会认不出新关卡。"""
+    p = config_dir() / "cli.toml"
+    try:
+        text = fs.read_text_utf8(p)
+    except OSError:
+        return
+    if re.search(r"^auto_update\s*=\s*true\b", text, re.M):
+        return
+    if re.search(r"^auto_update\s*=", text, re.M):
+        text = re.sub(r"^auto_update\s*=\s*\S+", "auto_update = true", text, flags=re.M)
+    elif re.search(r"^\[resource\]", text, re.M):
+        text = re.sub(r"^\[resource\]", "[resource]\nauto_update = true", text, count=1, flags=re.M)
+    else:
+        text = text.rstrip() + "\n\n[resource]\nauto_update = true\n"
+    fs.atomic_write_text(p, text)
 
 
 def _resolved_adb() -> str | None:

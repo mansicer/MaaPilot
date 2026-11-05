@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import sys
 import tarfile
@@ -32,6 +33,12 @@ VERSION_FILE = "VERSION"
 
 # 名字 → .tools 下的目录
 DIRS = {"maa": "maa-cli", "adb": "platform-tools"}
+
+
+def version_tuple(v: str) -> tuple[int, ...]:
+    """"0.7.7" / "v0.8.0-nightly.1+sha.x" → (0, 7, 7) / (0, 8, 0)。"""
+    m = re.match(r"v?(\d+(?:\.\d+)*)", str(v).strip())
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
 
 
 def tools_dir() -> Path:

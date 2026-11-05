@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from maapilot import paths
 from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, FAILED, CliError
+from maapilot.crew.maacore import MIN_CORE as PROGRESS_MIN_CORE
 from maapilot.flows._common import check_operator, depot_names, rel, run_shortcut
 
 
@@ -125,7 +126,6 @@ def mastery(name: str, skill: int, rank: int) -> dict:
 
 # --- op progress：MaaCore 的干员培养 ------------------------------------------------------
 
-PROGRESS_MIN_CORE = "v6.19.0"
 PROGRESS_TIMEOUT_S = 3600
 # OperProgressProcessTask 的 ResultDetail / Result（按枚举顺序；回调里可能是名字也可能是序号）
 RESULT_DETAILS = ("Completed", "AlreadySatisfied", "ResourceInsufficient", "OperatorNotFound", "PrerequisiteNotMet",
@@ -248,8 +248,8 @@ def progress(name: str, elite: int | None, skill_level: int | None, mastery: lis
                        hint="先问用户同不同意用采购凭证买芯片助剂；同意了加 --allow-catalyst 再跑")
     found = maacore.find()
     if found is None or not maacore.at_least(found[0], PROGRESS_MIN_CORE):
-        raise CliError("maacore_missing", f"干员培养要单独装 MaaCore {PROGRESS_MIN_CORE} 以上"
-                       + (f"（现在是 {found[0]}）" if found else ""), exit=ENVIRONMENT, hint="maapilot doctor --fix")
+        raise CliError("maacore_missing", f"干员培养要 MaaCore {PROGRESS_MIN_CORE} 以上"
+                       + (f"（现在是 {found[0]}）" if found else ""), exit=ENVIRONMENT, hint="maapilot update apply maa-core（用户同意后）或 maapilot doctor --fix")
     from maapilot.tools import maa_cmd
     with common.device("op progress", job=f"op progress {name}") as lk:
         # MaaCore 的干员培养只会从首页进干员列表（真机：停在干员详情页时它点错、翻到了别的干员），所以先回首页

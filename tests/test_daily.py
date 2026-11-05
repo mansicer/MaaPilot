@@ -102,6 +102,8 @@ def env(tmp_path, monkeypatch):
                                        "update_needed": False, "accept_terms": None}
 
     monkeypatch.setattr(daily, "refresh_news", fake_refresh)
+    monkeypatch.setattr(daily, "refresh_update", lambda: False)
+    monkeypatch.setattr(daily, "refresh_resource", lambda: None)
     monkeypatch.setattr(daily, "maintenance_now", lambda: behavior["maintenance"])
     monkeypatch.setattr(daily, "version_info", fake_version)
     return {"calls": calls, "behavior": behavior, "news_calls": news_calls}

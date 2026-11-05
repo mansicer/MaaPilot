@@ -3,8 +3,9 @@
 maa-cli v0.7.5 的任务类型是写死的枚举，MaaCore v6.19.0 新加的 OperProgress 它跑不了；这里在子进程
 （maapilot.crew.maacore_runner）里用 ctypes 加载 MaaCore，把回调一条条收回来。
 
-本体单独装在 `private/cache/maa-core/<版本>/`（`install()` 从 MAA 的 GitHub 发布下载），和 maa-cli 自己的本体分开，
-互不影响。资源先加载本体自带的，再叠加 maa-cli 热更新的资源（新干员、新活动），和 maa-cli 一样。
+绕过的只是 maa-cli，本体和 maa-cli 共用一份（`maa dir library`，跟着 `update apply maa-core` 更新）；只有那份低于 MIN_CORE 时，
+才用单独装在 `private/cache/maa-core/<版本>/` 的（`install()` 从 MAA 的 GitHub 发布下载）。
+资源先加载本体自带的，再叠加 maa-cli 热更新的资源（新干员、新活动），和 maa-cli 一样。
 
 这里不拿锁、不做参数检查：那些在调用方（maapilot.flows.op）。本模块只管"跑一次、给回全部回调"。
 """
@@ -28,6 +29,7 @@ from maapilot.oscompat import WINDOWS, procs
 
 RELEASES_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
 LIB_NAMES = ("libMaaCore.dylib", "libMaaCore.so", "MaaCore.dll")
+MIN_CORE = "v6.19.0"            # 有 OperProgress 的最低版本
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 # AsstMsg
@@ -53,8 +55,30 @@ def _version_key(name: str) -> tuple[int, ...] | None:
     return tuple(int(x) for x in m.groups()) if m else None
 
 
+def cli_core() -> tuple[str, Path] | None:
+    """maa-cli 用的那份本体：(版本, 含 libMaaCore 的目录)；没装、读不出 → None。"""
+    from maapilot import config
+    from maapilot.crew import maa as crew_maa
+    lib_dir = _maa_dir("library")
+    if lib_dir is None or not any((lib_dir / n).exists() for n in LIB_NAMES):
+        return None
+    try:
+        out = procs.run_text([config.tool("maa"), "version"], timeout=20, env=crew_maa.env())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"maa-?core\s+v?(\d+\.\d+\.\d+)\s*$", out.stdout or "", re.I | re.M)
+    return (f"v{m.group(1)}", lib_dir) if m else None
+
+
 def find() -> tuple[str, Path] | None:
-    """装好的最新本体：(版本, 含 libMaaCore 的目录)；没有 → None。"""
+    """要加载的本体：(版本, 含 libMaaCore 的目录)。maa-cli 那份够新就用它，否则用单独装的最新一份；都没有 → None。"""
+    shared = cli_core()
+    if shared and at_least(shared[0], MIN_CORE):
+        return shared
+    return _cached() or shared
+
+
+def _cached() -> tuple[str, Path] | None:
     best = None
     if root().is_dir():
         for d in root().iterdir():
@@ -123,15 +147,28 @@ def install(*, timeout_s: float = 600) -> dict:
     return {"version": tag, "dir": str(found[1]) if found else str(dest), "installed": True}
 
 
-def hot_update_dir() -> Path | None:
-    """maa-cli 热更新的资源目录（`maa dir hot-update`）；拿不到 → None。"""
+def _maa_dir(which: str) -> Path | None:
+    """`maa dir <which>`；拿不到 → None。"""
     from maapilot import config
     try:
-        out = procs.run_text([config.tool("maa"), "dir", "hot-update"], timeout=20)
+        out = procs.run_text([config.tool("maa"), "dir", which], timeout=20)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    p = Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+    return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+
+
+def hot_update_dir() -> Path | None:
+    """maa-cli 热更新的资源目录；拿不到 → None。"""
+    p = _maa_dir("hot-update")
     return p if p and (p / "resource").is_dir() else None
+
+
+def base_resource(lib_dir: Path) -> Path:
+    """本体自带资源的上一级（AsstLoadResource 要的目录）：单独装的在库旁边，maa-cli 的在 `maa dir resource`。"""
+    if (lib_dir / "resource").is_dir():
+        return lib_dir
+    res = _maa_dir("resource")
+    return res.parent if res else lib_dir
 
 
 @dataclass
@@ -169,7 +206,7 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
         return CoreRun(None, [], [], log, 0.0, error="没装单独的 MaaCore")
     version, lib_dir = found
     lib = next(lib_dir / n for n in LIB_NAMES if (lib_dir / n).exists())
-    resources = [str(lib_dir)]
+    resources = [str(base_resource(lib_dir))]
     hot = hot_update_dir()
     if hot is not None:
         resources.append(str(hot))

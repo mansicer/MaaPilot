@@ -51,6 +51,21 @@ def refresh_news() -> bool:
     return True
 
 
+def refresh_update() -> bool:
+    """版本信息旧了就重查（MaaPilot、MaaCore）。→ 查了没有。查不到不算错：写在缓存里，连着几天查不到时启动检查和结果里会说。"""
+    from maapilot.knowledge import updates
+    if not updates.stale():
+        return False
+    updates.refresh()
+    return True
+
+
+def refresh_resource() -> dict | None:
+    """更新 MAA 资源（不问用户）。这一小时更新过 → None。成败记在缓存里，不算日常的错。"""
+    from maapilot.knowledge import updates
+    return updates.hot_update() if updates.resource_stale() else None
+
+
 def maintenance_now() -> dict | None:
     """国服公告写的维护时段里 → 那条维护；别的服（YoStar、txwy）维护时间不一样，不按它跳过日常。"""
     from maapilot.knowledge import news
@@ -78,6 +93,17 @@ def _preflight(r: _Run) -> bool:
     except Exception as e:                               # noqa: BLE001 - 联网失败：用旧的缓存
         r.data["alerts"].append(f"官方公告没拉下来（{_err(e)}），按上次的缓存看维护时间")
         r.event("news_failed", error=_err(e))
+    try:
+        if daily.refresh_update():
+            r.event("update_checked")
+    except Exception as e:                               # noqa: BLE001 - 查不到更新不影响日常
+        r.event("update_check_failed", error=_err(e))
+    try:
+        res = daily.refresh_resource()
+        if res:
+            r.event("resource_updated", commit=res.get("commit"), error=res.get("error"))
+    except Exception as e:                               # noqa: BLE001 - 资源更新不了：照跑，连着几天不成才告诉用户
+        r.event("resource_update_failed", error=_err(e))
     try:
         m = daily.maintenance_now()
     except Exception as e:                               # noqa: BLE001

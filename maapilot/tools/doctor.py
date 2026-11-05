@@ -257,9 +257,8 @@ def maa_dir(ctx: Ctx, which: str) -> Path | None:
 
 
 def _ver(v: str) -> tuple[int, ...]:
-    """"0.7.7" / "v0.8.0-nightly.1+sha.x" → (0, 7, 7) / (0, 8, 0)。"""
-    m = re.match(r"v?(\d+(?:\.\d+)*)", str(v).strip())
-    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+    from maapilot.toolchain import version_tuple
+    return version_tuple(v)
 
 
 def maa_cli_range(cli: str) -> str | None:
@@ -347,16 +346,16 @@ def check_maa_config(ctx: Ctx) -> dict:
 
 
 def check_maa_core(ctx: Ctx) -> dict:
-    """单独装的 MaaCore（`op progress` 用；maa-cli 还跑不了干员培养）。没有不影响别的命令。"""
+    """`op progress` 加载的 MaaCore（maa-cli 还跑不了干员培养，但本体和它共用一份）。没有不影响别的命令。"""
     from maapilot.crew import maacore
     from maapilot.flows.op import PROGRESS_MIN_CORE
     found = maacore.find()
     if found is None:
-        return _item("maa_core", False, "没单独装 MaaCore（干员培养 op progress 要用）", "maapilot doctor --fix（从 MAA 的 GitHub 下载）",
+        return _item("maa_core", False, "没有能用的 MaaCore（干员培养 op progress 要用）", "maapilot update apply maa-core 或 maapilot doctor --fix",
                      required=False)
     if not maacore.at_least(found[0], PROGRESS_MIN_CORE):
-        return _item("maa_core", False, f"单独装的 MaaCore 是 {found[0]}，干员培养要 {PROGRESS_MIN_CORE} 以上",
-                     "maapilot doctor --fix", required=False)
+        return _item("maa_core", False, f"MaaCore 是 {found[0]}，干员培养要 {PROGRESS_MIN_CORE} 以上",
+                     "maapilot update apply maa-core 或 maapilot doctor --fix", required=False)
     return _item("maa_core", True, f"{found[0]}（{found[1]}）", required=False)
 
 
@@ -567,6 +566,7 @@ def brief(probe: Probe | None = None) -> dict:
     data["memory"] = memory_brief() if setup_done else None
     data["goals"] = goals_brief()
     data["news"] = news_brief()
+    data["update"] = update_brief() if setup_done else None
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
     data["lines"] = brief_lines(data)
@@ -647,6 +647,19 @@ def news_brief() -> dict | None:
         return None
 
 
+def update_brief() -> dict | None:
+    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost）、MAA 资源更新不了（resource_lost）。都没有 → None。"""
+    try:
+        from maapilot.knowledge import updates
+        st = updates.status()
+        resource_lost = st["maa-resource"]["lost"]
+        if not st["due"] and not st["lost"] and not resource_lost:
+            return None
+        return {"due": st["due"], "lost": st["lost"], "resource_lost": resource_lost, "lines": updates.lines(st)}
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return None
+
+
 def brief_lines(d: dict) -> list[str]:
     if not d["setup_done"]:
         return ["MaaPilot 还没设置：用户一开口（说什么都行）就进入 maapilot-setup（先跟用户打招呼，说明要做几步）。"]
@@ -686,6 +699,9 @@ def brief_lines(d: dict) -> list[str]:
         lines.append(f"官方日程：{l}")
     if n.get("due"):
         lines.append("官方日程有消息还没跟用户说（新公告 / 维护结束 / 活动开始，maapilot-events）：" + "、".join(n["due"]))
+    u = d.get("update") or {}
+    if u.get("lines"):
+        lines.append("版本更新（maapilot-update）：" + "；".join(u["lines"]))
     for x in d.get("sources") or []:
         lines.append(f"外部数据：{x['message']}" + (f"，{x['effect']}" if x.get("effect") else "")
                      + "（要开发者修；用户问起或受影响时用玩家的话说明，见 maapilot-recovery）")
