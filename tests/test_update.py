@@ -67,6 +67,24 @@ def test_github_down_keeps_last_result_and_says_so(monkeypatch):
     assert any("5 天没" in l for l in updates.lines(st))
 
 
+def test_maa_core_lookup_tracked_on_its_own(monkeypatch):
+    online(monkeypatch)
+    updates.refresh()
+    d = updates.load()
+    d["maa_core_at"] = days_ago(updates.CHECK_LOST_DAYS)
+    (paths.STATE / "update.json").write_text(json.dumps(d), encoding="utf-8")
+
+    def only_maapilot(url):
+        if url == updates.MAA_API:
+            raise OSError("连不上")
+        return release(__version__)
+    monkeypatch.setattr(updates, "http_json", only_maapilot)
+    st = updates.status(updates.refresh())
+    assert not st["lost"] and st["maa-core"]["lost"] and st["maa-core"]["latest"] == "6.21.4"
+    assert any("MAA 的新版本信息" in l and "连不上" in l for l in updates.lines(st))
+    assert doctor.update_brief()["core_lost"]
+
+
 def test_never_checked_counts_as_lost():
     assert updates.status()["lost"] and "从没" in updates.lines()[0]
 
@@ -335,6 +353,12 @@ def test_apply_resource_failure_is_reported(capsys, monkeypatch):
      "[core]\nchannel = \"stable\"\n\n[resource]\nauto_update = true\nbackend = \"git\"\n"),
     ("[core]\nchannel = \"stable\"\n", "[core]\nchannel = \"stable\"\n\n[resource]\nauto_update = true\n"),
     ("[resource]\nauto_update = true # 开\n", "[resource]\nauto_update = true # 开\n"),
+    ("[other]\nauto_update = true\n\n[resource]\nauto_update = false\n",
+     "[other]\nauto_update = true\n\n[resource]\nauto_update = true\n"),
+    ("[resource]\nauto_update = false\n\n[other]\nauto_update = false\n",
+     "[resource]\nauto_update = true\n\n[other]\nauto_update = false\n"),
+    ("[other]\nauto_update = false\n\n[resource]\nbackend = \"git\"\n",
+     "[other]\nauto_update = false\n\n[resource]\nauto_update = true\nbackend = \"git\"\n"),
 ])
 def test_auto_update_turned_on_in_existing_config(before, after):
     from maapilot.crew import maa

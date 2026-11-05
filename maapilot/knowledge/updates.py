@@ -7,8 +7,8 @@
 - MAA 资源不问用户：日常开头 `maa hot-update`，maa-cli 跑任务前也会自己更新（cli.toml 的 resource.auto_update）。
   更新不成任务照跑，连着 CHECK_LOST_DAYS 天不成才告诉用户。
 
-缓存在 private/state/update.json：`{at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
-`at` 是最近一次查成功 MaaPilot 新版本的时间；`resource` 是 `{at（最近一次更新成功）, commit, commit_at, error}`。
+缓存在 private/state/update.json：`{at, maa_core_at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
+`at`、`maa_core_at` 是最近一次查成功 MaaPilot、MaaCore 新版本的时间（各记各的：一边查不到不能被另一边盖住）；`resource` 是 `{at（最近一次更新成功）, commit, commit_at, error}`。
 """
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def refresh() -> dict:
     except Exception as e:                               # noqa: BLE001 - 限流、连不上、格式变了：留上次的，连着几天这样就告诉用户
         errors["maapilot"] = f"{type(e).__name__}: {e}"
     try:
-        new["maa_core"] = _release("maa_release", MAA_API)
+        new.update(maa_core=_release("maa_release", MAA_API), maa_core_at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 查不到 MaaCore 不耽误 MaaPilot 的
         errors["maa-core"] = f"{type(e).__name__}: {e}"
     d = {**load(), **new, "errors": errors}              # 拉的这几秒里别的进程记下的 told 不丢
@@ -191,11 +191,14 @@ def status(d: dict | None = None) -> dict:
     v = version.info()
     p, c = d.get("maapilot") or {}, d.get("maa_core") or {}
     cur = (d.get("local") or {}).get("maa_core")
+    core_age = _age(d.get("maa_core_at"))
     out = {"maapilot": {"current": v["version"], "commit": v["commit"], "latest": p.get("version"),
                         "update": _behind(__version__, p.get("version")), "url": p.get("url"),
                         "published": p.get("published"), "notes": p.get("notes") or ""},
            "maa-cli": _maa_cli(d),
-           "maa-core": {"current": cur, "latest": c.get("version"), "update": _behind(cur, c.get("version")), "url": c.get("url")},
+           "maa-core": {"current": cur, "latest": c.get("version"), "update": _behind(cur, c.get("version")), "url": c.get("url"),
+                        "at": d.get("maa_core_at"), "age_days": None if core_age is None else core_age.days,
+                        "lost": core_age is None or core_age.days >= CHECK_LOST_DAYS},
            "maa-resource": _resource(d)}
     age = _age(d.get("at"))
     out.update(at=d.get("at"), age_days=None if age is None else age.days, errors=d.get("errors") or {},
@@ -233,6 +236,11 @@ def lines(st: dict | None = None) -> list[str]:
         days = "从没" if st["at"] is None else f"已经 {st['age_days']} 天没"
         why = st["errors"].get("maapilot")
         out.append(f"{days}查到 MaaPilot 的新版本信息" + (f"（{why}）" if why else ""))
+    c = st["maa-core"]
+    if c["lost"]:
+        days = "从没" if c["at"] is None else f"已经 {c['age_days']} 天没"
+        why = st["errors"].get("maa-core")
+        out.append(f"{days}查到 MAA 的新版本信息" + (f"（{why}）" if why else ""))
     r = st["maa-resource"]
     if r["lost"]:
         days = "一直" if r["at"] is None else f"已经 {r['age_days']} 天"

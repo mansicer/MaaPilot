@@ -93,14 +93,20 @@ def ensure_auto_update() -> None:
         text = fs.read_text_utf8(p)
     except OSError:
         return
-    if re.search(r"^auto_update\s*=\s*true\b", text, re.M):
+    head = re.search(r"^\s*\[\s*resource\s*\]", text, re.M)
+    if head is None:
+        fs.atomic_write_text(p, text.rstrip() + "\n\n[resource]\nauto_update = true\n")
         return
-    if re.search(r"^auto_update\s*=", text, re.M):
-        text = re.sub(r"^auto_update\s*=\s*\S+", "auto_update = true", text, flags=re.M)
-    elif re.search(r"^\[resource\]", text, re.M):
-        text = re.sub(r"^\[resource\]", "[resource]\nauto_update = true", text, count=1, flags=re.M)
+    next_table = re.compile(r"^\s*\[", re.M).search(text, head.end())
+    end = next_table.start() if next_table else len(text)
+    body = text[head.end():end]                    # 只看 [resource] 这一节：别的表里同名的键不算
+    if re.search(r"^\s*auto_update\s*=\s*true\b", body, re.M):
+        return
+    if re.search(r"^\s*auto_update\s*=", body, re.M):
+        body = re.sub(r"^(\s*)auto_update\s*=\s*\S+", r"\1auto_update = true", body, flags=re.M)
     else:
-        text = text.rstrip() + "\n\n[resource]\nauto_update = true\n"
+        body = "\nauto_update = true" + body
+    text = text[:head.end()] + body + text[end:]
     fs.atomic_write_text(p, text)
 
 

@@ -648,14 +648,15 @@ def news_brief() -> dict | None:
 
 
 def update_brief() -> dict | None:
-    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost）、MAA 资源更新不了（resource_lost）。都没有 → None。"""
+    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost、core_lost）、MAA 资源更新不了（resource_lost）。都没有 → None。"""
     try:
         from maapilot.knowledge import updates
         st = updates.status()
-        resource_lost = st["maa-resource"]["lost"]
-        if not st["due"] and not st["lost"] and not resource_lost:
+        core_lost, resource_lost = st["maa-core"]["lost"], st["maa-resource"]["lost"]
+        if not st["due"] and not st["lost"] and not core_lost and not resource_lost:
             return None
-        return {"due": st["due"], "lost": st["lost"], "resource_lost": resource_lost, "lines": updates.lines(st)}
+        return {"due": st["due"], "lost": st["lost"], "core_lost": core_lost, "resource_lost": resource_lost,
+                "lines": updates.lines(st)}
     except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
         return None
 
