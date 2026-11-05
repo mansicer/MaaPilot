@@ -348,7 +348,7 @@ class FakeGame:
     def swipe(self, *a, duration_ms=400, delay=0.8):
         self.calls.append(("swipe", *a, duration_ms))
 
-    def drag(self, *a, hold_ms=200, duration_ms=300, delay=0.5):
+    def drag(self, *a, hold_ms=800, duration_ms=800, delay=0.5):
         self.calls.append(("drag", *a, hold_ms, duration_ms))
 
     def long_press(self, x, y, duration_ms, delay=0.5):
@@ -427,12 +427,12 @@ def test_input_drag_press_seq(game, capsys, monkeypatch):
     assert run(capsys, "input", "drag", "100", "600", "640", "360")[0] == 0
     assert run(capsys, "input", "drag", "1", "2", "3", "4", "--hold", "0", "--ms", "500")[0] == 0
     assert run(capsys, "input", "press", "5", "6")[0] == 0
-    assert game.calls == [("drag", 100, 600, 640, 360, 200, 300), ("drag", 1, 2, 3, 4, 0, 500), ("press", 5, 6, 1000)]
+    assert game.calls == [("drag", 100, 600, 640, 360, 800, 800), ("drag", 1, 2, 3, 4, 0, 500), ("press", 5, 6, 1000)]
     game.calls.clear()
     code, env = run(capsys, "input", "seq", "drag 100 600 640 360", "wait 200", "swipe 640 360 840 360 150",
                     "tap 1 2", "press 3 4 500", "back")
     assert code == 0 and env["data"] == {"done": True, "steps": 6}
-    assert game.calls == [("drag", 100, 600, 640, 360, 200, 300), ("wait", 0.2), ("swipe", 640, 360, 840, 360, 150),
+    assert game.calls == [("drag", 100, 600, 640, 360, 800, 800), ("wait", 0.2), ("swipe", 640, 360, 840, 360, 150),
                           ("tap", 1, 2), ("press", 3, 4, 500), ("back",)]
     game.calls.clear()
     for steps, code_ in ((["tap 1"], "bad_arguments"), (["fly 1 2"], "bad_arguments"), (["wait"], "bad_arguments"),

@@ -192,7 +192,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 |---|---|
 | `input tap X Y` | 点一下 |
 | `input swipe X1 Y1 X2 Y2 [--ms 毫秒]` | 滑动（默认 500 ms） |
-| `input drag X1 Y1 X2 Y2 [--hold 毫秒] [--ms 毫秒]` | 拖动：起点按住 `--hold`（默认 200 ms）、`--ms`（默认 300 ms）里分步挪到终点、停 100 ms 再松开 |
+| `input drag X1 Y1 X2 Y2 [--hold 毫秒] [--ms 毫秒]` | 拖动：起点按住 `--hold`（默认 800 ms）、`--ms`（默认 800 ms）里分步挪到终点、停 100 ms 再松开 |
 | `input press X Y [--ms 毫秒]` | 长按（默认 1000 ms） |
 | `input seq "<步>" …` | 一次连接里按顺序做几步（1–20 步），步与步之间不停 |
 | `input back` | 安卓返回键 |
@@ -212,8 +212,8 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 
 例：`maapilot input seq "tap 640 360" "wait 500" "back"`。
 
-部署干员（11-04 在 TR-1 实测，默认时长就行）：一点卡片镜头就倾斜，格子在屏幕上的位置和平时不一样，所以先 `input tap` 卡片、`screen shot`，
-量绿色格子（能放的位置）的坐标，再 `input drag <卡片> <格子>`；放下后游戏停着等你选朝向，`screen shot` 看干员在哪，从干员身上朝要的方向 `input swipe` 约 200 像素。
+部署干员（11-04、11-05 在 TR-1 实测，用默认时长；按住 200 ms 时镜头还没倾斜完，游戏不认这次拖动）：一点卡片镜头就倾斜，格子在屏幕上的位置和平时不一样，所以先 `input tap` 卡片、`screen shot`，
+量绿色格子（能放的位置）的坐标（对准绿格，不要对准教学箭头），再 `input drag <卡片> <格子>`；放下后游戏停着等你选朝向，`screen shot` 看干员在哪，从干员身上朝要的方向 `input swipe` 约 200 像素。
 每一步都要看截图，用不上 `seq`。有剧情对话开着时，第一下只会关掉对话。
 
 `input home`：和 `maa startup` 之后回首页同一套（`nav.ensure_home`）：关掉认得的弹窗（表在 `maapilot/crew/overlays.py`：连接故障、公告、月签到、

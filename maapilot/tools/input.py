@@ -16,7 +16,7 @@ SEQ_MAX = 20
 STEPS = {
     "tap": (2, ()),
     "swipe": (4, (("ms", 500, 50, 10000),)),
-    "drag": (4, (("hold", 200, 0, 5000), ("ms", 300, 50, 5000))),
+    "drag": (4, (("hold", 800, 0, 5000), ("ms", 800, 50, 5000))),
     "press": (2, (("ms", 1000, 100, 10000),)),
     "back": (0, ()),
     "wait": (0, (("ms", None, 0, 10000),)),
@@ -204,8 +204,8 @@ def register(sub) -> None:
     p = gs.add_parser("drag", help="按住、拖到终点再松开（部署干员、拖道具）")
     for a in ("x1", "y1", "x2", "y2"):
         p.add_argument(a, type=int)
-    p.add_argument("--hold", type=int, default=200, help="起点按住多久再开始拖（毫秒，默认 200）")
-    p.add_argument("--ms", type=int, default=300, help="拖过去用多久（毫秒，默认 300）")
+    p.add_argument("--hold", type=int, default=800, help="起点按住多久再开始拖（毫秒，默认 800；镜头倾斜完才认拖动）")
+    p.add_argument("--ms", type=int, default=800, help="拖过去用多久（毫秒，默认 800）")
     p.set_defaults(func=cmd_drag, command="input drag")
     p = gs.add_parser("press", help="长按")
     p.add_argument("x", type=int)

@@ -251,7 +251,7 @@ class Game:
             self._touch(self.ctrl.post_touch_up(), "up")
         time.sleep(delay)
 
-    def drag(self, x1, y1, x2, y2, hold_ms: int = 200, duration_ms: int = 300, delay: float = 0.5) -> None:
+    def drag(self, x1, y1, x2, y2, hold_ms: int = 800, duration_ms: int = 800, delay: float = 0.5) -> None:
         """Press, hold so the game picks the thing up, move in steps, rest on the target, release.
         swipe 按下就走，游戏当成划底栏；部署干员、拖道具要先按住一会儿（MAA 部署也是这样做的）。"""
         self._writable()
@@ -378,7 +378,7 @@ class ImageGame(Game):
     def long_press(self, x: int, y: int, duration_ms: int, delay: float = 0.5) -> None:
         self.actions.append(("long_press", int(x), int(y), int(duration_ms)))
 
-    def drag(self, x1, y1, x2, y2, hold_ms: int = 200, duration_ms: int = 300, delay: float = 0.5) -> None:
+    def drag(self, x1, y1, x2, y2, hold_ms: int = 800, duration_ms: int = 800, delay: float = 0.5) -> None:
         self.actions.append(("drag", int(x1), int(y1), int(x2), int(y2)))
 
     def key_back(self, delay: float = 0) -> None:
