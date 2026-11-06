@@ -33,7 +33,12 @@ DENIED = ("Permission for this tool use was denied", "Permission for this action
 _STANDARD = re.compile(r"^(maapilot\s[^|;&<>`$\n]*|maapilot|sleep 300)$")
 _QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|\'[^\']*\'')         # 引号里的 | ; 等不算（如 --find "a|b"）
 _MEMORY_PATH = re.compile(r"[/\\]private[/\\]memory[/\\]")
-_MEMORY_BASH = re.compile(r"(>|\b(?:rm|mv|cp|tee|sed -i)\b).*private[/\\]memory|private[/\\]memory.*(>|\b(?:rm|mv)\b)")
+_MEMORY_DIR = r"private[/\\]memory(?![\w.-])"
+# 写进偏好目录的命令：重定向或 tee 到那里、删或移走、sed -i、cp 的目标在那里。读（cat、cp 出去、> 到别处）不算
+_MEMORY_CMD = r"(?:^|[|;&\n]\s*)"                # 一段命令的开头：grep rm 这样的参数不算
+_MEMORY_BASH = re.compile(rf"""(?:>|{_MEMORY_CMD}tee\b[^|;&>]*\s)\s*["']?[^\s"'|;&]*{_MEMORY_DIR}"""
+                          rf"""|{_MEMORY_CMD}(?:rm|mv|sed\s+-i\S*)\b[^|;&>]*{_MEMORY_DIR}"""
+                          rf"""|{_MEMORY_CMD}cp\b[^|;&>]*\s["']?[^\s"'|;&]*{_MEMORY_DIR}[^\s|;&>]*\s*(?:$|[|;&])""")
 # 开发会话的迹象：改代码、跑测试、提交
 _DEV_PATH = re.compile(r"/(maapilot|tests|docs)/|/\.(claude|agents)/skills/|(CLAUDE|CLAUDE_DEV|AGENTS)\.md$")
 _DEV_BASH = re.compile(r"\bpytest\b|\bgit (commit|diff|add)\b|CLAUDE_DEV\.md")
@@ -205,6 +210,17 @@ def _maapilot_cmd(cmd: str) -> str | None:
     return " ".join(x for x in (m.group(1), sub) if x)
 
 
+def _memory_edit(use: dict) -> dict | None:
+    """这次成功的工具调用改了用户偏好 → {file, tool, change}；没改 → None。"""
+    name, inp = use.get("name"), use.get("input") or {}
+    if name in ("Edit", "Write") and _MEMORY_PATH.search(str(inp.get("file_path", ""))):
+        return {"file": Path(str(inp["file_path"])).name, "tool": name,
+                "change": _short(inp.get("new_string") or inp.get("content"), 120)}
+    if name == "Bash" and _MEMORY_BASH.search(str(inp.get("command", ""))):
+        return {"file": "（命令）", "tool": name, "change": _short(inp["command"], 120)}
+    return None
+
+
 def read_session(path: Path, since: datetime) -> dict | None:
     uses: dict[str, dict] = {}
     s = {"id": path.stem, "start": None, "end": None, "prompt": None, "dev": None, "agent_name": None,
@@ -247,15 +263,10 @@ def read_session(path: Path, since: datetime) -> dict | None:
                     name = x.get("name")
                     if name in ("Edit", "Write", "NotebookEdit") and _DEV_PATH.search(str(inp.get("file_path", ""))):
                         s["dev"] = s["dev"] or f"改了 {Path(str(inp['file_path'])).name}"
-                    if new and name in ("Edit", "Write") and _MEMORY_PATH.search(str(inp.get("file_path", ""))):
-                        s["memory_edits"].append({"file": Path(str(inp["file_path"])).name, "tool": name,
-                                                  "change": _short(inp.get("new_string") or inp.get("content"), 120)})
                     if name == "Bash":
                         cmd = str(inp.get("command", "")).strip()
                         if _DEV_BASH.search(cmd):
                             s["dev"] = s["dev"] or f"跑了 {_short(cmd, 40)}"
-                        if new and _MEMORY_BASH.search(cmd):
-                            s["memory_edits"].append({"file": "（命令）", "tool": name, "change": _short(cmd, 120)})
                         if new:
                             s["bash_total"] += 1
                             bare = _QUOTED.sub('""', cmd)
@@ -272,6 +283,8 @@ def read_session(path: Path, since: datetime) -> dict | None:
                         s["denied"].append({"tool": use.get("name"), "what": what, "why": _short(text, 100)})
                         continue
                     if not x.get("is_error"):
+                        if (edit := _memory_edit(use)):
+                            s["memory_edits"].append(edit)
                         continue
                     cmd = str(use.get("input", {}).get("command", "")) if use.get("name") == "Bash" else ""
                     mp = _maapilot_cmd(cmd) if cmd else None

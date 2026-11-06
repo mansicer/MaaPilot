@@ -2,6 +2,8 @@
 import json
 from datetime import timedelta
 
+import pytest
+
 from maapilot import cli, paths
 from maapilot.tools import common, dev_cmd
 
@@ -134,18 +136,42 @@ def test_review_log_and_transcripts(tmp_path, capsys, monkeypatch):
 def test_review_shows_memory_edits(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     tdir = tmp_path / "t"
-    tdir.mkdir()
-    rows = [_use("1", "Write", 5, file_path="/x/private/memory/sanity.md", content="快到期的理智液可以用"),
-            _use("2", "Bash", 4, command="rm private/memory/old.md"),
-            _use("3", "Bash", 3, command="cat private/memory/a.md"),
-            _use("4", "Write", 2, file_path="/x/private/goals.md", content="y")]
-    (tdir / "s.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
+    rows = [_use(1, "Write", 9, file_path="/x/private/memory/sanity.md", content="快到期的理智液可以用"), _result(1, 9, "ok"),
+            _use(2, "Bash", 8, command="rm private/memory/old.md"), _result(2, 8, "ok"),
+            _use(3, "Bash", 7, command="cat private/memory/a.md"), _result(3, 7, "x"),
+            _use(4, "Write", 6, file_path="/x/private/goals.md", content="y"), _result(4, 6, "ok"),
+            _use(5, "Write", 5, file_path="/x/private/memory/no.md", content="没写成"), _result(5, 5, "failed", error=True),
+            _use(6, "Edit", 4, file_path="/x/private/memory/denied.md", new_string="被拒"),
+            _result(6, 4, "Permission for this tool use was denied"),
+            _use(7, "Write", 3, file_path="/x/private/memory/cut.md", content="没有结果")]
+    _session(tdir, "s", rows)
     code, env = run(capsys, "dev", "review", "--transcripts", str(tdir), "--since", "1d")
     assert code == 0, env
     s = env["data"]["transcripts"]["sessions"][0]
     assert s["memory_edits"] == [{"file": "sanity.md", "tool": "Write", "change": "快到期的理智液可以用"},
                                  {"file": "（命令）", "tool": "Bash", "change": "rm private/memory/old.md"}]
     assert any("改偏好" in ln for ln in env["data"]["lines"])
+
+
+@pytest.mark.parametrize("cmd, edit", [
+    ("echo x >> private/memory/a.md", True),
+    ("echo x > 'private/memory/a.md'", True),
+    ("echo x | tee private/memory/a.md", True),
+    ("mv private/memory/a.md /tmp", True),
+    ("sed -i '' s/a/b/ private/memory/a.md", True),
+    ("cp /tmp/a.md private/memory/a.md", True),
+    ("cp /tmp/a.md C:/x/private/memory/a.md && ls", True),
+    ("rm -r private/memory", True),
+    ("cd x && rm private/memory/a.md", True),
+    ("cat private/memory/a.md", False),
+    ("cat private/memory/a.md > /tmp/a.md", False),
+    ("cp private/memory/a.md /tmp", False),
+    ("grep rm private/memory/a.md", False),
+    ("rm private/memory-backup/a.md", False),
+    ("echo x > private/memory.md", False),
+])
+def test_memory_bash_only_counts_writes(cmd, edit):
+    assert bool(dev_cmd._memory_edit({"name": "Bash", "input": {"command": cmd}})) is edit
 
 
 def test_review_session_filter_and_exclude(tmp_path, capsys, monkeypatch):

@@ -1027,7 +1027,7 @@ Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（�
   `repeated` 同一条命令（参数也一样）失败两次以上；`shortcut_then_manual` 快捷操作（`op upgrade / mastery`、`craft`、`state op`）失败后 30 分钟内接着手动 `input …` 的。
 - 会话记录（`transcripts`）：目录按仓库路径推出（Claude Code 的规则：路径里非字母数字的字符换成 `-`，放在 `~/.claude/projects/` 下；在 git worktree 里跑时用主仓库的路径），`--transcripts` 可以改。
   每个会话：`label`（v0.1 定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
-  `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`memory_edits` 改了用户偏好的操作（`{file, tool, change}`，`change` 是改成的内容，用命令改的是命令）、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
+  `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`memory_edits` 成功改了用户偏好的操作（失败、被拒的不算，只读不算；`{file, tool, change}`，`change` 是改成的内容，用命令改的是命令）、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
   （管道、`&&`、`;`、`cat`、`grep`……；引号里的 `|` 不算）、`result` 最后的"结果：…"。
   不看：`--exclude` 的、当前会话（环境变量 `CLAUDE_CODE_SESSION_ID`）、开发会话（改过 `maapilot/`、`tests/`、`docs/`、skill、`CLAUDE*.md`，跑过 pytest、git commit，
   或 agent 名以 dev 开头；`--include-dev` 也看）。`--session` 点名的会话照看不误。
