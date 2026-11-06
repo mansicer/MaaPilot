@@ -56,6 +56,8 @@
 | `calc need / craft / stages / event` | 否 | 放行 | A |
 | `lock status` / `lock release` | 否 | 放行 | A |
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
+| `update check / told` | 否（`check` 联网） | 放行 | A |
+| `update apply maapilot\|maa-cli\|maa-core\|maa-resource` | 否（拿锁，换程序） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
 | `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
 | `reset [--dry-run] [--memory]` | 否 | 放行 | B |
@@ -90,7 +92,7 @@
 - `--offline`：不碰模拟器、不联网的那几项。
 - `--fix`：顺手做不需要问用户的本地修复：从 maa-cli 资源复制 OCR 模型、把 maa-cli 配置模板（`templates/maa-config/` 的
   `cli.toml`、`profiles/default.toml`）装进本项目的 maa-cli 配置目录 `private/maa-config/`（已有的不覆盖）、缺数据表时 `data sync`、
-  没有单独的 MaaCore（或版本太旧）时从 MAA 的 GitHub 发布下载（见下表 `maa_core`）。
+  没有够新的 MaaCore（maa-cli 那份和单独装的都不够）时从 MAA 的 GitHub 发布下载（见下表 `maa_core`）。
   装软件（maa-cli、adb）不在这里做：由 agent 问过用户后用 `maapilot tools install`（见「tools」）。
 - `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
 
@@ -107,12 +109,12 @@
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
 | `agent_config` | `config.yaml` 里还写着 v0.1 的设置（`agent`、`schedule_options`、`daily.agent_timeout_min`、`daily.recovery_timeout_min`：定时叫起无头 agent、系统定时用的）：现在不用了，写了也忽略；`legacy` 列出是哪几个。`required: false` | 用户同意后从 `config.yaml` 删掉（不删也不影响） |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
-| `maa_core` | 单独装的 MaaCore（`private/cache/maa-core/<版本>/`，`op progress` 用；maa-cli 自己的本体还跑不了干员培养）在、且不低于 v6.19.0。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
+| `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
 | `legacy_schedule` | 系统里（crontab / Windows 任务计划程序）还留着 v0.1 的定时日常没有（同 `daily unschedule` 删的那些；`times`、`entries`）：留着会到点自己跑 `daily run`，不通过。更旧的 MaaPilot 的定时（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务）列在 `old_entries`，不算。读不了时不通过（`detail` 写原因）；这台电脑上没有系统定时（Windows 上找不到 schtasks.exe）算通过。`required: false` | 用户同意后 `daily unschedule`，再用 harness 的定时在会话里定好（`maapilot-setup`） |
-| `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接） |
+| `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接，并标上 `skip-worktree`：不然 `git restore`、`git reset --hard`、`git stash` 会穿过联接清空 `.agents/skills`） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
 
 `--offline` 跳过 `emulator`、`screen`、`input`、`game`（其余几项只跑本机命令）。
@@ -154,6 +156,7 @@
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说），列到 `news told` 为止。
+`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
@@ -645,8 +648,8 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 | `op progress <干员> [--elite E] [--skill-level N] [--mastery K:M …] [--allow-catalyst]` | 交给 MAA 本体的干员培养（MaaCore 的 OperProgress，见下）：精英化到精 E（1–2）、技能升到 N 级（2–7）、技能 K 专到 M（`--mastery` 可写多次）。不管等级、模组 |
 | `craft <物品> [--count N]` | 精英材料走加工站（`maapilot/crew/craft.py`，只合这一样：中间材料先各自 `craft`，顺序看 `calc craft`）；双芯片走制造站（`manufacture.py`，造完改回原产物）；商店兑换的（芯片助剂，花采购凭证）走采购中心（`shop.py`，确认框上核对总价，对不上不买） |
 
-`op progress` 不经 maa-cli（v0.7.5 还不认这个任务类型），在子进程里直接加载单独装的 MaaCore（`maapilot/crew/maacore.py`、
-`maacore_runner.py`；资源先用本体自带的，再叠加 maa-cli 热更新的），回调全文记在 `data.log`（`private/log/maa/<时间>-op-progress.log`）。
+`op progress` 不经 maa-cli（它还不认这个任务类型），在子进程里直接加载 MaaCore（`maapilot/crew/maacore.py`、
+`maacore_runner.py`；本体和 maa-cli 共用一份，低于 v6.19.0 才用单独装的；资源先用本体自带的，再叠加 maa-cli 热更新的），回调全文记在 `data.log`（`private/log/maa/<时间>-op-progress.log`）。
 拿锁后先回首页（MaaCore 只会从首页进干员列表；回不去退出码 1 `not_home`，什么都没做），做完再回首页（`data.home`）。
 MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都不点；缺的精英材料会先去加工站合（花龙门币和下级材料）；
 专精一次只开一级（要专 3、现在专 1 → 开专 2，`PrerequisiteTraining`，`training_started: true`），开了之后后面的专精项不再做。
@@ -687,7 +690,7 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 | `not_home` / `maa_failed` | 1 | `op progress`：开始前回不到首页；MaaCore 连不上模拟器、超时（60 分钟）、没给结果 |
 | `needs_consent` | 2 | `op progress`：5、6 星精二可能花采购凭证买芯片助剂，问过用户再加 `--allow-catalyst` |
 | `needs_user` | 3 | `guard allow`：花合成玉 / 源石要用户在会话里同意，日常在跑或没收尾时一律拒绝。什么都没做，等 `daily done` 收尾后用户同意再记 |
-| `maacore_missing` / `maacore_broken` | 5 | `op progress`：没装单独的 MaaCore 或低于 v6.19.0（`doctor --fix`）；本体或资源加载失败 |
+| `maacore_missing` / `maacore_broken` | 5 | `op progress`：没有 v6.19.0 以上的 MaaCore（`update apply maa-core` 或 `doctor --fix`）；本体或资源加载失败 |
 | `not_restored` | 1 | `craft` 双芯片：造好了，但制造站没改回原产物（`data.original`、`shot`） |
 | `not_bought` | 1 | `craft` 兑换：确认之前停下了，什么都没花（余额不够、找不到商品、确认框对不上） |
 | `unknown_name` / `not_craftable` | 2 | 名字认不出；这样东西快捷操作做不了 |
@@ -824,6 +827,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
 `seen_overlays`：这次日常的子命令（`maa startup` 回首页、`guard snapshot` 读仓库……）导航时关掉的活动签到页（`login_event`）/ 月签到（`sign_in`），
 接着跑的几段合在一起；有的话「要注意」（和 `lines` 的"告警："）里写一条"回首页时看到了活动签到页，被程序关掉了，奖励没领：领奖励交给 agent"，`next` 提示收尾前 `input home` 回去看。
 不算问题（`has_problem` 不看它），agent 按 `maapilot-daily`「活动签到」处理。MAA 自己（`maa-cli` 的任务里）关掉的看不到。
+`update`：版本信息（开头查过的缓存，同 `doctor --brief` 的 `update`），有内容时 `lines` 里有对应的行，agent 按 `maapilot-update` 说；查不到不算日常的错。
 `news`：官方日程（开头拉过的缓存，同 `doctor --brief` 的 `news`）；`due` 不为空时 `lines` 里有一行，agent 按 `maapilot-events` 跟用户说、`news told`。
 `lines`：每次都给的几句中文（怎么结束的、维护时段、目标变动、到期要看的、没做成的项、官方日程……），agent 照着转述。
 
@@ -933,6 +937,57 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 失败：`network`（下载不了，退出码 1）、`install_failed`（包里没有程序、旧的换不掉）、`maa_install_failed`（maa-cli 装好了但 `maa install` 没成）、`unsupported_platform`（5）。
 要联网、会换掉日常执行的程序：agent 先问过用户。`config.yaml` 写了别的路径时 `note` 提示怎么改用装好的（改不改问用户）。
 
+## update —— MaaPilot 和 MAA 的更新（不碰模拟器）
+
+要问用户的三样东西（`maapilot/knowledge/updates.py`、`maapilot/tools/update_cmd.py`）：
+
+| 名字 | 现在的版本 | 最新版本 | 怎么更新 |
+|---|---|---|---|
+| `maapilot` | `maapilot.__version__` | GitHub 上最新的正式 Release（草稿、预发布不算） | 本地 `main` 快进到发布标签 |
+| `maa-cli` | `.tools/` 里装的 | 这个版本的 MaaPilot 实测过的上限（`MAA_CLI_TESTED`），不跟 maa-cli 的最新版 | 同 `tools install maa-cli` |
+| `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份） |
+
+目标是用户不和更新断联：没有关掉检查的开关；缓存 20 小时算旧，`daily run` 开头（维护中也查）和 `update check` 重查；查不到不算错，留上次的结果，
+原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（从没查过也算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
+`due`：有新版本、还没告诉用户的；`update told` 之后不再列，**7 天**后还没更新再列一次，出了更新的版本马上再列。
+
+| 命令 | 行为 |
+|---|---|
+| `update check [--refresh]` | 版本信息。缓存旧了（或 `--refresh`）先重查 |
+| `update told maapilot [maa-cli maa-core]` | 这些新版本告诉过用户了（日常在跑或没收尾时也能记）。`{told, due}` |
+| `update apply maapilot\|maa-cli\|maa-core` | 更新一项，**用户同意后才跑**。日常在跑或没收尾退出码 4（`daily_open`）；模拟器被占用退出码 4 |
+| `update apply maa-resource` | 马上更新 MAA 资源，不用问用户。限制同上，失败退出码 1（`resource_update_failed`） |
+
+```json
+{"maapilot": {"current": "0.2.2", "commit": "553f177", "latest": "0.3.0", "update": true, "url": "https://github.com/…",
+              "published": "…", "notes": "<更新说明，外来的文字>", "blocked": null},
+ "maa-cli": {"current": "0.7.5", "latest": "0.7.7", "update": true},
+ "maa-core": {"current": "6.21.1", "latest": "6.21.4", "update": true, "url": "…", "at": "…", "age_days": 0, "lost": false},
+ "at": "…", "age_days": 0, "lost": false, "errors": {}, "due": ["maapilot", "maa-cli", "maa-core"]}
+```
+
+**MAA 资源不问用户、不列进 `due`**：`daily run` 开头（这一小时更新过就跳过）跑 `maa hot-update`，maa-cli 跑任务前也会自己更新
+（`install_config` 保证 `cli.toml` 的 `resource.auto_update` 是 `true`，别的设置不动）。更新不成任务照跑，只记下来；连着 3 天不成（或一次都没成）时 `maa-resource.lost` 为真，
+启动检查和日常结果写明，`lines` 里有一行。`check` 的 `maa-resource`：`{commit, commit_at, at, error, age_days, lost}`，`at` 是最近一次更新成功的时间。
+
+`maa-cli` 的 `update` 只在用的是 `.tools/` 里装的时才为真；用别处装的（Homebrew 等）落后时带 `note`。
+
+`update apply maapilot`：先重查；从 `https://github.com/mansicer/MaaPilot.git` 拉发布标签，`git merge --ff-only` 快进（不看 origin 指到哪）；
+`pyproject.toml` / `uv.lock` 变了就同步环境（有 uv 用 uv，PATH 里没有时也看 `~/.local/bin`；否则 pip，环境里没有 pip 先 `ensurepip`）；Windows 上先把运行中的 `maapilot.exe` 挪开放副本，才换得掉；再起一个新进程确认版本对、命令能载入。这两步失败就退回原来的提交，退出码 1（`update_failed`），用户手里还是能用的旧版本。
+没新版本 `{updated: false}`。不能快进时什么都不改，退出码 3，`hint` 写明出路（`update check` 的 `maapilot.blocked` 也提前写明）：
+
+| 错误码 | 情形 |
+|---|---|
+| `dirty` | 入库的文件被改过（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
+| `not_on_main` | 不在 main 分支 |
+| `diverged` | main 上有发布标签里没有的提交 |
+| `not_git` / `no_git` / `git_failed` | 不是 git 下载的 / 没有 git / git 读不了 |
+
+成功：`{what, updated, from, to, commit, env_synced, url, notes, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
+Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；换不了按上面退回旧版本。
+
+`network`（退出码 1）：拉不到 GitHub。`maa_update_failed`（退出码 1）：`maa update` 没成功，原来的版本还在。
+
 ## host —— agent 宿主（不碰模拟器）
 
 用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建定时见 docs/harnesses/）。程序的找法在 `maapilot/hosts.py`：
@@ -993,7 +1048,7 @@ private/
   setup.json         setup 完成的标记
   goals.md           进行中的目标
   goals-done.md      完成或放弃的目标
-  state/             depot.json  box.json  sanity.json（最新快照）  live.json（现场练度）  annihilation.json（本周剿灭）  news.json（官方公告缓存）
+  state/             depot.json  box.json  sanity.json（最新快照）  live.json（现场练度）  annihilation.json（本周剿灭）  news.json（官方公告缓存）  update.json（版本信息缓存）
                      sources.json（外部数据源的格式健康：{来源: {last_ok, last_error, recent}}）
   cache/game/        game update 下载的安装包（.part 是没下完的；装完删掉）
   cache/copilot/     copilot strip 存的去掉练度要求的作业

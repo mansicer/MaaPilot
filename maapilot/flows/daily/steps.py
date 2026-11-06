@@ -122,6 +122,7 @@ def _run(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | None,
                 r.data["depot_change"] = ch
         _seen_overlays(r)
         r.data["news"] = _news()
+        r.data["update"] = _update()
         r.data["lines"] = reportmod.summary_lines(r.data)   # 给 agent 转述：维护时段、到期和变动的目标……
         if r.data.get("open"):
             r.data["next"] = next_hint(r.data)
@@ -160,6 +161,15 @@ def _news() -> dict | None:
     try:
         from maapilot.tools import doctor
         return doctor.news_brief()
+    except Exception:                                    # noqa: BLE001 - 读不了不影响日常
+        return None
+
+
+def _update() -> dict | None:
+    """版本信息（开头查过的缓存）：还没跟用户说的新版本、查更新的路断了。没有 → None。"""
+    try:
+        from maapilot.tools import doctor
+        return doctor.update_brief()
     except Exception:                                    # noqa: BLE001 - 读不了不影响日常
         return None
 

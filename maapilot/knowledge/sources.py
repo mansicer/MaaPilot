@@ -31,6 +31,8 @@ SOURCES = {
     "penguin": "企鹅物流",
     "yituliu": "一图流",
     "gamedata": "游戏数据表",
+    "maapilot_release": "MaaPilot 的发布信息",
+    "maa_release": "MAA 的发布信息",
 }
 
 

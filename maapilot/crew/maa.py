@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maapilot import paths
-from maapilot.oscompat import procs
+from maapilot.oscompat import fs, procs
 
 TASK_PREFIX = "maapilot-"
 KILL_GRACE_S = 10
@@ -81,8 +81,33 @@ def install_config(force: bool = False) -> list[str]:
         shutil.copyfile(src / f, dest)
         done.append(f)
     (config_dir() / "tasks").mkdir(parents=True, exist_ok=True)
+    ensure_auto_update()
     sync_adb_path()
     return done
+
+
+def ensure_auto_update() -> None:
+    """cli.toml 里打开资源自动更新（已有的配置文件不覆盖，只改这一项）：资源旧了 MAA 会认不出新关卡。"""
+    p = config_dir() / "cli.toml"
+    try:
+        text = fs.read_text_utf8(p)
+    except OSError:
+        return
+    head = re.search(r"^\s*\[\s*resource\s*\]", text, re.M)
+    if head is None:
+        fs.atomic_write_text(p, text.rstrip() + "\n\n[resource]\nauto_update = true\n")
+        return
+    next_table = re.compile(r"^\s*\[", re.M).search(text, head.end())
+    end = next_table.start() if next_table else len(text)
+    body = text[head.end():end]                    # 只看 [resource] 这一节：别的表里同名的键不算
+    if re.search(r"^\s*auto_update\s*=\s*true\b", body, re.M):
+        return
+    if re.search(r"^\s*auto_update\s*=", body, re.M):
+        body = re.sub(r"^(\s*)auto_update\s*=\s*\S+", r"\1auto_update = true", body, flags=re.M)
+    else:
+        body = "\nauto_update = true" + body
+    text = text[:head.end()] + body + text[end:]
+    fs.atomic_write_text(p, text)
 
 
 def _resolved_adb() -> str | None:

@@ -58,6 +58,7 @@ MaaPilot/
 ## 规矩
 - 这台电脑的模拟器和账号是真实测试环境，也是用户在用的环境：代码、skill、模板不能写死它的设定（模拟器、地址、路径、账号进度）。
 - `private/` 是用户的真实数据和配置，开发时只读；不改用户设好的日常时间、配置和目标。
+- Windows 上 `.claude/skills` 是目录联接：提交时一个个写路径，不用 `git add -A` 或 `git add .`。它们会清掉 `skip-worktree`，之后 `git reset --hard`、`git stash` 会清空 `.agents/skills`。
 - 碰模拟器前：避开定时日常（`private/config.yaml` 的 `schedule`，用户的会话到点会自己跑）前后，`maapilot lock status` 确认没人占用；点击、花资源的操作先问用户。
 - 要试 agent 的对话效果，在临时副本里跑 `claude -p`，不要在这个目录里跑（会留下会话记录和自动记忆）。
 - 用户要求时才提交；提交信息用英文。提交信息、PR 和 issue 里都不加 Claude Code 的署名和会话链接（`Co-Authored-By`、`Claude-Session`、"Generated with Claude Code"；用户 10-24 说的，已有的不动）。
@@ -93,6 +94,7 @@ MaaPilot/
 | 官方公告 `bulletin` | `knowledge/news.py` | 列表 `cid/title/displayTime/updatedAt/category`，全文 `content` 等 | 用上次的缓存，日常告警里写明 |
 | 官网安装包地址 `game_download` | `tools/game.py` | 跳转后的文件名 `arknights-hg-<版本>.apk` | `game version` 报错，不更新 |
 | 企鹅物流 `penguin`、一图流 `yituliu` | `knowledge/live.py` | matrix / stages、`data[].itemValueAp` | 不换缓存（旧的照用） |
+| GitHub 发布 `maapilot_release`、`maa_release` | `knowledge/updates.py` | `tag_name` | 留上次的结果；连着 3 天查不到 MaaPilot 的，启动检查和日常结果写明 |
 | 游戏数据表 `gamedata` | `knowledge/datasync.py` | 每张表程序用到的字段（`TABLE_SCHEMA`） | 不替换本地的表 |
 
 规矩：在解析的地方核对用到的字段，对不上抛 `UpstreamFormat`（错误码 `upstream_format`，消息写明来源和字段），不当成"没有数据"悄悄过去；
@@ -113,7 +115,11 @@ MaaPilot/
 - maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：`maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 记实测过的范围（`tools install` 默认装上限这个版本），发版前把本机升到最新、跑通日常和作业后更新上限。
 - 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送标签，提交开 PR（main 不能直接推）。PR 要用普通合并（merge commit），不用 squash / rebase，标签指的提交才在 main 上。
   CI 在标签上先跑三个系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
-  把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。带 `-` 的标签（`v0.1.0-rc1`）标成预发布。
+  把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。
+  用户的 agent 只认**已发布的正式 Release**（`update check`），草稿和带 `-` 的预发布都收不到；发布后，用户的 agent 会把更新说明转述给用户。
+  本地 `main` 快进到标签才算更新（`update apply`），所以标签必须在 main 上；别删、别改已发布的标签。
+  MAA 资源自动更新、不问用户（用户 11-05 定）：日常开头 `maa hot-update`，加上 maa-cli 的 `auto_update`。
+  这条路不能断（用户 11-05 定）：改 `maapilot/knowledge/updates.py`、`tools/update_cmd.py` 和 `MAAPILOT_REPO` 要想清楚旧版本还收不收得到更新；仓库改名、搬家前先发一版指向新地址的。带 `-` 的标签（`v0.1.0-rc1`）标成预发布。
 
 ## 测试环境
 - 本机的模拟器、服务器、日常时间都看 `private/config.yaml`，不写进仓库。

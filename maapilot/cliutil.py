@@ -63,14 +63,10 @@ def log(*parts) -> None:
 
 
 @contextmanager
-def device(owner: str, *, wait_s: float = 0, job: str | None = None):
-    """碰模拟器的命令都包在这里：读配置、配置设备连接、拿锁（占用 → BUSY）。yield Lock。
-    子进程继承锁见 maapilot.crew.lock。"""
-    from maapilot import config
-    from maapilot.crew import device as dev, lock
+def holding(owner: str, *, wait_s: float = 0, job: str | None = None):
+    """拿模拟器锁（占用 → BUSY）。yield Lock。不碰模拟器、只是不能和别的命令同时跑的（换程序）用它。"""
+    from maapilot.crew import lock
 
-    conn = config.connection()          # 没配置 → CliError(ENVIRONMENT)
-    dev.configure(conn)
     try:
         lk = lock.acquire(owner, job=job, wait_s=wait_s)
     except lock.LockBusy as e:
@@ -82,14 +78,27 @@ def device(owner: str, *, wait_s: float = 0, job: str | None = None):
         raise CliError("busy", str(e), hint="稍后再试，或等正在跑的任务结束（lock status 看谁占着）", exit=BUSY,
                        data={"holder": holder}) from None
     try:
-        from maapilot.tools import guard
-        guard.mark_dirty(owner)             # 可能花东西的命令：下次 guard snapshot 先对账
-    except Exception:
-        pass
-    try:
         yield lk
     finally:
         lk.release()
+
+
+@contextmanager
+def device(owner: str, *, wait_s: float = 0, job: str | None = None):
+    """碰模拟器的命令都包在这里：读配置、配置设备连接、拿锁（占用 → BUSY）。yield Lock。
+    子进程继承锁见 maapilot.crew.lock。"""
+    from maapilot import config
+    from maapilot.crew import device as dev
+
+    conn = config.connection()          # 没配置 → CliError(ENVIRONMENT)
+    dev.configure(conn)
+    with holding(owner, wait_s=wait_s, job=job) as lk:
+        try:
+            from maapilot.tools import guard
+            guard.mark_dirty(owner)         # 可能花东西的命令：下次 guard snapshot 先对账
+        except Exception:
+            pass
+        yield lk
 
 
 @contextmanager

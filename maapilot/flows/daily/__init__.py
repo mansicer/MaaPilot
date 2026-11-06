@@ -20,7 +20,7 @@ agent 一直在场（用户会话或 harness 的独立任务会话；定时日�
   steps      daily run 的编排
   close      daily done：收尾
   cron       v0.1 的系统定时（只认、只删）与 daily status
-测试替换的名字（maapilot_call、refresh_news、maintenance_now、version_info、running、open_daily、_set_step、_leftover_maa、
+测试替换的名字（maapilot_call、refresh_news、refresh_update、refresh_resource、maintenance_now、version_info、running、open_daily、_set_step、_leftover_maa、
 procs.kill_pids、TIMEOUT_LEFTOVER_WAIT_S、_stage_cost、now）子模块都经 `daily.X` 取，替换才生效；子模块里新用到这些名字也要这样取。
 """
 from __future__ import annotations
@@ -40,7 +40,8 @@ from maapilot.flows.daily.farm import (  # noqa: F401
     DEFAULT_STAGE_COST, FARM_MARGIN_MIN, FARM_MIN_PER_FIGHT, SANITY_FRESH_MIN, _age_min, _sanity_estimate,
     _stage_cost, farm_timeout, read_sanity_for_farm)
 from maapilot.flows.daily.preflight import (  # noqa: F401
-    _game_version, _goals_change, _preflight, expire_goals, goals_diff, goals_snapshot, maintenance_now, refresh_news,
+    _game_version, _goals_change, _preflight, expire_goals, goals_diff, goals_snapshot, maintenance_now, refresh_news, refresh_resource,
+    refresh_update,
     version_info)
 from maapilot.flows.daily.close import close_run, report_done  # noqa: F401
 from maapilot.flows.daily.steps import _finish, _steps, next_hint, run  # noqa: F401

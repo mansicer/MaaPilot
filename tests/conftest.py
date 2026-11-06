@@ -35,5 +35,15 @@ def _tmp_private(tmp_path, monkeypatch):
     # 不用本机项目 .tools/ 里真装好的 maa-cli、adb（要测的测试自己换掉）
     from maapilot import toolchain
     monkeypatch.setattr(toolchain, "tools_dir", lambda: tmp_path / "no-tools")
+    # 不用本机 maa-cli 真装好的 MaaCore（要测的测试自己换掉）
+    from maapilot.crew import maacore
+    monkeypatch.setattr(maacore, "cli_core", lambda: None)
+    # 查新版本不联网、不跑本机的 maa（要测的测试自己换掉）
+    from maapilot.knowledge import updates
+
+    def _no_network(*a):
+        raise OSError("测试不联网")
+    monkeypatch.setattr(updates, "http_json", _no_network)
+    monkeypatch.setattr(updates, "local_versions", lambda: {})
     yield tmp_path / "private"
     paths.set_private(old)

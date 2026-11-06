@@ -124,6 +124,25 @@ def make_dir_link(link: Path, target: Path) -> str:
         return "copy"
 
 
+def release_running_exe(exe: Path) -> None:
+    """让正在跑的 exe 能被替换：Windows 上它删不掉、但能改名，所以挪到一边（等进程退出后下次清掉），原位放一份副本。
+    别的系统、exe 不在、这个进程已经挪过：什么都不做。"""
+    import shutil
+    exe = Path(exe)
+    if not WINDOWS or not exe.is_file():
+        return
+    aside = exe.with_name(f"{exe.name}.old{os.getpid()}")
+    if aside.exists():
+        return
+    for old in exe.parent.glob(f"{exe.name}.old*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    exe.replace(aside)
+    shutil.copy2(aside, exe)
+
+
 def imread(p: Path | str):
     """读图片 → BGR 的 uint8 数组（和 MaaFramework 截图同一格式）；带透明通道、灰度的都转成 3 通道。读不到 → None。
     用 PIL 不用 cv2（见 crew/clears.ccoeff_normed）；PIL 认中文路径。"""

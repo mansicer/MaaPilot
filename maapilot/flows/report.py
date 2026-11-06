@@ -162,6 +162,8 @@ def summary_lines(d: dict) -> list[str]:
     due = (d.get("news") or {}).get("due") or []
     if due:
         lines.append(f"官方日程有 {len(due)} 条消息还没跟用户说（新公告 / 维护结束 / 活动开始，maapilot-events；说完 news told）")
+    for u in (d.get("update") or {}).get("lines") or []:
+        lines.append(f"版本更新：{u}（maapilot-update）")
     return lines
 
 
