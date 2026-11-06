@@ -30,7 +30,7 @@
   `legacy_schedule`（还留着旧版用系统定时任务跑的定时日常）：第一句回复就告诉用户，说清它会和会话里的定时重复跑日常，问要不要删掉；
   用户同意后 `maapilot daily unschedule`，再按 skill `maapilot-setup`「定时日常」在会话里定好。
   `news.due` 不为空（新的活动 / 维护公告、维护结束、活动开始，还没跟用户说）：也在第一句回复里说，按 skill `maapilot-events`。
-  `update` 不为空（MaaPilot 或 MAA 有新版本还没跟用户说，或者好几天没查到版本信息）：也在第一句回复里说，按 skill `maapilot-update`。`update.check_needed`：版本信息旧了，先跑一次 `maapilot update check` 再看。
+  回复用户之前先跑一次 `maapilot update check`（启动检查不联网，这条联网查，最多十几秒，查不到不算错）：`due` 不为空（MaaPilot 或 MAA 有新版本还没跟用户说），或者 `lost`、`maa-core.lost`、`maa-resource.lost` 为真（好几天没查到版本信息、资源没更新成）：也在第一句回复里说，按 skill `maapilot-update`。
   没有就不用主动汇报，用户问起再说。
 - `memory.index` 是用户偏好记录的目录（见「用户偏好」）：做事前对一对有没有相关的。
 

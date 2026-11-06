@@ -51,15 +51,12 @@ def refresh_news() -> bool:
     return True
 
 
-def refresh_update() -> bool:
-    """版本信息旧了就重查（MaaPilot、MaaCore）。→ 查了没有。查不到不算错：写在缓存里，连着几天查不到时启动检查和结果里会说。"""
+def refresh_update() -> None:
+    """重查版本信息（MaaPilot、MaaCore）。查不到不算错：记下来，连着几天查不到时启动检查和结果里会说。"""
     from maapilot.knowledge import updates
     from maapilot.tools import doctor
     doctor.keep_skills_link()                          # 老用户的目录联接：别等到有新版本才保护起来
-    if not updates.stale():
-        return False
     updates.refresh()
-    return True
 
 
 def refresh_resource() -> dict | None:
@@ -96,8 +93,8 @@ def _preflight(r: _Run) -> bool:
         r.data["alerts"].append(f"官方公告没拉下来（{_err(e)}），按上次的缓存看维护时间")
         r.event("news_failed", error=_err(e))
     try:
-        if daily.refresh_update():
-            r.event("update_checked")
+        daily.refresh_update()
+        r.event("update_checked")
     except Exception as e:                               # noqa: BLE001 - 查不到更新不影响日常
         r.event("update_check_failed", error=_err(e))
     try:

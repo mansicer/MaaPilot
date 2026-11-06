@@ -10,6 +10,7 @@ MaaPilot 只走 git：本地 main 快进到发布标签，绝不覆盖用户改�
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 
@@ -53,11 +54,8 @@ def blocked() -> dict | None:
     return None
 
 
-def check(refresh: bool = False) -> dict:
-    d = updates.load()
-    if refresh or updates.stale(d):
-        d = updates.refresh()
-    st = updates.status(d)
+def check() -> dict:
+    st = updates.status(updates.refresh())
     if st["maapilot"]["update"]:
         st["maapilot"]["blocked"] = blocked()
     return st
@@ -157,7 +155,7 @@ def _go_back(prev: str, branch: str, old_main: str) -> bool:
 
 
 def apply_maapilot() -> dict:
-    st = check(refresh=True)
+    st = check()
     p = st["maapilot"]
     if not p["latest"]:
         raise CliError("network", "查不到 MaaPilot 的最新版本", exit=FAILED, data={"errors": st["errors"]},
@@ -198,7 +196,7 @@ def apply_maapilot() -> dict:
     updates.told(["maapilot"])
     return {"what": "maapilot", "updated": True, "from": __version__, "to": p["latest"], "commit": _out("rev-parse", "--short", "HEAD"),
             "env_synced": sync, "url": p["url"], "notes": p["notes"], "switched_from": None if branch == BRANCH else (branch or prev[:7]),
-            "reread": ["AGENTS.md", "你所在 harness 的说明文件"], "next": "maapilot update check --refresh（新版本可能要求新的 maa-cli）"}
+            "reread": ["AGENTS.md", "你所在 harness 的说明文件"], "next": "maapilot update check（新版本可能要求新的 maa-cli）"}
 
 
 def apply_maa_cli() -> dict:
@@ -248,7 +246,7 @@ def apply_maa_core() -> dict:
     from maapilot.crew import maacore
     with holding("update apply maa-core", job="update apply"):
         recovered = _recover_core()
-    st = check(refresh=True)
+    st = check()
     e = st["maa-core"]
     broken = maacore.cli_core() is None or not maacore.resources_ok()   # 坏了就重装，不管有没有新版本
     if not e["update"] and not broken:
@@ -286,7 +284,7 @@ def apply_resource() -> dict:
 
 
 def cmd_check(args) -> dict:
-    return check(args.refresh)
+    return check()
 
 
 def cmd_told(args) -> dict:
@@ -306,8 +304,8 @@ def cmd_apply(args) -> dict:
 def register(sub) -> None:
     g = sub.add_parser("update", help="MaaPilot、maa-cli、MaaCore 的更新：查新版本、更新")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
-    p = gs.add_parser("check", help="有没有新版本（缓存旧了联网重查）")
-    p.add_argument("--refresh", action="store_true", help="不管缓存，重查一次")
+    p = gs.add_parser("check", help="有没有新版本（联网查，最多十几秒）")
+    p.add_argument("--refresh", action="store_true", help=argparse.SUPPRESS)  # 现在每次都查；旧版说明里还写着它，留着别报错
     p.set_defaults(func=cmd_check, command="update check")
     p = gs.add_parser("told", help="这些新版本告诉过用户了（过一阵子还没更新会再列出来）")
     p.add_argument("what", nargs="+", choices=updates.WHATS)

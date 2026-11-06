@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -157,26 +159,44 @@ def test_check_command_uses_cache_unless_refresh(capsys, monkeypatch):
     monkeypatch.setattr(updates, "refresh", lambda: calls.append(1) or real())
     monkeypatch.setattr(update_cmd, "blocked", lambda: None)
     assert run(capsys, "update", "check")[0] == 0 and len(calls) == 1
-    assert run(capsys, "update", "check")[0] == 0 and len(calls) == 1
-    code, out = run(capsys, "update", "check", "--refresh")
-    assert code == 0 and len(calls) == 2 and out["data"]["maapilot"]["blocked"] is None
+    assert run(capsys, "update", "check")[0] == 0 and len(calls) == 2      # 查过了也重查
+    code, out = run(capsys, "update", "check", "--refresh")                # 旧版说明里的写法还能用
+    assert code == 0 and len(calls) == 3 and out["data"]["maapilot"]["blocked"] is None
 
 
-def test_daily_refreshes_update_when_stale(monkeypatch):
+def test_daily_always_rechecks(monkeypatch):
     from maapilot.flows import daily
     calls = []
     monkeypatch.setattr(updates, "refresh", lambda: calls.append(1))
-    monkeypatch.setattr(updates, "stale", lambda: False)
-    assert daily.refresh_update() is False and calls == []
-    monkeypatch.setattr(updates, "stale", lambda: True)
-    assert daily.refresh_update() is True and calls == [1]
+    daily.refresh_update()
+    daily.refresh_update()
+    assert calls == [1, 1]
+
+
+def test_hung_network_is_cut_off_and_the_other_answer_kept(monkeypatch):
+    stop = threading.Event()
+
+    def fake(url):
+        if url == updates.MAA_API:
+            stop.wait(30)
+            raise OSError("早该放弃了")
+        return {"tag_name": "v9.9.9"}
+
+    monkeypatch.setattr(updates, "http_json", fake)
+    monkeypatch.setattr(updates, "TIMEOUT_S", 0.05)
+    started = time.monotonic()
+    d = updates.refresh()
+    stop.set()
+    assert time.monotonic() - started < 5
+    assert d["maapilot"]["version"] == "9.9.9" and "maa_core" not in d
+    assert "TimeoutError" in d["errors"]["maa-core"] and "maapilot" not in d["errors"]
 
 
 def test_daily_protects_skills_link_without_new_version(monkeypatch):
     from maapilot.flows import daily
     calls = []
     monkeypatch.setattr(doctor, "keep_skills_link", lambda: calls.append(1))
-    monkeypatch.setattr(updates, "stale", lambda: False)
+    monkeypatch.setattr(updates, "refresh", lambda: {})
     daily.refresh_update()
     assert calls == [1]
 
@@ -553,7 +573,7 @@ def core(monkeypatch, tmp_path):
     monkeypatch.setattr(maacore, "_maa_dir", lambda which: {"library": lib, "resource": res}[which])
     monkeypatch.setattr(maacore, "cli_core", lambda: (f"v{installed()}", lib) if installed() else None)
     monkeypatch.setattr(updates, "local_versions", lambda: {"maa_core": installed()})
-    update_cmd.check(refresh=True)
+    update_cmd.check()
     return lib, res, maacore
 
 
@@ -661,9 +681,8 @@ def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
     assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message and e.value.data == {"version": "6.21.1"}
 
 
-def test_startup_asks_for_a_check_when_stale():
-    u = doctor.update_brief(startup=True)
-    assert u["check_needed"] and "update check" in u["lines"][-1]
+def test_startup_stays_offline(monkeypatch):
+    monkeypatch.setattr(updates, "refresh", lambda: pytest.fail("启动检查不该联网"))
     assert doctor.update_brief() is None
 
 
