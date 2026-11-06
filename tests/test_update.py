@@ -272,6 +272,56 @@ def test_edits_kept_when_rolling_back(repo, monkeypatch):
     assert text(repo) == "1\n" and (repo / "pyproject.toml").read_text(encoding="utf-8") == "用户改的\n"
 
 
+def test_failed_rollback_is_not_reported_as_success(repo, monkeypatch):
+    def broken(want):
+        raise OSError("跑不起来")
+    monkeypatch.setattr(update_cmd, "_verify", broken)
+    monkeypatch.setattr(update_cmd, "_go_back", lambda *a: False)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "rollback_failed" and "没退回" in e.value.message and e.value.data["want"]
+
+
+def test_go_back_says_when_git_refuses(repo, monkeypatch):
+    head = git(repo, "rev-parse", "HEAD")
+    assert update_cmd._go_back(head, "main", head)
+    assert not update_cmd._go_back("0" * 40, "main", head)
+
+
+def test_upstream_rename_of_an_edited_file_is_dirty(repo, tmp_path):
+    origin = tmp_path / "origin"
+    git(origin, "mv", "pyproject.toml", "renamed.toml")
+    git(origin, "commit", "-qm", "rename")
+    git(origin, "tag", "-f", f"v{NEWER}")
+    (repo / "pyproject.toml").write_text("用户改的\n", encoding="utf-8")
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "dirty" and "pyproject.toml" in e.value.message
+
+
+def test_untracked_file_in_the_way_is_named(repo, tmp_path):
+    origin = tmp_path / "origin"
+    (origin / "fresh.txt").write_text("new\n", encoding="utf-8")
+    git(origin, "add", ".")
+    git(origin, "commit", "-qm", "add")
+    git(origin, "tag", "-f", f"v{NEWER}")
+    (repo / "fresh.txt").write_text("用户的\n", encoding="utf-8")
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "dirty" and "fresh.txt" in e.value.message and text(repo) == "1\n"
+
+
+def test_git_refusal_says_nothing_moved(repo, monkeypatch):
+    real = update_cmd._git
+
+    def refuse(*a, **kw):
+        return Run(1, stderr="not now") if a[0] == "merge" else real(*a, **kw)
+    monkeypatch.setattr(update_cmd, "_git", refuse)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "merge_refused" and "not now" in e.value.message
+
+
 def test_other_branch_without_own_commits_switches_to_main(repo):
     git(repo, "switch", "-qc", "mine")
     r = update_cmd.apply_maapilot()
@@ -495,6 +545,7 @@ def core(monkeypatch, tmp_path):
     res.mkdir()
     (lib / "MaaCore.dll").write_text("6.21.1", encoding="utf-8")
     (res / "tasks.json").write_text("old", encoding="utf-8")
+    (res / "PaddleOCR").mkdir()
 
     def installed():
         f = lib / "MaaCore.dll"
@@ -508,7 +559,7 @@ def core(monkeypatch, tmp_path):
 
 def maa_update(monkeypatch, fn):
     def run(argv, **kw):
-        if argv[-1] != "update":
+        if argv[-1] != "update" and "--force" not in argv:
             return Run()
         fn()
         return Run(0 if fn.__name__ != "wiped" else 1, stderr="Failed to remove dir (os error 4395)")
@@ -603,7 +654,7 @@ def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
             raise shutil.Error([("a", "b", "读不了")])
         monkeypatch.setattr(maacore.shutil, "copytree", full)
     else:
-        monkeypatch.setattr(maacore, "_maa_dir", lambda which: lib if which == "library" else None)
+        monkeypatch.setattr(maacore, "_maa_dir", lambda which: lib / "missing" if which == "library" else res)
     maa_update(monkeypatch, lambda: pytest.fail("不该跑 maa update"))
     with pytest.raises(CliError) as e:
         update_cmd.apply_maa_core()
@@ -614,6 +665,102 @@ def test_startup_asks_for_a_check_when_stale():
     u = doctor.update_brief(startup=True)
     assert u["check_needed"] and "update check" in u["lines"][-1]
     assert doctor.update_brief() is None
+
+
+def test_killed_update_is_recovered_first(core, monkeypatch):
+    lib, res, maacore = core
+    maacore.backup_core()
+    (lib / "MaaCore.dll").unlink()                               # 更新到一半被杀了
+    updates.reread_local()
+
+    def nothing_new():
+        pytest.fail("先恢复，读得出就不用重装")
+    online(monkeypatch, core="6.21.1")
+    maa_update(monkeypatch, nothing_new)
+    r = update_cmd.apply_maa_core()
+    assert r["recovered"] and not r["updated"] and r["version"] == "6.21.1"
+    assert (lib / "MaaCore.dll").exists() and maacore.saved_backup() is None
+
+
+def test_retry_after_broken_keeps_the_good_backup(core, monkeypatch):
+    lib, res, maacore = core
+
+    def wiped():
+        shutil.rmtree(res)
+        res.mkdir()
+    maa_update(monkeypatch, wiped)
+    good = maacore.restore_core
+    monkeypatch.setattr(maacore, "restore_core", lambda saved: False)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_core_broken"
+    with pytest.raises(CliError):                                # 再跑一次恢复还是不成：备份留着
+        update_cmd.apply_maa_core()
+    assert maacore.saved_backup()
+    monkeypatch.setattr(maacore, "restore_core", good)
+    online(monkeypatch, core="6.21.1")
+    assert update_cmd.apply_maa_core()["recovered"] and (res / "tasks.json").read_text(encoding="utf-8") == "old"
+
+
+def test_undeletable_backup_is_not_restored_later(core):
+    lib, res, maacore = core
+    (res / "sub").mkdir()
+    (res / "sub" / "a.json").write_text("x", encoding="utf-8")
+    (res / "sub").chmod(0o555)
+    maacore.backup_core()
+    maacore.drop_backup()
+    (res / "sub").chmod(0o755)
+    assert maacore.saved_backup() is None and not maacore._backup_root().exists()
+
+
+def test_half_made_backup_is_not_trusted(core):
+    lib, res, maacore = core
+    (maacore._backup_root() / "library").mkdir(parents=True)
+    assert maacore.saved_backup() is None
+
+
+def test_broken_core_is_reinstalled_without_a_new_version(core, monkeypatch):
+    lib, res, maacore = core
+    (lib / "MaaCore.dll").unlink()
+    updates.reread_local()
+    online(monkeypatch, core="6.21.4")
+
+    def reinstalls():
+        (lib / "MaaCore.dll").write_text("6.21.4", encoding="utf-8")
+    maa_update(monkeypatch, reinstalls)
+    assert update_cmd.apply_maa_core()["updated"] and (lib / "MaaCore.dll").exists()
+
+
+def test_missing_resources_are_reinstalled(core, monkeypatch):
+    lib, res, maacore = core
+    (res / "PaddleOCR").rmdir()
+    online(monkeypatch, core="6.21.1")
+
+    def reinstalls():
+        (res / "PaddleOCR").mkdir()
+    maa_update(monkeypatch, reinstalls)
+    assert update_cmd.apply_maa_core()["updated"]
+
+
+@pytest.mark.skipif(update_cmd.WINDOWS, reason="建符号链接要开发者模式")
+def test_restore_keeps_symlinks(core, monkeypatch):
+    lib, res, maacore = core
+    (lib / "libort.1.19.dylib").write_text("old", encoding="utf-8")
+    (lib / "libort.dylib").symlink_to("libort.1.19.dylib")
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+        (lib / "libort.1.19.dylib").unlink()
+        (lib / "libort.dylib").unlink()
+        (lib / "libort.1.20.dylib").write_text("new", encoding="utf-8")
+        (lib / "libort.dylib").symlink_to("libort.1.20.dylib")
+    maa_update(monkeypatch, wiped)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed"
+    assert (lib / "libort.dylib").is_symlink() and (lib / "libort.dylib").read_text(encoding="utf-8") == "old"
+    assert not (lib / "libort.1.20.dylib").exists()
+    maacore.backup_core()                                        # 下一次备份不受影响
 
 
 def test_core_notes_shown(monkeypatch):

@@ -3,7 +3,7 @@
 
 找程序（config.tool / config.adb_path）：config.yaml 里写的是路径（带目录）→ 就用它；写的是程序名（`maa`、`adb`，模板的默认）→
 `.tools/` 里装了就用装好的，没装再按名字在 PATH 上找。所以用 Homebrew 等装好、config 写了绝对路径的照样能用。
-MaaCore 和资源仍由 maa-cli 自己下载到它的数据目录（`maa install`）。
+MaaCore 和资源由 maa-cli 自己下载，放在 `.tools/maa-data/`（`crew/maa.py` 的 `data_dir`）。
 """
 from __future__ import annotations
 

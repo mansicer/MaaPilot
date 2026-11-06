@@ -282,10 +282,10 @@ def check_maa_cli(ctx: Ctx) -> dict:
     if not cli:
         return _item("maa_cli", False, "maa-cli 跑不起来", "重新安装 maa-cli")
     if not core:
-        return _item("maa_cli", False, f"maa-cli {cli}，但没装 MaaCore", "maa install", version=cli)
+        return _item("maa_cli", False, f"maa-cli {cli}，但没装 MaaCore", "maapilot update apply maa-core", version=cli)
     res = maa_dir(ctx, "resource")
     if res is None or not (res / "PaddleOCR").exists():
-        return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maa update",
+        return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maapilot update apply maa-core",
                      version=cli, core=core)
     from maapilot.toolchain import MAA_CLI_TESTED
     lo, hi = MAA_CLI_TESTED
@@ -293,7 +293,11 @@ def check_maa_cli(ctx: Ctx) -> dict:
     if rng == "old":
         return _item("maa_cli", False, f"maa-cli {cli} 太旧（实测过的是 {lo}–{hi}）", hints.install_hint("maa_upgrade"),
                      version=cli, core=core, tested=list(MAA_CLI_TESTED))
-    extra = {"warnings": [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"]} if rng == "new" else {}
+    from maapilot.crew import maa as crew_maa
+    warnings = [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"] if rng == "new" else []
+    if crew_maa.data_problem():
+        warnings.append(f"MAA 的数据还在原来的目录，没搬进项目：{crew_maa.data_problem()}")
+    extra = {"warnings": warnings} if warnings else {}
     return _item("maa_cli", True, f"maa-cli {cli}、MaaCore {core}", version=cli, core=core, resource=str(res),
                  path=path, tested=list(MAA_CLI_TESTED), **extra)
 
@@ -509,7 +513,7 @@ def fix(probe: Probe | None = None) -> list[dict]:
                     src = d
                     break
         if src is None:
-            done.append({"name": "ocr_model", "done": [], "detail": "maa-cli 资源里没找到 PaddleOCR（先 maa install）"})
+            done.append({"name": "ocr_model", "done": [], "detail": "maa-cli 资源里没找到 PaddleOCR（先 maapilot update apply maa-core）"})
         else:
             paths.OCR_MODEL.mkdir(parents=True, exist_ok=True)
             pairs = {"det.onnx": src / "det" / "inference.onnx", "rec.onnx": src / "rec" / "inference.onnx",

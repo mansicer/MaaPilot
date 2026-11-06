@@ -911,10 +911,10 @@ v0.1 的 `report seen`（记"告诉过用户没有"）去掉了：日常就在�
 ## tools —— 项目里的 maa-cli 和 adb（不碰模拟器）
 
 maa-cli 的数据（MaaCore、资源、热更新资源）放在 `.tools/maa-data/`：程序运行 maa-cli 时设 `MAA_DATA_DIR`。不放系统默认目录，是因为 Windows 上 MSIX 打包的 agent 应用（Claude 桌面版等）会重定向 `%APPDATA%`，`maa update` 在那里删不掉目录（`os error 4395`）。
-第一次用时把原来的数据复制过来（`maa dir data`，原来的不删）；复制不成就接着用原来的目录，下次再试。`MAA_DATA_DIR` 已经设了就照它。缓存和日志还在系统默认目录，`maa dir` 问得到。
+第一次用时把原来的数据复制过来（`maa dir data`，原来的不删）；复制不成就接着用原来的目录，同一个进程里不再重试，下一条命令再试，`doctor` 的 `maa_cli` 在 `warnings` 里写明。上次复制到一半留下的临时目录会清掉。`MAA_DATA_DIR` 已经设了就照它。缓存和日志还在系统默认目录，`maa dir` 问得到。
 
 maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的 `.tools/`（不进 git）：`.tools/maa-cli/maa`、`.tools/platform-tools/adb`（Windows 带 `.exe`），
-各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源仍由 maa-cli 下载到它自己的数据目录。
+各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源由 maa-cli 下载，放在 `.tools/maa-data/`。
 
 找程序（`config.tool("maa")`、`config.adb_path()`，doctor、日常都用它）：`config.yaml` 的 `tools.maa` / `emulator.adb` 写的是路径 → 照它；
 写的是程序名（模板默认的 `maa`、`adb`）或没写 → `.tools/` 里装了就用装好的，没装再在 PATH 上找。所以自己用 Homebrew 等装好、写了绝对路径的照样能用。
@@ -984,7 +984,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 | 错误码 | 情形 |
 |---|---|
-| `dirty` | 改过的入库文件，新版本也改了（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
+| `dirty` | 改过的入库文件，新版本也改了；或者没入库的文件和新版本的文件同名（别的没入库文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
 | `not_on_main` | 当前分支或提交上，有发布标签里没有的提交 |
 | `diverged` | main 上有发布标签里没有的提交 |
 | `not_git` / `no_git` / `git_failed` | 不是 git 下载的 / 没有 git / git 读不了 |
@@ -992,10 +992,11 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 成功：`{what, updated, from, to, commit, env_synced, url, notes, switched_from, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
 Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；换不了按上面退回旧版本。
 
-`network`（退出码 1）：拉不到 GitHub。
+`network`（退出码 1）：拉不到 GitHub。`merge_refused`（退出码 1）：git 没让更新（`main` 在别的 worktree 里、正在合并……），什么都没动。`rollback_failed`（退出码 1）：新版本跑不起来，而且没退回去，`data` 给现在的提交和要回到的提交。
 
 `update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
-`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
+`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，或者重装也没成，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
+再跑一次 `update apply maa-core`：上次没走完留下的备份（被杀了、恢复失败）先恢复（`recovered`），不会被新备份盖掉。MaaCore 读不出或资源不全时，不管有没有新版本都重装（`maa install --force`）。
 
 ## memory —— 用户偏好（不碰模拟器）
 

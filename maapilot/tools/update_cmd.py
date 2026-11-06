@@ -116,6 +116,13 @@ def _fetch(tag: str) -> None:
                        hint="网络能上 GitHub 吗？要代理就设 HTTPS_PROXY 再试")
 
 
+def _names(cmd: str, *args: str) -> list[str]:
+    """git 列出的文件路径。--no-renames：改名算一删一加，两个名字都列出来，别漏了旧名字。"""
+    flags = ["--name-only", "--no-renames"] if cmd == "diff" else []
+    p = _git("-c", "core.quotePath=false", cmd, *flags, *args)
+    return (p.stdout or "").splitlines()
+
+
 def _check_mergeable(tag: str, branch: str, old_main: str) -> None:
     """走不通的才拦：有 tag 里没有的提交（用户自己的工作）、改过的文件新版本也改了。"""
     if _git("merge-base", "--is-ancestor", "HEAD", tag).returncode != 0:
@@ -127,20 +134,26 @@ def _check_mergeable(tag: str, branch: str, old_main: str) -> None:
     if old_main and _git("merge-base", "--is-ancestor", old_main, tag).returncode != 0:
         raise CliError("diverged", f"{BRANCH} 上有 {tag} 里没有的提交", exit=NEEDS_USER, data={"commit": old_main[:7]},
                        hint="告诉用户这些提交是什么（git log），由用户决定怎么合并")
-    edited = set(_git("-c", "core.quotePath=false", "diff", "--name-only", "HEAD").stdout.splitlines())
-    both = sorted(edited & set(_git("-c", "core.quotePath=false", "diff", "--name-only", "HEAD", tag).stdout.splitlines()))
+    edited = set(_names("diff", "HEAD"))
+    both = sorted(edited & set(_names("diff", "HEAD", tag)))
     if both:
         raise CliError("dirty", "这些文件改过，新版本也改了：" + "、".join(both[:5]), exit=NEEDS_USER,
                        hint="看改了什么、告诉用户；要留着就先另存，用户同意后 git restore 这些文件再更新")
+    added = set(_names("diff", "--diff-filter=A", "HEAD", tag))
+    blocking = sorted(added & set(_names("ls-files", "--others", "--exclude-standard")))
+    if blocking:
+        raise CliError("dirty", "这些没入库的文件和新版本的文件同名：" + "、".join(blocking[:5]), exit=NEEDS_USER,
+                       hint="告诉用户；用户同意后把这些文件挪走再更新")
 
 
-def _go_back(prev: str, branch: str, old_main: str) -> None:
-    """更新没成：回到更新前的提交和分支，改过的文件留着。"""
+def _go_back(prev: str, branch: str, old_main: str) -> bool:
+    """更新没成：回到更新前的提交和分支，改过的文件留着。→ 回去了没有。"""
     if branch == BRANCH:
-        _git("reset", "--keep", prev)
-        return
-    _git("checkout", "-q", branch or prev)
-    _git("branch", "-f", BRANCH, old_main) if old_main else _git("branch", "-D", BRANCH)
+        return _git("reset", "--keep", prev).returncode == 0
+    if _git("checkout", "-q", branch or prev).returncode != 0:
+        return False
+    fix = _git("branch", "-f", BRANCH, old_main) if old_main else _git("branch", "-D", BRANCH)
+    return fix.returncode == 0
 
 
 def apply_maapilot() -> dict:
@@ -159,23 +172,27 @@ def apply_maapilot() -> dict:
     _fetch(tag)
     old_main = prev if branch == BRANCH else _out("rev-parse", "--verify", "-q", f"refs/heads/{BRANCH}")
     _check_mergeable(tag, branch, old_main)
-    changed = _out("diff", "--name-only", prev, tag).splitlines()
+    changed = _names("diff", prev, tag)
     sync = any(f in ENV_FILES for f in changed)
     m = _git("merge", "--ff-only", "--quiet", tag) if branch == BRANCH else _git("checkout", "-q", "-B", BRANCH, tag)
     if m.returncode != 0:
-        raise CliError("update_failed", f"更新不了：{(m.stderr or '').strip()[-300:]}", exit=FAILED,
-                       hint="多半是有没入库的文件挡路：看错误里的文件，告诉用户")
+        raise CliError("merge_refused", f"git 没让更新：{(m.stderr or '').strip()[-300:]}", exit=FAILED,
+                       hint="什么都没动；看错误原文告诉用户（比如 main 在别的 worktree 里、正在合并）")
     try:
         if sync:
             _sync_env()
         _verify(p["latest"])
     except (OSError, subprocess.SubprocessError) as e:
-        _go_back(prev, branch, old_main)
+        back = _go_back(prev, branch, old_main)
         if sync:
             try:
                 _sync_env()
             except (OSError, subprocess.SubprocessError):
                 pass
+        if not back:
+            raise CliError("rollback_failed", f"{e}，而且没退回 {__version__}：新版本可能跑不起来", exit=FAILED,
+                           data={"commit": _out("rev-parse", "--short", "HEAD"), "want": prev[:7]},
+                           hint=f"马上告诉用户；git status 看卡在哪，用户同意后回到 {prev[:7]}") from None
         raise CliError("update_failed", f"{e}，已经退回 {__version__}", exit=FAILED, data={"commit": prev[:7]},
                        hint="程序照旧能用；告诉用户更新没成，把原因报给开发者") from None
     updates.told(["maapilot"])
@@ -195,44 +212,67 @@ def apply_maa_cli() -> dict:
     return {"what": "maa-cli", "updated": True, "from": e["current"], "to": r["version"], "core": r.get("core")}
 
 
-def _maa_update() -> str | None:
-    """跑 maa update，再确认 MaaCore 真能用。→ 没成的原因；成了 → None。"""
+def _maa_install(*args: str) -> str | None:
+    """跑 maa update 或 maa install，再确认 MaaCore 真能用。→ 没成的原因；成了 → None。"""
     from maapilot import config
     from maapilot.crew import maa as crew_maa, maacore
+    name = f"maa {args[0]}"
     try:
-        p = procs.run_text([config.tool("maa"), "update"], timeout=MAA_UPDATE_TIMEOUT_S, env=crew_maa.env())
+        p = procs.run_text([config.tool("maa"), *args], timeout=MAA_UPDATE_TIMEOUT_S, env=crew_maa.env())
     except (OSError, subprocess.SubprocessError) as e:
-        return f"maa update 跑不了：{e}"
+        return f"{name} 跑不了：{e}"
     if p.returncode != 0:
-        return f"maa update 没成功（退出码 {p.returncode}）：{(p.stderr or p.stdout or '').strip()[-300:]}"
-    return None if maacore.cli_core() else "maa update 跑完了，但读不出 MaaCore"
+        return f"{name} 没成功（退出码 {p.returncode}）：{(p.stderr or p.stdout or '').strip()[-300:]}"
+    return None if maacore.cli_core() else f"{name} 跑完了，但读不出 MaaCore"
+
+
+def _core_broken(why: str, saved: dict) -> CliError:
+    return CliError("maa_core_broken", f"{why}，MAA 可能用不了", exit=FAILED, data={"backup": saved},
+                    hint="日常可能也跑不了，马上告诉用户；再跑一次 update apply maa-core 会接着恢复，备份在 data.backup 里")
+
+
+def _recover_core() -> bool:
+    """上次更新没走完（被杀了、恢复失败）留下的备份先恢复，不能被新备份盖掉。→ 恢复了没有。"""
+    from maapilot.crew import maacore
+    saved = maacore.saved_backup()
+    if saved is None:
+        return False
+    if not maacore.restore_core(saved):
+        raise _core_broken("上次留下的备份没有恢复干净", saved)
+    maacore.drop_backup()
+    updates.reread_local()
+    return True
 
 
 def apply_maa_core() -> dict:
     from maapilot.crew import maacore
+    with holding("update apply maa-core", job="update apply"):
+        recovered = _recover_core()
     st = check(refresh=True)
     e = st["maa-core"]
-    if not e["update"]:
-        return {"what": "maa-core", "updated": False, "version": e["current"], "latest": e["latest"]}
+    broken = maacore.cli_core() is None or not maacore.resources_ok()   # 坏了就重装，不管有没有新版本
+    if not e["update"] and not broken:
+        return {"what": "maa-core", "updated": False, "version": e["current"], "latest": e["latest"], "recovered": recovered}
     with holding("update apply maa-core", job="update apply"):
-        try:
-            saved = maacore.backup_core()
-        except OSError as err:
-            raise CliError("maa_update_failed", f"备份不了原来的 MaaCore，没有更新：{err}", exit=FAILED, data={"version": e["current"]},
-                           hint="原来的版本没动；看看磁盘空间和文件权限") from None
-        err = _maa_update()
-        restored = err is None or maacore.restore_core(saved)
+        saved = {}
+        if not broken:
+            try:
+                saved = maacore.backup_core()
+            except OSError as err:
+                raise CliError("maa_update_failed", f"备份不了原来的 MaaCore，没有更新：{err}", exit=FAILED, data={"version": e["current"]},
+                               hint="原来的版本没动；看看磁盘空间和文件权限") from None
+        err = _maa_install("install", "--force") if broken else _maa_install("update")
+        restored = err is None or (not broken and maacore.restore_core(saved))
         if restored:
             maacore.drop_backup()
     updates.reread_local()                               # 成没成都重读：别留着已经不对的版本
     cur = (updates.load().get("local") or {}).get("maa_core")
     if not restored:
-        raise CliError("maa_core_broken", f"{err}；备份没有恢复干净，MAA 可能用不了", exit=FAILED, data={"backup": saved},
-                       hint="日常可能也跑不了，马上告诉用户；用 doctor 看情况，备份在 data.backup 里")
+        raise _core_broken(f"{err}；备份没有恢复干净" if saved else str(err), saved)
     if err:
         raise CliError("maa_update_failed", f"{err}；已恢复原来的版本 {cur}", exit=FAILED, data={"version": cur},
                        hint="MAA 照旧能用，把原因告诉用户（不一定是网络问题，看错误原文）")
-    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"]}
+    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"], "recovered": recovered}
 
 
 def apply_resource() -> dict:

@@ -16,6 +16,7 @@ class Run:
 def old(tmp_path, monkeypatch):
     """系统默认目录里已经装好的数据。"""
     monkeypatch.delenv("MAA_DATA_DIR")
+    monkeypatch.setattr(maa, "_copy_failed", {})
     d = tmp_path / "old"
     (d / "lib").mkdir(parents=True)
     (d / "lib" / "MaaCore.dll").write_text("x", encoding="utf-8")
@@ -45,12 +46,50 @@ def test_keeps_old_folder_when_maa_cannot_say(old, monkeypatch, run):
     assert "MAA_DATA_DIR" not in maa.env() and not maa.data_dir().exists()
 
 
-def test_failed_copy_leaves_nothing_half_done(old, monkeypatch):
+def test_failed_copy_is_not_repeated_and_doctor_says_so(old, monkeypatch):
+    calls = []
+
     def full(*a, **kw):
+        calls.append(1)
         raise OSError("磁盘满了")
     monkeypatch.setattr(maa.shutil, "copytree", full)
-    assert "MAA_DATA_DIR" not in maa.env() and not maa.data_dir().exists()
-    assert not list(maa.data_dir().parent.glob("maa-data*")) if maa.data_dir().parent.exists() else True
+    assert "MAA_DATA_DIR" not in maa.env() and "MAA_DATA_DIR" not in maa.env()
+    assert calls == [1] and "磁盘满了" in maa.data_problem()
+    assert not maa.data_dir().exists()
+
+
+def test_old_data_seen_later_still_moves_in(old):
+    shutil.move(old / "lib", old / "aside")
+    assert maa.env()["MAA_DATA_DIR"] and maa.data_dir().is_dir()     # 空目录
+    shutil.move(old / "aside", old / "lib")
+    maa.env()
+    assert (maa.data_dir() / "lib" / "MaaCore.dll").exists()
+
+
+def test_update_deleting_lib_does_not_trigger_another_move(old, monkeypatch):
+    new = maa.env()["MAA_DATA_DIR"]
+    shutil.rmtree(maa.data_dir() / "lib")                            # maa update 先删后装
+    monkeypatch.setattr(maa.procs, "run_text", lambda *a, **kw: pytest.fail("搬过了不再问"))
+    assert maa.env()["MAA_DATA_DIR"] == new and not (maa.data_dir() / "lib").exists()
+
+
+def test_loser_of_a_race_uses_the_new_folder(old, monkeypatch):
+    def lost(*a, **kw):
+        (maa.data_dir() / "lib").mkdir(parents=True)
+        raise OSError("别的进程先搬好了")
+    monkeypatch.setattr(maa, "_copy_data_in", lost)
+    assert maa.env()["MAA_DATA_DIR"] == str(maa.data_dir()) and maa.data_problem() is None
+
+
+def test_dead_temp_folders_are_swept(old, monkeypatch):
+    new = maa.data_dir()
+    new.parent.mkdir(parents=True, exist_ok=True)
+    dead, alive = new.with_name(f"{new.name}.tmp999999"), new.with_name(f"{new.name}.tmp1")
+    dead.mkdir()
+    alive.mkdir()
+    monkeypatch.setattr(maa.procs, "pid_alive", lambda pid: pid == 1)
+    maa.env()
+    assert not dead.exists() and alive.exists()
 
 
 def test_own_setting_wins(old, monkeypatch):

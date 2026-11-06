@@ -35,6 +35,10 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 
 `update_failed`：程序已经退回原来的版本，照常能用。告诉用户没更新成、原因，请用户把原因报给开发者（GitHub 上提 issue）。
 
+`merge_refused`：什么都没动，按错误原文告诉用户卡在哪。
+
+`rollback_failed`：新版本跑不起来，而且没退回去。马上告诉用户，`git status` 看卡在哪，用户同意后回到 `data.want` 那个提交。
+
 ### MAA
 
 - 更新 maa-cli：`maapilot update apply maa-cli`。`note` 说用的是别处装的：告诉用户，问要自己升级，还是改用项目里的（改 `tools.maa` 前先问）。
@@ -44,13 +48,15 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 更新完（成没成都一样）跑 `maapilot doctor --offline` 看 MAA 能不能用。
 
 - `maa_update_failed`：原来的版本已经恢复，日常照常跑。告诉用户原因，看错误原文，不一定是网络问题。
-- `maa_core_broken`：备份没有恢复干净，MAA 可能用不了，日常也可能跑不了。马上告诉用户，别等下次日常；备份在 `data.backup` 里。
+- `maa_core_broken`：备份没有恢复干净，或者重装也没成，MAA 可能用不了，日常也可能跑不了。马上告诉用户，别等下次日常；再跑一次 `update apply maa-core` 会接着恢复。
+
+这条命令被打断、MaaCore 读不出、资源不全时，也跑一次 `update apply maa-core`：有备份先恢复，没有就重装。
 
 ## 更新不了
 
 什么都没改，退出码 3，`hint` 写着出路。先把情况告诉用户，用户同意了再动，不替用户丢东西：
 
-- `dirty`：用户改过的文件，新版本也改了（新版本没碰的改动程序会留着，照常更新）。看 `git diff` 改了什么，用人话告诉用户。不要的 `git restore` 那些文件；要留着的先另存一份，更新完再看要不要放回去。
+- `dirty`：用户改过的文件，新版本也改了（新版本没碰的改动程序会留着，照常更新），或者没入库的文件和新版本的文件同名（挪走就行）。看 `git diff` 改了什么，用人话告诉用户。不要的 `git restore` 那些文件；要留着的先另存一份，更新完再看要不要放回去。
   只恢复列出来的文件，一个个写路径。不用 `git add -A` 或 `git add .`，也不要 `git add .claude/skills`：Windows 上它是目录联接，这样会清掉保护，之后 `git reset --hard`、`git stash` 就会清空 `.agents/skills`。
 - `not_on_main`：当前分支上有用户自己的提交（没有的话程序会自己切回主分支）。把 `git log` 看到的告诉用户，由用户决定保留还是切回去。
 - `diverged`：主分支上有用户自己的提交。把 `git log` 看到的告诉用户，由用户决定怎么合并。
