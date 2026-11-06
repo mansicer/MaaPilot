@@ -7,7 +7,7 @@
 - MAA 资源不问用户：日常开头 `maa hot-update`，maa-cli 跑任务前也会自己更新（cli.toml 的 resource.auto_update）。
   更新不成任务照跑，连着 CHECK_LOST_DAYS 天不成才告诉用户。
 
-缓存在 private/state/update.json：`{at, maa_core_at, tried_at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
+上次查到的记在 private/state/update.json（启动检查不联网，读这份；`update check`、`daily run` 开头每次都重查）：`{at, maa_core_at, tried_at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
 `tried_at` 是第一次查的时间。
 `at`、`maa_core_at` 是最近一次查成功 MaaPilot、MaaCore 新版本的时间（各记各的：一边查不到不能被另一边盖住）；`resource` 是 `{at（最近一次更新成功）, commit, commit_at, error}`。
 """
@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
+import time
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -29,8 +31,8 @@ MAAPILOT_REPO = "mansicer/MaaPilot"
 MAAPILOT_GIT = f"https://github.com/{MAAPILOT_REPO}.git"
 MAAPILOT_API = f"https://api.github.com/repos/{MAAPILOT_REPO}/releases/latest"
 MAA_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
-TIMEOUT_S = 8
-STALE = timedelta(hours=20)     # 缓存多旧算旧（日常开头、update check 重查）
+TIMEOUT_S = 8                   # 一次网络等待：第一个地址不通时还来得及试下一个
+TOTAL_S = 15                    # 联网部分最多等这么久：网不好时不能拖住开场和日常
 CHECK_LOST_DAYS = 3             # 这么多天没查成功就告诉用户（查更新的路断了）
 RESOURCE_FRESH = timedelta(hours=1)  # 接着跑（--only）时不重复更新资源
 RESOURCE_TIMEOUT_S = 300
@@ -59,21 +61,37 @@ def _age(at) -> timedelta | None:
         return None
 
 
-def stale(d: dict | None = None) -> bool:
-    age = _age((d if d is not None else load()).get("at"))
-    return age is None or age >= STALE
-
-
 def http_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "maapilot", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def _release(source: str, url: str) -> dict:
+def _fetch(urls: tuple[str, ...]) -> dict:
+    """同时拉几个地址：{地址: 内容或异常}，一共最多等 TOTAL_S 秒，没回来的是 TimeoutError。
+    urlopen 的 timeout 只管单次等待，慢慢回数据、域名解析卡住都管不住，所以总时间在这里卡。"""
+    got: dict = {}
+
+    def one(url: str) -> None:
+        try:
+            got[url] = http_json(url)
+        except Exception as e:                           # noqa: BLE001 - 限流、连不上：交给 _release 记
+            got[url] = e
+
+    threads = [threading.Thread(target=one, args=(u,), daemon=True) for u in urls]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + TOTAL_S
+    for t in threads:
+        t.join(max(0, deadline - time.monotonic()))
+    return {u: got.get(u, TimeoutError(f"{TOTAL_S} 秒内没查到")) for u in urls}
+
+
+def _release(source: str, d: dict | Exception) -> dict:
     """GitHub 的最新正式发布 → {version, tag, url, published, notes, via}。格式不对 → UpstreamFormat（已记进 sources.json）。"""
+    if isinstance(d, Exception):
+        raise d
     try:
-        d = http_json(url)
         tag = sources.need(d, "tag_name", str, source=source)
         if not toolchain.version_tuple(tag):
             raise UpstreamFormat(source, "tag_name", f"认不出版本号 {tag[:40]}")
@@ -99,15 +117,18 @@ def local_versions() -> dict:
 
 
 def refresh() -> dict:
-    """重新查一次（联网，要几秒到几十秒）。查不到的项留上次的结果、原因写进 errors，不抛错。"""
+    """重新查一次（联网部分最多 TOTAL_S 秒，之前的 `maa version` 另算）。查不到的项留上次的结果、原因写进 errors，不抛错。"""
     errors: dict = {}
-    new: dict = {"local": local_versions(), "tried_at": load().get("tried_at") or _now().isoformat(timespec="seconds")}
+    last = load()
+    local = {**(last.get("local") or {}), **{k: v for k, v in local_versions().items() if v}}  # maa 这次跑不了：别当成没装，新版本提醒会断
+    new: dict = {"local": local, "tried_at": last.get("tried_at") or _now().isoformat(timespec="seconds")}
+    got = _fetch((MAAPILOT_API, MAA_API))
     try:
-        new.update(maapilot=_release("maapilot_release", MAAPILOT_API), at=_now().isoformat(timespec="seconds"))
+        new.update(maapilot=_release("maapilot_release", got[MAAPILOT_API]), at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 限流、连不上、格式变了：留上次的，连着几天这样就告诉用户
         errors["maapilot"] = f"{type(e).__name__}: {e}"
     try:
-        new.update(maa_core=_release("maa_release", MAA_API), maa_core_at=_now().isoformat(timespec="seconds"))
+        new.update(maa_core=_release("maa_release", got[MAA_API]), maa_core_at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 查不到 MaaCore 不耽误 MaaPilot 的
         errors["maa-core"] = f"{type(e).__name__}: {e}"
     d = {**load(), **new, "errors": errors}              # 拉的这几秒里别的进程记下的 told 不丢
@@ -143,7 +164,7 @@ def _resource_version() -> dict:
 
 
 def hot_update() -> dict:
-    """更新 MAA 资源（`maa hot-update`，联网）。成败都记进缓存，不抛错；要改用户的数据目录，调用方保证 MAA 没在跑。→ 这条记录。"""
+    """更新 MAA 资源（`maa hot-update`，联网）。成败都记下来，不抛错；要改用户的数据目录，调用方保证 MAA 没在跑。→ 这条记录。"""
     from maapilot import config
     from maapilot.crew import maa as crew_maa
     rec = dict(load().get("resource") or {})
@@ -193,7 +214,7 @@ def _lost(at, d: dict) -> bool:
 
 
 def status(d: dict | None = None) -> dict:
-    """{maapilot, maa-cli, maa-core, at, age_days, lost, errors, due}。只读缓存，不联网。"""
+    """{maapilot, maa-cli, maa-core, at, age_days, lost, errors, due}。只读记录，不联网。"""
     d = load() if d is None else d
     v = version.info()
     p, c = d.get("maapilot") or {}, d.get("maa_core") or {}

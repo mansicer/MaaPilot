@@ -157,7 +157,7 @@
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说），列到 `news told` 为止。
-`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。版本信息过了 20 小时时 `check_needed` 为真（启动检查不联网，没跑日常就没人查），agent 跑一次 `update check`。
+`update`：上次查到的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。启动检查不联网，`lines` 里固定有一行让 agent 回复用户前跑一次 `update check`。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
@@ -952,13 +952,13 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 | `maa-cli` | `.tools/` 里装的 | 这个版本的 MaaPilot 实测过的上限（`MAA_CLI_TESTED`），不跟 maa-cli 的最新版 | 同 `tools install maa-cli` |
 | `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份，放在 `.tools/maa-data/`） |
 
-目标是用户不和更新断联：没有关掉检查的开关；缓存 20 小时算旧，`daily run` 开头（维护中也查）和 `update check` 重查；查不到不算错，留上次的结果，
+目标是用户不和更新断联：没有关掉检查的开关；`daily run` 开头（维护中也查）和 `update check` 每次都联网查，MaaPilot、MaaCore 同时查，联网部分最多等 15 秒（一次网络等待 8 秒），之前读本机版本的 `maa version` 另算（最多 30 秒，第一次还可能要搬数据）；`maa version` 跑不了时本机版本留上次的；查不到不算错，留上次的结果，
 原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（一次都没查成就从第一次查算起；还没查过不算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
 `due`：有新版本、还没告诉用户的；`update told` 之后不再列，**7 天**后还没更新再列一次，出了更新的版本马上再列。
 
 | 命令 | 行为 |
 |---|---|
-| `update check [--refresh]` | 版本信息。缓存旧了（或 `--refresh`）先重查 |
+| `update check` | 联网查一次，给版本信息 |
 | `update told maapilot [maa-cli maa-core]` | 这些新版本告诉过用户了（日常在跑或没收尾时也能记）。`{told, due}` |
 | `update apply maapilot\|maa-cli\|maa-core` | 更新一项，**用户同意后才跑**。日常在跑或没收尾退出码 4（`daily_open`）；模拟器被占用退出码 4 |
 | `update apply maa-resource` | 马上更新 MAA 资源，不用问用户。限制同上，失败退出码 1（`resource_update_failed`） |
