@@ -157,6 +157,15 @@ def test_daily_refreshes_update_when_stale(monkeypatch):
     assert daily.refresh_update() is True and calls == [1]
 
 
+def test_daily_protects_skills_link_without_new_version(monkeypatch):
+    from maapilot.flows import daily
+    calls = []
+    monkeypatch.setattr(doctor, "keep_skills_link", lambda: calls.append(1))
+    monkeypatch.setattr(updates, "stale", lambda: False)
+    daily.refresh_update()
+    assert calls == [1]
+
+
 # --- 更新 MaaPilot：真的 git 仓库 ---------------------------------------------------------------------------------------
 
 def git(cwd, *args):

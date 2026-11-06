@@ -54,6 +54,8 @@ def refresh_news() -> bool:
 def refresh_update() -> bool:
     """版本信息旧了就重查（MaaPilot、MaaCore）。→ 查了没有。查不到不算错：写在缓存里，连着几天查不到时启动检查和结果里会说。"""
     from maapilot.knowledge import updates
+    from maapilot.tools import doctor
+    doctor.keep_skills_link()                          # 老用户的目录联接：别等到有新版本才保护起来
     if not updates.stale():
         return False
     updates.refresh()

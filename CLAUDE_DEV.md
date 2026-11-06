@@ -58,6 +58,7 @@ MaaPilot/
 ## 规矩
 - 这台电脑的模拟器和账号是真实测试环境，也是用户在用的环境：代码、skill、模板不能写死它的设定（模拟器、地址、路径、账号进度）。
 - `private/` 是用户的真实数据和配置，开发时只读；不改用户设好的日常时间、配置和目标。
+- Windows 上 `.claude/skills` 是目录联接：提交时一个个写路径，不用 `git add -A` 或 `git add .`。它们会清掉 `skip-worktree`，之后 `git reset --hard`、`git stash` 会清空 `.agents/skills`。
 - 碰模拟器前：避开定时日常（`private/config.yaml` 的 `schedule`，用户的会话到点会自己跑）前后，`maapilot lock status` 确认没人占用；点击、花资源的操作先问用户。
 - 要试 agent 的对话效果，在临时副本里跑 `claude -p`，不要在这个目录里跑（会留下会话记录和自动记忆）。
 - 用户要求时才提交；提交信息用英文。提交信息、PR 和 issue 里都不加 Claude Code 的署名和会话链接（`Co-Authored-By`、`Claude-Session`、"Generated with Claude Code"；用户 10-24 说的，已有的不动）。

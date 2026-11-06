@@ -48,7 +48,7 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 什么都没改，退出码 3，`hint` 写着出路。先把情况告诉用户，用户同意了再动，不替用户丢东西：
 
 - `dirty`：项目文件被改过。看 `git diff` 改了什么，用人话告诉用户。不要的 `git restore` 那些文件；要留着的先另存一份，更新完再看要不要放回去。
-  只恢复列出来的文件；`.claude/skills` 不要 `git restore`，也不用 `git reset --hard`、`git stash`、`git checkout -f`：Windows 上它是目录联接，这些命令会清空 `.agents/skills`。
+  只恢复列出来的文件，一个个写路径。不用 `git add -A` 或 `git add .`，也不要 `git add .claude/skills`：Windows 上它是目录联接，这样会清掉保护，之后 `git reset --hard`、`git stash` 就会清空 `.agents/skills`。
 - `not_on_main`：不在主分支上。问用户后切回去。
 - `diverged`：主分支上有用户自己的提交。把 `git log` 看到的告诉用户，由用户决定怎么合并。
 - `not_git` / `no_git`：不是用 git 下载的，或者电脑上没有 git。请用户装好 git、重新 clone 一份，把 `private/` 和 `.tools/` 挪过去。
