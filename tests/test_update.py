@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -497,16 +498,50 @@ def test_says_so_when_core_cannot_be_restored(core, monkeypatch):
     assert maacore._backup_root().exists() and updates.status()["maa-core"]["current"] is None   # 不再报旧版本
 
 
-def test_core_not_touched_when_backup_fails(core, monkeypatch):
+def test_restore_removes_files_the_failed_update_left(core, monkeypatch):
     lib, res, maacore = core
 
-    def full(*a, **kw):
-        raise OSError("磁盘满了")
-    monkeypatch.setattr(maacore, "backup_core", full)
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+        (lib / "new.dll").write_text("new", encoding="utf-8")
+    maa_update(monkeypatch, wiped)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed" and [f.name for f in lib.iterdir()] == ["MaaCore.dll"]
+
+
+def test_backup_kept_when_leftovers_cannot_be_removed(core, monkeypatch):
+    lib, res, maacore = core
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+        (lib / "new.dll").write_text("new", encoding="utf-8")
+    maa_update(monkeypatch, wiped)
+    real = Path.unlink
+
+    def stuck(self, *a, **kw):
+        if self.name == "new.dll":
+            raise PermissionError("占用中")
+        return real(self, *a, **kw)
+    monkeypatch.setattr(Path, "unlink", stuck)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_core_broken" and maacore._backup_root().exists()
+
+
+@pytest.mark.parametrize("why", ["copy", "no_dir"])
+def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
+    lib, res, maacore = core
+    if why == "copy":
+        def full(*a, **kw):
+            raise shutil.Error([("a", "b", "读不了")])
+        monkeypatch.setattr(maacore.shutil, "copytree", full)
+    else:
+        monkeypatch.setattr(maacore, "_maa_dir", lambda which: lib if which == "library" else None)
     maa_update(monkeypatch, lambda: pytest.fail("不该跑 maa update"))
     with pytest.raises(CliError) as e:
         update_cmd.apply_maa_core()
-    assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message
+    assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message and e.value.data == {"version": "6.21.1"}
 
 
 def test_core_notes_shown(monkeypatch):

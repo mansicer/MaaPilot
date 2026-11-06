@@ -990,8 +990,8 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 `network`（退出码 1）：拉不到 GitHub。
 
-`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`，跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
-`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份也没恢复成，MAA 用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。
+`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
+`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
 
 ## memory —— 用户偏好（不碰模拟器）
 

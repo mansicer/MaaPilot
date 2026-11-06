@@ -44,7 +44,7 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 更新完（成没成都一样）跑 `maapilot doctor --offline` 看 MAA 能不能用。
 
 - `maa_update_failed`：原来的版本已经恢复，日常照常跑。告诉用户原因，看错误原文，不一定是网络问题。
-- `maa_core_broken`：备份也没恢复成，MAA 现在用不了，日常也跑不了。马上告诉用户，别等下次日常；备份在 `data.backup` 里。
+- `maa_core_broken`：备份没有恢复干净，MAA 可能用不了，日常也可能跑不了。马上告诉用户，别等下次日常；备份在 `data.backup` 里。
 
 ## 更新不了
 

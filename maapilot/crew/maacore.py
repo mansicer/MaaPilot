@@ -169,17 +169,21 @@ def backup_core() -> dict[str, str]:
     saved = {}
     for which in ("library", "resource"):
         src = _maa_dir(which)
-        if src and src.is_dir():
-            shutil.copytree(src, dst / which)
-            saved[str(src)] = str(dst / which)
+        if src is None or not src.is_dir():
+            raise OSError(f"找不到 MaaCore 的 {which} 目录")
+        shutil.copytree(src, dst / which)
+        saved[str(src)] = str(dst / which)
     return saved
 
 
 def restore_core(saved: dict[str, str]) -> bool:
-    """备份盖回去（不先删：这些目录可能就是删不掉才失败的）。→ 本体能用了没有。"""
+    """备份盖回去，再删掉备份里没有的文件（不先删整个目录：它们可能就是删不掉才失败的）。→ 恢复干净、本体能用了没有。"""
     try:
         for src, bak in saved.items():
             shutil.copytree(bak, src, dirs_exist_ok=True)
+            for f in Path(src).rglob("*"):
+                if f.is_file() and not (Path(bak) / f.relative_to(src)).exists():
+                    f.unlink()
     except OSError:
         return False
     return cli_core() is not None
