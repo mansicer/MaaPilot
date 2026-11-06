@@ -3,7 +3,7 @@
 maa-cli 的配置目录用本项目自己的 `private/maa-config/`（经环境变量 MAA_CONFIG_DIR 传给 maa-cli），不碰用户
 原有的 maa-cli 配置：`cli.toml`、`profiles/default.toml` 由 `install_config()`（`doctor --fix`）从
 templates/maa-config/ 复制过来；任务文件每次调用时生成（`tasks/maapilot-<名>.toml`）。
-MaaCore 与资源仍装在 maa-cli 的数据目录（`maa install`），与配置目录无关。
+MaaCore 与资源在项目的 `.tools/maa-data/`（`data_dir`，用 MAA_DATA_DIR 指给 maa-cli），与配置目录无关。
 
 这里不拿锁、不做参数白名单与源石的检查：那些在 maapilot.tools.maa_cmd。本模块只管"跑一次 maa、给回结构化结果"。
 """
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from maapilot import paths
+from maapilot import paths, toolchain
 from maapilot.oscompat import fs, procs
 
 TASK_PREFIX = "maapilot-"
@@ -60,8 +60,81 @@ def maa_bin() -> str:
     return shutil.which(t) or t
 
 
+def data_dir() -> Path:
+    """maa-cli 的数据（MaaCore、资源）放在项目里：Windows 上 MSIX 打包的 agent 应用会重定向 %APPDATA%，
+    maa update 在那里删不掉目录（os error 4395）。"""
+    return toolchain.tools_dir() / "maa-data"
+
+
+MOVED = ".moved-from"                                    # 搬过的记号：maa update 删 lib 重装时，别当成没搬过再盖一遍
+
+
+def _moved(new: Path) -> bool:
+    return (new / "lib").is_dir() or (new / MOVED).exists()
+
+
+def _old_data() -> Path:
+    """maa-cli 默认的数据目录。"""
+    p = procs.run_text([maa_bin(), "dir", "data"], timeout=20, env={**os.environ, "MAA_CONFIG_DIR": str(config_dir())})
+    text = (p.stdout or "").strip()
+    if p.returncode != 0 or not text:
+        raise OSError(f"maa dir data 退出码 {p.returncode}")
+    return Path(text)
+
+
+def _copy_data_in(old: Path, new: Path) -> None:
+    """把原来的数据复制过来（原来的不删），一次到位：复制一半时不算搬好。原来没装过就只建目录。"""
+    for t in new.parent.glob(f"{new.name}.tmp*"):        # 上次复制到一半被杀了留下的
+        pid = t.name.rpartition(".tmp")[2]
+        if pid.isdigit() and not procs.pid_alive(int(pid)):
+            shutil.rmtree(t, ignore_errors=True)
+    if not (old / "lib").is_dir():
+        new.mkdir(parents=True, exist_ok=True)
+        return
+    tmp = new.with_name(f"{new.name}.tmp{os.getpid()}")
+    try:
+        shutil.copytree(old, tmp, symlinks=True)
+        (tmp / MOVED).write_text(str(old), encoding="utf-8")
+        if new.exists() and not (new / "lib").is_dir():
+            shutil.rmtree(new)                           # 之前没看到旧数据时建的空目录
+        tmp.rename(new)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+_copy_failed: dict[str, str] = {}                        # 这个进程里搬失败的原因：别每次都重新复制一遍
+
+
+def data_problem() -> str | None:
+    """数据还留在原来的目录、搬不过来的原因；没有 → None。"""
+    return _copy_failed.get(str(data_dir()))
+
+
+def data_env() -> dict:
+    """跑 maa-cli 时要加的 MAA_DATA_DIR。没装过 MaaCore 的新目录也用；搬不过来 → 空，接着用原来的目录，下次再试。"""
+    if os.environ.get("MAA_DATA_DIR"):                   # 用户自己设的；空的 maa-cli 也当没设
+        return {}
+    new = data_dir()
+    if _moved(new):
+        return {"MAA_DATA_DIR": str(new)}
+    if str(new) in _copy_failed:
+        return {}
+    try:
+        old = _old_data()
+    except (OSError, subprocess.SubprocessError):        # maa 还没装：装好后再说，不算搬失败
+        return {}
+    try:
+        _copy_data_in(old, new)
+    except OSError as e:
+        if _moved(new):                                  # 别的进程刚搬好
+            return {"MAA_DATA_DIR": str(new)}
+        _copy_failed[str(new)] = f"{type(e).__name__}: {e}"
+        return {}
+    return {"MAA_DATA_DIR": str(new)}
+
+
 def env() -> dict:
-    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir())}
+    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir()), **data_env()}
 
 
 def config_missing() -> list[str]:

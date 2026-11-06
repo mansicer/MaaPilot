@@ -157,7 +157,7 @@
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说），列到 `news told` 为止。
-`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。
+`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。版本信息过了 20 小时时 `check_needed` 为真（启动检查不联网，没跑日常就没人查），agent 跑一次 `update check`。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
@@ -910,8 +910,11 @@ v0.1 的 `report seen`（记"告诉过用户没有"）去掉了：日常就在�
 
 ## tools —— 项目里的 maa-cli 和 adb（不碰模拟器）
 
+maa-cli 的数据（MaaCore、资源、热更新资源）放在 `.tools/maa-data/`：程序运行 maa-cli 时设 `MAA_DATA_DIR`。不放系统默认目录，是因为 Windows 上 MSIX 打包的 agent 应用（Claude 桌面版等）会重定向 `%APPDATA%`，`maa update` 在那里删不掉目录（`os error 4395`）。
+第一次用时把原来的数据复制过来（`maa dir data`，原来的不删）；复制不成就接着用原来的目录，同一个进程里不再重试，下一条命令再试，`doctor` 的 `maa_cli` 在 `warnings` 里写明。上次复制到一半留下的临时目录会清掉。`MAA_DATA_DIR` 已经设了就照它。缓存和日志还在系统默认目录，`maa dir` 问得到。
+
 maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的 `.tools/`（不进 git）：`.tools/maa-cli/maa`、`.tools/platform-tools/adb`（Windows 带 `.exe`），
-各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源仍由 maa-cli 下载到它自己的数据目录。
+各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源由 maa-cli 下载，放在 `.tools/maa-data/`。
 
 找程序（`config.tool("maa")`、`config.adb_path()`，doctor、日常都用它）：`config.yaml` 的 `tools.maa` / `emulator.adb` 写的是路径 → 照它；
 写的是程序名（模板默认的 `maa`、`adb`）或没写 → `.tools/` 里装了就用装好的，没装再在 PATH 上找。所以自己用 Homebrew 等装好、写了绝对路径的照样能用。
@@ -947,10 +950,10 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 |---|---|---|---|
 | `maapilot` | `maapilot.__version__` | GitHub 上最新的正式 Release（草稿、预发布不算） | 本地 `main` 快进到发布标签 |
 | `maa-cli` | `.tools/` 里装的 | 这个版本的 MaaPilot 实测过的上限（`MAA_CLI_TESTED`），不跟 maa-cli 的最新版 | 同 `tools install maa-cli` |
-| `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份） |
+| `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份，放在 `.tools/maa-data/`） |
 
 目标是用户不和更新断联：没有关掉检查的开关；缓存 20 小时算旧，`daily run` 开头（维护中也查）和 `update check` 重查；查不到不算错，留上次的结果，
-原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（从没查过也算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
+原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（一次都没查成就从第一次查算起；还没查过不算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
 `due`：有新版本、还没告诉用户的；`update told` 之后不再列，**7 天**后还没更新再列一次，出了更新的版本马上再列。
 
 | 命令 | 行为 |
@@ -964,7 +967,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 {"maapilot": {"current": "0.2.2", "commit": "553f177", "latest": "0.3.0", "update": true, "url": "https://github.com/…",
               "published": "…", "notes": "<更新说明，外来的文字>", "blocked": null},
  "maa-cli": {"current": "0.7.5", "latest": "0.7.7", "update": true},
- "maa-core": {"current": "6.21.1", "latest": "6.21.4", "update": true, "url": "…", "at": "…", "age_days": 0, "lost": false},
+ "maa-core": {"current": "6.21.1", "latest": "6.21.4", "update": true, "url": "…", "notes": "<更新说明，外来的文字>", "at": "…", "age_days": 0, "lost": false},
  "at": "…", "age_days": 0, "lost": false, "errors": {}, "due": ["maapilot", "maa-cli", "maa-core"]}
 ```
 
@@ -976,19 +979,24 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 `update apply maapilot`：先重查；从 `https://github.com/mansicer/MaaPilot.git` 拉发布标签，`git merge --ff-only` 快进（不看 origin 指到哪）；
 `pyproject.toml` / `uv.lock` 变了就同步环境（有 uv 用 uv，PATH 里没有时也看 `~/.local/bin`；否则 pip，环境里没有 pip 先 `ensurepip`）；Windows 上先把运行中的 `maapilot.exe` 挪开放副本，才换得掉；再起一个新进程确认版本对、命令能载入。这两步失败就退回原来的提交，退出码 1（`update_failed`），用户手里还是能用的旧版本。
-没新版本 `{updated: false}`。不能快进时什么都不改，退出码 3，`hint` 写明出路（`update check` 的 `maapilot.blocked` 也提前写明）：
+没新版本 `{updated: false}`。**什么状态都尽量走通**：改过的文件新版本没碰就留着照常更新；不在 main 上（包括分离 HEAD）但没有 `tag` 里没有的提交，就切回 main（`switched_from`，退回时也切回去）。
+只有会丢用户东西的才停下，什么都不改，退出码 3，`hint` 写明出路（要拉到新版本才知道，所以 `update check` 的 `maapilot.blocked` 只提前写明最后一行那几种）：
 
 | 错误码 | 情形 |
 |---|---|
-| `dirty` | 入库的文件被改过（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
-| `not_on_main` | 不在 main 分支 |
+| `dirty` | 改过的入库文件，新版本也改了；或者没入库的文件和新版本的文件同名（别的没入库文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
+| `not_on_main` | 当前分支或提交上，有发布标签里没有的提交 |
 | `diverged` | main 上有发布标签里没有的提交 |
 | `not_git` / `no_git` / `git_failed` | 不是 git 下载的 / 没有 git / git 读不了 |
 
-成功：`{what, updated, from, to, commit, env_synced, url, notes, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
+成功：`{what, updated, from, to, commit, env_synced, url, notes, switched_from, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
 Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；换不了按上面退回旧版本。
 
-`network`（退出码 1）：拉不到 GitHub。`maa_update_failed`（退出码 1）：`maa update` 没成功，原来的版本还在。
+`network`（退出码 1）：拉不到 GitHub。`merge_refused`（退出码 1）：git 没让更新（`main` 在别的 worktree 里、正在合并……），什么都没动。`rollback_failed`（退出码 1）：新版本跑不起来，而且没退回去，`data` 给现在的提交和要回到的提交。
+
+`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
+`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，或者重装也没成，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
+再跑一次 `update apply maa-core`：上次没走完留下的备份（被杀了、恢复失败）先恢复（`recovered`），不会被新备份盖掉。MaaCore 读不出或资源不全时，不管有没有新版本都重装（`maa install --force`）。
 
 ## memory —— 用户偏好（不碰模拟器）
 

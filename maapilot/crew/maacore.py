@@ -12,6 +12,7 @@ maa-cli v0.7.5 的任务类型是写死的枚举，MaaCore v6.19.0 新加的 Ope
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -27,6 +28,7 @@ from pathlib import Path
 from maapilot import paths
 from maapilot.oscompat import WINDOWS, procs
 
+BACKUP_LIST = "saved.json"
 RELEASES_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
 LIB_NAMES = ("libMaaCore.dylib", "libMaaCore.so", "MaaCore.dll")
 MIN_CORE = "v6.19.0"            # 有 OperProgress 的最低版本
@@ -156,6 +158,82 @@ def _maa_dir(which: str) -> Path | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+
+
+def _backup_root() -> Path:
+    return paths.PRIVATE / "cache" / "maa-core-backup"
+
+
+def saved_backup() -> dict[str, str] | None:
+    """完整的备份 {原目录: 备份目录}：上次更新没走完留下的；没有 → None。"""
+    try:
+        return json.loads((_backup_root() / BACKUP_LIST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def backup_core() -> dict[str, str]:
+    """把 maa-cli 的本体和自带资源复制一份：maa update 先删后装，半路失败时本体就没了。→ {原目录: 备份目录}。
+    清单最后写：有清单才算备份完整。"""
+    dst = _backup_root()
+    _remove(dst)
+    saved = {}
+    for which in ("library", "resource"):
+        src = _maa_dir(which)
+        if src is None or not src.is_dir():
+            raise OSError(f"找不到 MaaCore 的 {which} 目录")
+        shutil.copytree(src, dst / which, symlinks=True)
+        saved[str(src)] = str(dst / which)
+    (dst / BACKUP_LIST).write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+    return saved
+
+
+def _put_back(bak: Path, src: Path) -> None:
+    """让 src 和 bak 一样：盖回文件和链接，删掉 bak 里没有的（不删目录本身：它们可能就是删不掉才失败的）。"""
+    for f in sorted(bak.rglob("*")):
+        dst = src / f.relative_to(bak)
+        if f.is_symlink():
+            if dst.is_symlink() or dst.exists():
+                dst.unlink()
+            dst.symlink_to(os.readlink(f))
+        elif f.is_dir():
+            dst.mkdir(parents=True, exist_ok=True)
+        else:
+            if dst.is_symlink():
+                dst.unlink()                             # 不能写穿链接
+            shutil.copy2(f, dst)
+    for f in src.rglob("*"):
+        if (f.is_symlink() or f.is_file()) and not os.path.lexists(bak / f.relative_to(src)):
+            f.unlink()
+
+
+def restore_core(saved: dict[str, str]) -> bool:
+    """备份盖回去。→ 恢复干净、本体能用了没有。"""
+    try:
+        for src, bak in saved.items():
+            Path(src).mkdir(parents=True, exist_ok=True)
+            _put_back(Path(bak), Path(src))
+    except OSError:
+        return False
+    return cli_core() is not None
+
+
+def resources_ok() -> bool:
+    """maa-cli 自带的资源在不在（doctor 同样看 PaddleOCR）。"""
+    res = _maa_dir("resource")
+    return bool(res and (res / "PaddleOCR").exists())
+
+
+def drop_backup() -> None:
+    """先删清单：删不干净也不能被当成还要恢复的备份。"""
+    (_backup_root() / BACKUP_LIST).unlink(missing_ok=True)
+    _remove(_backup_root())
+
+
+def _remove(path: Path) -> None:
+    for d, _, _ in os.walk(path):                        # 备份带着原目录的权限，只读的目录删不掉
+        os.chmod(d, 0o700)
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def hot_update_dir() -> Path | None:

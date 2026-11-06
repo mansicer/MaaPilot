@@ -235,7 +235,8 @@ def installed_games(ctx: Ctx) -> list[dict] | None:
 
 def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
     from maapilot import config
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"])
+    from maapilot.crew import maa as crew_maa
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"], env=crew_maa.env())
     cli = core = None
     for line in r.text.splitlines():
         if m := re.search(r"maa-?cli\s+v?(\S+)", line, re.I):
@@ -251,7 +252,8 @@ def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
 
 def maa_dir(ctx: Ctx, which: str) -> Path | None:
     from maapilot import config
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which])
+    from maapilot.crew import maa as crew_maa
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which], env=crew_maa.env())
     lines = [l.strip() for l in r.text.splitlines() if l.strip()]
     return Path(lines[-1]) if r.returncode == 0 and lines else None
 
@@ -280,10 +282,10 @@ def check_maa_cli(ctx: Ctx) -> dict:
     if not cli:
         return _item("maa_cli", False, "maa-cli 跑不起来", "重新安装 maa-cli")
     if not core:
-        return _item("maa_cli", False, f"maa-cli {cli}，但没装 MaaCore", "maa install", version=cli)
+        return _item("maa_cli", False, f"maa-cli {cli}，但没装 MaaCore", "maapilot update apply maa-core", version=cli)
     res = maa_dir(ctx, "resource")
     if res is None or not (res / "PaddleOCR").exists():
-        return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maa update",
+        return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maapilot update apply maa-core",
                      version=cli, core=core)
     from maapilot.toolchain import MAA_CLI_TESTED
     lo, hi = MAA_CLI_TESTED
@@ -291,7 +293,11 @@ def check_maa_cli(ctx: Ctx) -> dict:
     if rng == "old":
         return _item("maa_cli", False, f"maa-cli {cli} 太旧（实测过的是 {lo}–{hi}）", hints.install_hint("maa_upgrade"),
                      version=cli, core=core, tested=list(MAA_CLI_TESTED))
-    extra = {"warnings": [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"]} if rng == "new" else {}
+    from maapilot.crew import maa as crew_maa
+    warnings = [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"] if rng == "new" else []
+    if crew_maa.data_problem():
+        warnings.append(f"MAA 的数据还在原来的目录，没搬进项目：{crew_maa.data_problem()}")
+    extra = {"warnings": warnings} if warnings else {}
     return _item("maa_cli", True, f"maa-cli {cli}、MaaCore {core}", version=cli, core=core, resource=str(res),
                  path=path, tested=list(MAA_CLI_TESTED), **extra)
 
@@ -507,7 +513,7 @@ def fix(probe: Probe | None = None) -> list[dict]:
                     src = d
                     break
         if src is None:
-            done.append({"name": "ocr_model", "done": [], "detail": "maa-cli 资源里没找到 PaddleOCR（先 maa install）"})
+            done.append({"name": "ocr_model", "done": [], "detail": "maa-cli 资源里没找到 PaddleOCR（先 maapilot update apply maa-core）"})
         else:
             paths.OCR_MODEL.mkdir(parents=True, exist_ok=True)
             pairs = {"det.onnx": src / "det" / "inference.onnx", "rec.onnx": src / "rec" / "inference.onnx",
@@ -580,7 +586,7 @@ def brief(probe: Probe | None = None) -> dict:
     data["memory"] = memory_brief() if setup_done else None
     data["goals"] = goals_brief()
     data["news"] = news_brief()
-    data["update"] = update_brief() if setup_done else None
+    data["update"] = update_brief(startup=True) if setup_done else None
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
     data["lines"] = brief_lines(data)
@@ -661,16 +667,19 @@ def news_brief() -> dict | None:
         return None
 
 
-def update_brief() -> dict | None:
-    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost、core_lost）、MAA 资源更新不了（resource_lost）。都没有 → None。"""
+def update_brief(startup: bool = False) -> dict | None:
+    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost、core_lost）、MAA 资源更新不了（resource_lost）。都没有 → None。
+    startup：启动检查不联网，版本信息旧了（没跑日常就一直没人查）写 check_needed，agent 跑一次 update check。"""
     try:
         from maapilot.knowledge import updates
         st = updates.status()
         core_lost, resource_lost = st["maa-core"]["lost"], st["maa-resource"]["lost"]
-        if not st["due"] and not st["lost"] and not core_lost and not resource_lost:
+        check = startup and updates.stale()
+        if not st["due"] and not st["lost"] and not core_lost and not resource_lost and not check:
             return None
+        lines = updates.lines(st) + (["版本信息旧了：跑一次 maapilot update check"] if check else [])
         return {"due": st["due"], "lost": st["lost"], "core_lost": core_lost, "resource_lost": resource_lost,
-                "lines": updates.lines(st)}
+                "check_needed": check, "lines": lines}
     except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
         return None
 
