@@ -123,6 +123,9 @@ def _run(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | None,
         _seen_overlays(r)
         r.data["news"] = _news()
         r.data["update"] = _update()
+        r.data.pop("memory_tidy", None)                  # --only 接着跑时读回了上一段的：这期间可能已经整理过
+        if _memory_tidy():
+            r.data["memory_tidy"] = True
         r.data["lines"] = reportmod.summary_lines(r.data)   # 给 agent 转述：维护时段、到期和变动的目标……
         if r.data.get("open"):
             r.data["next"] = next_hint(r.data)
@@ -172,6 +175,15 @@ def _update() -> dict | None:
         return doctor.update_brief()
     except Exception:                                    # noqa: BLE001 - 读不了不影响日常
         return None
+
+
+def _memory_tidy() -> bool:
+    """用户偏好离上次整理满一个月了没有。"""
+    try:
+        from maapilot.tools import memory
+        return memory.tidy_due()
+    except Exception:                                    # noqa: BLE001 - 读不了不影响日常
+        return False
 
 
 def next_hint(d: dict) -> str:

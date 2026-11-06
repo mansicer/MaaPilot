@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = (sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")) + sorted((ROOT / "docs" / "harnesses").glob("*.md"))
         + [ROOT / "AGENTS.md", ROOT / "CLAUDE.md", ROOT / "README.md"])
 GROUPS = ("doctor", "screen", "input", "maa", "state", "data", "calc", "goals", "op", "craft", "report",
-          "daily", "guard", "lock", "reset", "skland", "news", "game", "copilot", "update")
+          "daily", "guard", "lock", "reset", "skland", "news", "game", "copilot", "update", "memory")
 # 权限设置里是询问的命令：只有记下花合成玉 / 源石的同意（CLAUDE_DEV.md「设计哲学」第 3 条、docs/cli.md 命令总览）
 ASK = ("guard allow",)
 # 只能由用户自己在终端里跑的命令（agent 一律被拒；skill 里只会让用户去跑）

@@ -362,6 +362,26 @@ def test_daily_done_closes_and_writes_goals_section(capsys, env):
     assert code == 2 and out["error"]["code"] == "not_in_daily"
 
 
+def test_daily_result_mentions_memory_tidy_only_when_due(capsys, env, monkeypatch):
+    from maapilot.tools import memory
+    code, out = run(capsys, "daily", "run")
+    assert "memory_tidy" not in out["data"]
+    run(capsys, "daily", "done", "--summary", "x")
+    monkeypatch.setattr(memory, "tidy_due", lambda: True)
+    code, out = run(capsys, "daily", "run")
+    assert out["data"]["memory_tidy"] is True and any("maapilot-memory" in ln for ln in out["data"]["lines"])
+
+
+def test_memory_tidy_cleared_when_resuming_after_tidying(capsys, env, monkeypatch):
+    from maapilot.tools import memory
+    monkeypatch.setattr(memory, "tidy_due", lambda: True)
+    code, out = run(capsys, "daily", "run")
+    assert out["data"]["memory_tidy"] is True
+    monkeypatch.setattr(memory, "tidy_due", lambda: False)
+    code, out = run(capsys, "daily", "run", "--only", "award")
+    assert "memory_tidy" not in out["data"] and not any("maapilot-memory" in ln for ln in out["data"]["lines"])
+
+
 def test_daily_done_without_goals(capsys, env):
     """没有目标（只有固定日常）也照样用 daily done 收尾。"""
     code, out = run(capsys, "daily", "run")

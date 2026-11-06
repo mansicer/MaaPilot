@@ -1,7 +1,11 @@
 """用户偏好记录 private/memory/：启动检查带上目录行；第一次从 Claude Code 自动记忆搬过来（复制，不删原来的）。"""
 from __future__ import annotations
 
-from maapilot import paths
+import json
+import os
+from datetime import datetime, timedelta
+
+from maapilot import cli, paths
 from maapilot.flows import reset
 from maapilot.tools import doctor, memory
 
@@ -23,6 +27,47 @@ def test_first_brief_imports_claude_memory_once():
     (memory.memory_dir() / "MEMORY.md").write_text("- [理智液](sanity.md) — 都不用\n", encoding="utf-8")
     m = doctor.memory_brief()                                                  # 搬过一次就不再搬
     assert m["imported"] is None and m["index"] == ["- [理智液](sanity.md) — 都不用"]
+
+
+def _prefs(days_old: float) -> None:
+    d = memory.memory_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / memory.INDEX).write_text("- [a](a.md)\n", encoding="utf-8")
+    (d / "a.md").write_text("x", encoding="utf-8")
+    t = (datetime.now() - timedelta(days=days_old)).timestamp()
+    os.utime(d / "a.md", (t, t))
+
+
+def test_tidy_not_due_without_preferences():
+    assert memory.tidy_due() is False
+
+
+def test_first_tidy_waits_a_month_from_oldest_preference():
+    _prefs(29)
+    assert memory.tidy_due() is False
+    _prefs(31)
+    assert memory.tidy_due() is True
+
+
+def test_tidied_quiets_for_a_month(capsys):
+    _prefs(90)
+    assert cli.main(["memory", "tidied"]) == 0
+    assert json.loads(capsys.readouterr().out)["data"]["tidied_at"]
+    now = datetime.now().astimezone()
+    assert memory.tidy_due(now + timedelta(days=29)) is False
+    assert memory.tidy_due(now + timedelta(days=30)) is True
+
+
+def test_bad_tidy_record_falls_back_to_files():
+    _prefs(31)
+    (memory.memory_dir() / memory.TIDIED).write_text("?", encoding="utf-8")
+    assert memory.tidy_due() is True
+
+
+def test_report_line_only_when_due():
+    from maapilot.flows import report
+    assert any("maapilot-memory" in ln for ln in report.summary_lines({"memory_tidy": True}))
+    assert not any("maapilot-memory" in ln for ln in report.summary_lines({}))
 
 
 def test_no_claude_memory_no_dir():

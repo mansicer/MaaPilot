@@ -57,6 +57,7 @@
 | `lock status` / `lock release` | 否 | 放行 | A |
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
 | `update check / told` | 否（`check` 联网） | 放行 | A |
+| `memory tidied` | 否 | 放行 | A |
 | `update apply maapilot\|maa-cli\|maa-core\|maa-resource` | 否（拿锁，换程序） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
 | `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
@@ -828,6 +829,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
 接着跑的几段合在一起；有的话「要注意」（和 `lines` 的"告警："）里写一条"回首页时看到了活动签到页，被程序关掉了，奖励没领：领奖励交给 agent"，`next` 提示收尾前 `input home` 回去看。
 不算问题（`has_problem` 不看它），agent 按 `maapilot-daily`「活动签到」处理。MAA 自己（`maa-cli` 的任务里）关掉的看不到。
 `update`：版本信息（开头查过的缓存，同 `doctor --brief` 的 `update`），有内容时 `lines` 里有对应的行，agent 按 `maapilot-update` 说；查不到不算日常的错。
+`memory_tidy`：`true` 表示用户偏好离上次整理满 30 天（没整理过按最早的偏好文件算），`lines` 里有一行，agent 按 `maapilot-memory` 整理；没到期没有这个字段。
 `news`：官方日程（开头拉过的缓存，同 `doctor --brief` 的 `news`）；`due` 不为空时 `lines` 里有一行，agent 按 `maapilot-events` 跟用户说、`news told`。
 `lines`：每次都给的几句中文（怎么结束的、维护时段、目标变动、到期要看的、没做成的项、官方日程……），agent 照着转述。
 
@@ -988,6 +990,12 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 `network`（退出码 1）：拉不到 GitHub。`maa_update_failed`（退出码 1）：`maa update` 没成功，原来的版本还在。
 
+## memory —— 用户偏好（不碰模拟器）
+
+`maapilot memory tidied`：记下这次整理偏好的时间（`private/memory/.last-tidy`），`data`：`{tidied_at}`。偏好文件由 agent 直接读写，这条只管提醒的时间，见 skill `maapilot-memory`。
+
+---
+
 ## host —— agent 宿主（不碰模拟器）
 
 用户可以在 Claude Code 或 Codex 里用 MaaPilot（各 harness 怎么建定时见 docs/harnesses/）。程序的找法在 `maapilot/hosts.py`：
@@ -1011,25 +1019,6 @@ Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（�
 | `codex_untrusted` | 2 | 用户在 Codex 里明确没信任这个文件夹 |
 
 ## dev —— 开发用（不给用户的 agent）
-
-`maapilot dev review [--since 3d|12h|<日期>|<时间>] [--session <编号>]… [--exclude <编号>]… [--include-dev] [--transcripts <目录>] [--limit N]`：
-代替手动翻会话记录，看用户的 agent（和 v0.1 定时日常叫起的无头 agent）哪里出错、哪里用错了命令。只读，不碰模拟器，自己不写命令记录。默认看最近 3 天。
-
-- 命令记录 `private/log/<日期>.jsonl`（`log`）：`failures` 按命令 + 错误码归类（次数、最后一次、原话、哪几次日常）；`misuse` 参数写错（退出码 2，带 `argv`）；
-  `repeated` 同一条命令（参数也一样）失败两次以上；`shortcut_then_manual` 快捷操作（`op upgrade / mastery`、`craft`、`state op`）失败后 30 分钟内接着手动 `input …` 的。
-- 会话记录（`transcripts`）：目录按仓库路径推出（Claude Code 的规则：路径里非字母数字的字符换成 `-`，放在 `~/.claude/projects/` 下；在 git worktree 里跑时用主仓库的路径），`--transcripts` 可以改。
-  每个会话：`label`（v0.1 定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
-  `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
-  （管道、`&&`、`;`、`cat`、`grep`……；引号里的 `|` 不算）、`result` 最后的"结果：…"。
-  不看：`--exclude` 的、当前会话（环境变量 `CLAUDE_CODE_SESSION_ID`）、开发会话（改过 `maapilot/`、`tests/`、`docs/`、skill、`CLAUDE*.md`，跑过 pytest、git commit，
-  或 agent 名以 dev 开头；`--include-dev` 也看）。`--session` 点名的会话照看不误。
-- `data.lines` 是给人看的几行要点。
-
-```json
-{"since": "2026-10-10T16:00+08:00", "lines": ["命令记录 656 行，失败 14", "  失败 craft / shortcut_failed ×3：…", "会话 9 个（排除 7）", "  6aa16058 日常 20261011-1640 goals …：被拒 1、maapilot 失败 6、非标准 Bash 14/64；结果：完成"],
- "log": {"rows": 656, "failed": 14, "failures": [{"command", "error", "exit", "count", "last_at", "message", "runs"}], "misuse": […], "repeated": […], "shortcut_then_manual": […]},
- "transcripts": {"dir": "…", "sessions": [{"session", "label", "start", "end", "prompt", "result", "bash", "denied"?, "maapilot_failed"?, "tool_errors"?, "bash_nonstandard"?}], "excluded": [{"session", "why"}]}}
-```
 
 `maapilot dev rules [--check] [--root <目录>]`：按 `maapilot/policy.py` 生成两个宿主的权限规则文件和本文件里抄的设置（见「Claude Code 权限设置」）。
 `data`：`{"files": [{"path", "changed"}], "written"}`；`--check` 只核对、不写，有不一样的退出码 1 `rules_out_of_date`（`data.files` 照样带上）。
@@ -1058,7 +1047,7 @@ private/
   shots/             截图
   debug/             MaaFramework 调试输出、快捷操作失败时的截图
   guard/             snapshot.json  allowances.jsonl  stop.json  dirty.json
-  memory/            用户偏好（MEMORY.md 是目录；.imported-from-claude 是从 Claude Code 自动记忆搬过一次的记号）
+  memory/            用户偏好（MEMORY.md 是目录；.imported-from-claude 是从 Claude Code 自动记忆搬过一次的记号；.last-tidy 是上次整理的时间）
   maa-config/        本项目的 maa-cli 配置目录（MAA_CONFIG_DIR）：cli.toml  profiles/default.toml  tasks/maapilot-*.toml
   lock.json          模拟器锁
   daily-run.json     正在跑的日常（run_id、pid、当前步骤）；daily run 进程结束就删

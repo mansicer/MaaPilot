@@ -164,6 +164,8 @@ def summary_lines(d: dict) -> list[str]:
         lines.append(f"官方日程有 {len(due)} 条消息还没跟用户说（新公告 / 维护结束 / 活动开始，maapilot-events；说完 news told）")
     for u in (d.get("update") or {}).get("lines") or []:
         lines.append(f"版本更新：{u}（maapilot-update）")
+    if d.get("memory_tidy"):
+        lines.append("用户偏好一个月没整理了，收尾前整理一次（maapilot-memory）")
     return lines
 
 
