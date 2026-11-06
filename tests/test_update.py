@@ -246,17 +246,82 @@ def test_apply_rolls_back_when_new_code_is_broken(repo, monkeypatch):
 
 def test_apply_never_overwrites_user_edits(repo):
     (repo / "a.txt").write_text("用户改的\n", encoding="utf-8")
+    before = git(repo, "rev-parse", "HEAD")
     with pytest.raises(CliError) as e:
         update_cmd.apply_maapilot()
     assert e.value.code == "dirty" and e.value.exit == NEEDS_USER and "a.txt" in e.value.message and e.value.hint
-    assert text(repo) == "用户改的\n"
+    assert text(repo) == "用户改的\n" and git(repo, "rev-parse", "HEAD") == before
 
 
-def test_apply_blocked_on_another_branch(repo):
+def test_edits_the_update_does_not_touch_are_kept(repo):
+    (repo / "pyproject.toml").write_text("用户改的\n", encoding="utf-8")
+    assert update_cmd.blocked() is None
+    r = update_cmd.apply_maapilot()
+    assert r["updated"] and text(repo) == "2\n"
+    assert (repo / "pyproject.toml").read_text(encoding="utf-8") == "用户改的\n"
+
+
+def test_edits_kept_when_rolling_back(repo, monkeypatch):
+    (repo / "pyproject.toml").write_text("用户改的\n", encoding="utf-8")
+
+    def broken(want):
+        raise OSError("跑不起来")
+    monkeypatch.setattr(update_cmd, "_verify", broken)
+    with pytest.raises(CliError):
+        update_cmd.apply_maapilot()
+    assert text(repo) == "1\n" and (repo / "pyproject.toml").read_text(encoding="utf-8") == "用户改的\n"
+
+
+def test_other_branch_without_own_commits_switches_to_main(repo):
     git(repo, "switch", "-qc", "mine")
+    r = update_cmd.apply_maapilot()
+    assert r["updated"] and r["switched_from"] == "mine" and text(repo) == "2\n"
+    assert git(repo, "symbolic-ref", "--short", "HEAD") == "main"
+
+
+def test_detached_head_switches_to_main(repo):
+    git(repo, "checkout", "-q", "--detach")
+    r = update_cmd.apply_maapilot()
+    assert r["updated"] and git(repo, "symbolic-ref", "--short", "HEAD") == "main"
+
+
+def test_missing_main_is_created(repo):
+    git(repo, "switch", "-qc", "mine")
+    git(repo, "branch", "-qD", "main")
+    assert update_cmd.apply_maapilot()["updated"] and git(repo, "symbolic-ref", "--short", "HEAD") == "main"
+
+
+def test_rollback_returns_to_the_branch(repo, monkeypatch):
+    git(repo, "switch", "-qc", "mine")
+    before = git(repo, "rev-parse", "main")
+
+    def broken(want):
+        raise OSError("跑不起来")
+    monkeypatch.setattr(update_cmd, "_verify", broken)
+    with pytest.raises(CliError):
+        update_cmd.apply_maapilot()
+    assert git(repo, "symbolic-ref", "--short", "HEAD") == "mine" and git(repo, "rev-parse", "main") == before and text(repo) == "1\n"
+
+
+def test_branch_with_own_commits_is_left_alone(repo):
+    git(repo, "switch", "-qc", "mine")
+    (repo / "b.txt").write_text("x\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "local")
     with pytest.raises(CliError) as e:
         update_cmd.apply_maapilot()
-    assert e.value.code == "not_on_main" and "git switch main" in e.value.hint
+    assert e.value.code == "not_on_main" and e.value.exit == NEEDS_USER
+    assert git(repo, "symbolic-ref", "--short", "HEAD") == "mine" and (repo / "b.txt").exists()
+
+
+def test_diverged_main_is_left_alone_from_another_branch(repo):
+    (repo / "b.txt").write_text("x\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "local")
+    git(repo, "switch", "-qc", "mine", "HEAD~1")
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "diverged" and git(repo, "symbolic-ref", "--short", "HEAD") == "mine"
 
 
 def test_apply_blocked_on_local_commits(repo):
@@ -325,8 +390,9 @@ def test_skills_link_folder_does_not_block_update(repo):
 
 def test_refused_branch_leaves_index_alone(repo):
     link_tracked_but_a_folder(repo)
-    git(repo, "switch", "-qc", "other")
-    assert update_cmd.blocked()["code"] == "not_on_main"
+    (repo / ".claude" / "skills").rename(repo / "skills-aside")
+    (repo / ".claude" / "skills").write_text("../.agents/skills", encoding="utf-8")
+    assert update_cmd.blocked() is None                          # 真链接或文本文件：不用打标记
     assert git(repo, "ls-files", "-t", ".claude/skills").startswith("H")
 
 
@@ -542,6 +608,69 @@ def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
     with pytest.raises(CliError) as e:
         update_cmd.apply_maa_core()
     assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message and e.value.data == {"version": "6.21.1"}
+
+
+def windows_package(tmp_path, monkeypatch, maacore, lib, res, *, tag="v6.21.4"):
+    """假的发布：这个系统的包放在 maa-cli 的缓存目录里（不下载）。"""
+    import zipfile
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    name = f"MAA-{tag}-win-x64.zip"
+    with zipfile.ZipFile(cache / name, "w") as z:
+        z.writestr("MaaCore.dll", tag.removeprefix("v"))
+        z.writestr("start.bat", "x")
+        z.writestr("filelist.txt", "x")
+        z.writestr("externals/onnx.dll", "x")
+        z.writestr("resource/tasks.json", "new")
+    monkeypatch.setattr(update_cmd, "WINDOWS", True)
+    monkeypatch.setattr(maacore, "WINDOWS", True)
+    monkeypatch.setattr(maacore, "_asset_pattern", lambda: __import__("re").compile(r"^MAA-v[\d.]+-win-x64\.zip$"))
+    monkeypatch.setattr(maacore, "_maa_dir", lambda which: {"library": lib, "resource": res, "cache": cache}[which])
+
+    class Rel:
+        def __enter__(self):
+            return __import__("io").BytesIO(json.dumps({"tag_name": tag, "assets": [{"name": name}]}).encode())
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(maacore.urllib.request, "urlopen", lambda *a, **kw: Rel())
+
+
+def test_windows_falls_back_to_the_package(core, monkeypatch, tmp_path):
+    lib, res, maacore = core
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+    maa_update(monkeypatch, wiped)
+    windows_package(tmp_path, monkeypatch, maacore, lib, res)
+    r = update_cmd.apply_maa_core()
+    assert r["updated"] and r["to"] == "6.21.4" and r["via"] == "安装包"
+    assert sorted(f.name for f in lib.iterdir()) == ["MaaCore.dll", "onnx.dll"]
+    assert (res / "tasks.json").read_text(encoding="utf-8") == "new" and not maacore._backup_root().exists()
+
+
+def test_package_failure_restores_old_version(core, monkeypatch, tmp_path):
+    lib, res, maacore = core
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+    maa_update(monkeypatch, wiped)
+    monkeypatch.setattr(update_cmd, "WINDOWS", True)
+
+    def fails():
+        (lib / "half.dll").write_text("x", encoding="utf-8")
+        raise OSError("下载失败")
+    monkeypatch.setattr(maacore, "install_into_cli", fails)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed" and [f.name for f in lib.iterdir()] == ["MaaCore.dll"]
+    assert (lib / "MaaCore.dll").read_text(encoding="utf-8") == "6.21.1"
+
+
+def test_startup_asks_for_a_check_when_stale():
+    u = doctor.update_brief(startup=True)
+    assert u["check_needed"] and "update check" in u["lines"][-1]
+    assert doctor.update_brief() is None
 
 
 def test_core_notes_shown(monkeypatch):

@@ -580,7 +580,7 @@ def brief(probe: Probe | None = None) -> dict:
     data["memory"] = memory_brief() if setup_done else None
     data["goals"] = goals_brief()
     data["news"] = news_brief()
-    data["update"] = update_brief() if setup_done else None
+    data["update"] = update_brief(startup=True) if setup_done else None
     data["sources"] = sources_brief()
     data["live_suspects"] = live_suspects_brief()
     data["lines"] = brief_lines(data)
@@ -661,16 +661,19 @@ def news_brief() -> dict | None:
         return None
 
 
-def update_brief() -> dict | None:
-    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost、core_lost）、MAA 资源更新不了（resource_lost）。都没有 → None。"""
+def update_brief(startup: bool = False) -> dict | None:
+    """缓存里的版本信息（不联网）：还没跟用户说的新版本（due，列到 update told）、查更新的路断了（lost、core_lost）、MAA 资源更新不了（resource_lost）。都没有 → None。
+    startup：启动检查不联网，版本信息旧了（没跑日常就一直没人查）写 check_needed，agent 跑一次 update check。"""
     try:
         from maapilot.knowledge import updates
         st = updates.status()
         core_lost, resource_lost = st["maa-core"]["lost"], st["maa-resource"]["lost"]
-        if not st["due"] and not st["lost"] and not core_lost and not resource_lost:
+        check = startup and updates.stale()
+        if not st["due"] and not st["lost"] and not core_lost and not resource_lost and not check:
             return None
+        lines = updates.lines(st) + (["版本信息旧了：跑一次 maapilot update check"] if check else [])
         return {"due": st["due"], "lost": st["lost"], "core_lost": core_lost, "resource_lost": resource_lost,
-                "lines": updates.lines(st)}
+                "check_needed": check, "lines": lines}
     except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
         return None
 

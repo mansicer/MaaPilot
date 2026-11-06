@@ -5,7 +5,8 @@
 - apply：更新一项。MaaPilot、maa-cli、MaaCore 要 agent 先问过用户，资源不用。日常在跑或没收尾时不做；拿模拟器锁。
 
 MaaPilot 只走 git：本地 main 快进到发布标签，绝不覆盖用户改过的文件；依赖变了同步环境；新代码跑不起来就退回原来的提交，
-让用户手里始终是一份能用、能继续收到更新的程序。
+让用户手里始终是一份能用、能继续收到更新的程序。什么状态都尽量走通：改过的文件新版本没碰就留着照常更新，
+不在 main 上但没有自己的提交就切回 main。只有会丢用户东西的才停下。
 """
 from __future__ import annotations
 
@@ -37,7 +38,8 @@ def _out(*args: str) -> str:
 
 
 def blocked() -> dict | None:
-    """MaaPilot 现在不能直接更新的原因：{code, message, hint}；能 → None。每种都有出路，用户不会卡死在旧版本上。"""
+    """这份 MaaPilot 根本更新不了的原因：{code, message, hint}；能 → None。每种都有出路，用户不会卡死在旧版本上。
+    别的状态（改过文件、不在 main）都尽量走通，要拉到新版本才知道走不走得通，见 apply_maapilot。"""
     try:
         if not (paths.ROOT / ".git").exists():
             return {"code": "not_git", "message": "这份 MaaPilot 不是用 git 下载的",
@@ -46,16 +48,8 @@ def blocked() -> dict | None:
             return {"code": "git_failed", "message": "git 读不了这个文件夹", "hint": "先修好 git（doctor）"}
     except (OSError, subprocess.SubprocessError):
         return {"code": "no_git", "message": "这台电脑上跑不了 git", "hint": "先装 git"}
-    branch = _out("symbolic-ref", "--short", "HEAD")
-    if branch != BRANCH:
-        return {"code": "not_on_main", "message": f"现在不在 {BRANCH} 分支（{branch or '没有分支'}）",
-                "hint": f"问用户后 git switch {BRANCH}"}
     from maapilot.tools import doctor
     doctor.keep_skills_link()                          # 不然 Windows 的目录联接在 git 眼里是"文件被删了"
-    dirty = (_git("status", "--porcelain", "--untracked-files=no").stdout or "").splitlines()
-    if dirty:
-        return {"code": "dirty", "message": "项目文件被改过：" + "、".join(l[3:] for l in dirty[:5]),
-                "hint": "看改了什么、告诉用户；要留着就先另存，用户同意后 git restore 这些文件再更新"}
     return None
 
 
@@ -122,6 +116,33 @@ def _fetch(tag: str) -> None:
                        hint="网络能上 GitHub 吗？要代理就设 HTTPS_PROXY 再试")
 
 
+def _check_mergeable(tag: str, branch: str, old_main: str) -> None:
+    """走不通的才拦：有 tag 里没有的提交（用户自己的工作）、改过的文件新版本也改了。"""
+    if _git("merge-base", "--is-ancestor", "HEAD", tag).returncode != 0:
+        if branch == BRANCH:
+            raise CliError("diverged", f"{BRANCH} 上有 {tag} 里没有的提交", exit=NEEDS_USER, data={"commit": _out("rev-parse", "--short", "HEAD")},
+                           hint="告诉用户这些提交是什么（git log），由用户决定怎么合并")
+        raise CliError("not_on_main", f"现在在 {branch or '一个提交'} 上，上面有 {tag} 里没有的提交", exit=NEEDS_USER,
+                       hint=f"告诉用户这些提交是什么（git log），由用户决定保留还是切回 {BRANCH}")
+    if old_main and _git("merge-base", "--is-ancestor", old_main, tag).returncode != 0:
+        raise CliError("diverged", f"{BRANCH} 上有 {tag} 里没有的提交", exit=NEEDS_USER, data={"commit": old_main[:7]},
+                       hint="告诉用户这些提交是什么（git log），由用户决定怎么合并")
+    edited = set(_git("-c", "core.quotePath=false", "diff", "--name-only", "HEAD").stdout.splitlines())
+    both = sorted(edited & set(_git("-c", "core.quotePath=false", "diff", "--name-only", "HEAD", tag).stdout.splitlines()))
+    if both:
+        raise CliError("dirty", "这些文件改过，新版本也改了：" + "、".join(both[:5]), exit=NEEDS_USER,
+                       hint="看改了什么、告诉用户；要留着就先另存，用户同意后 git restore 这些文件再更新")
+
+
+def _go_back(prev: str, branch: str, old_main: str) -> None:
+    """更新没成：回到更新前的提交和分支，改过的文件留着。"""
+    if branch == BRANCH:
+        _git("reset", "--keep", prev)
+        return
+    _git("checkout", "-q", branch or prev)
+    _git("branch", "-f", BRANCH, old_main) if old_main else _git("branch", "-D", BRANCH)
+
+
 def apply_maapilot() -> dict:
     st = check(refresh=True)
     p = st["maapilot"]
@@ -134,13 +155,13 @@ def apply_maapilot() -> dict:
         b = p["blocked"]
         raise CliError(b["code"], b["message"], exit=NEEDS_USER, hint=b["hint"])
     tag, prev = f"v{p['latest']}", _out("rev-parse", "HEAD")
+    branch = _out("symbolic-ref", "--short", "HEAD")     # 分离 HEAD 时是空的
     _fetch(tag)
-    if _git("merge-base", "--is-ancestor", "HEAD", tag).returncode != 0:
-        raise CliError("diverged", f"{BRANCH} 上有 {tag} 里没有的提交", exit=NEEDS_USER, data={"commit": prev[:7]},
-                       hint="告诉用户这些提交是什么（git log），由用户决定怎么合并")
+    old_main = prev if branch == BRANCH else _out("rev-parse", "--verify", "-q", f"refs/heads/{BRANCH}")
+    _check_mergeable(tag, branch, old_main)
     changed = _out("diff", "--name-only", prev, tag).splitlines()
     sync = any(f in ENV_FILES for f in changed)
-    m = _git("merge", "--ff-only", "--quiet", tag)
+    m = _git("merge", "--ff-only", "--quiet", tag) if branch == BRANCH else _git("checkout", "-q", "-B", BRANCH, tag)
     if m.returncode != 0:
         raise CliError("update_failed", f"更新不了：{(m.stderr or '').strip()[-300:]}", exit=FAILED,
                        hint="多半是有没入库的文件挡路：看错误里的文件，告诉用户")
@@ -149,7 +170,7 @@ def apply_maapilot() -> dict:
             _sync_env()
         _verify(p["latest"])
     except (OSError, subprocess.SubprocessError) as e:
-        _git("reset", "--keep", prev)
+        _go_back(prev, branch, old_main)
         if sync:
             try:
                 _sync_env()
@@ -159,7 +180,7 @@ def apply_maapilot() -> dict:
                        hint="程序照旧能用；告诉用户更新没成，把原因报给开发者") from None
     updates.told(["maapilot"])
     return {"what": "maapilot", "updated": True, "from": __version__, "to": p["latest"], "commit": _out("rev-parse", "--short", "HEAD"),
-            "env_synced": sync, "url": p["url"], "notes": p["notes"],
+            "env_synced": sync, "url": p["url"], "notes": p["notes"], "switched_from": None if branch == BRANCH else (branch or prev[:7]),
             "reread": ["AGENTS.md", "你所在 harness 的说明文件"], "next": "maapilot update check --refresh（新版本可能要求新的 maa-cli）"}
 
 
@@ -187,6 +208,17 @@ def _maa_update() -> str | None:
     return None if maacore.cli_core() else "maa update 跑完了，但读不出 MaaCore"
 
 
+def _install_package(want: str) -> bool:
+    """maa update 走不通时，把发布包直接铺进去。→ 装上了这个版本没有。"""
+    from maapilot.crew import maacore
+    try:
+        maacore.install_into_cli()
+    except Exception:                                    # noqa: BLE001 - 下载、解包、复制都可能出错：调用方照样报 maa update 的错、恢复备份
+        return False
+    core = maacore.cli_core()
+    return bool(core) and core[0].removeprefix("v") == want
+
+
 def apply_maa_core() -> dict:
     from maapilot.crew import maacore
     st = check(refresh=True)
@@ -200,6 +232,10 @@ def apply_maa_core() -> dict:
             raise CliError("maa_update_failed", f"备份不了原来的 MaaCore，没有更新：{err}", exit=FAILED, data={"version": e["current"]},
                            hint="原来的版本没动；看看磁盘空间和文件权限") from None
         err = _maa_update()
+        via = "maa update"
+        if err and WINDOWS and maacore.restore_core(saved):  # 有些 Windows 环境里 maa update 删不掉目录（os error 4395）
+            if _install_package(e["latest"]):
+                err, via = None, "安装包"
         restored = err is None or maacore.restore_core(saved)
         if restored:
             maacore.drop_backup()
@@ -211,7 +247,7 @@ def apply_maa_core() -> dict:
     if err:
         raise CliError("maa_update_failed", f"{err}；已恢复原来的版本 {cur}", exit=FAILED, data={"version": cur},
                        hint="MAA 照旧能用，把原因告诉用户（不一定是网络问题，看错误原文）")
-    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"]}
+    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"], "via": via}
 
 
 def apply_resource() -> dict:

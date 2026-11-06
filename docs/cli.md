@@ -157,7 +157,7 @@
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
 `lines` 同 `news list`，`due` 是还没告诉用户的时间点的 key（新公告、活动开始、维护结束）（`lines` 里也写一行，agent 按 `maapilot-events` 去说），列到 `news told` 为止。
-`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。
+`update`：缓存里的版本信息（不联网；还没设置好时是 `null`，没事要说也是 `null`）：`{due, lost, core_lost, resource_lost, lines}`，见「update」。版本信息过了 20 小时时 `check_needed` 为真（启动检查不联网，没跑日常就没人查），agent 跑一次 `update check`。
 `sources`：格式出了问题的外部数据源（`private/state/sources.json` 里最近一次出错比最近一次读成还新的；没问题的不列，全好是 `[]`），
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
@@ -976,21 +976,22 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 
 `update apply maapilot`：先重查；从 `https://github.com/mansicer/MaaPilot.git` 拉发布标签，`git merge --ff-only` 快进（不看 origin 指到哪）；
 `pyproject.toml` / `uv.lock` 变了就同步环境（有 uv 用 uv，PATH 里没有时也看 `~/.local/bin`；否则 pip，环境里没有 pip 先 `ensurepip`）；Windows 上先把运行中的 `maapilot.exe` 挪开放副本，才换得掉；再起一个新进程确认版本对、命令能载入。这两步失败就退回原来的提交，退出码 1（`update_failed`），用户手里还是能用的旧版本。
-没新版本 `{updated: false}`。不能快进时什么都不改，退出码 3，`hint` 写明出路（`update check` 的 `maapilot.blocked` 也提前写明）：
+没新版本 `{updated: false}`。**什么状态都尽量走通**：改过的文件新版本没碰就留着照常更新；不在 main 上（包括分离 HEAD）但没有 `tag` 里没有的提交，就切回 main（`switched_from`，退回时也切回去）。
+只有会丢用户东西的才停下，什么都不改，退出码 3，`hint` 写明出路（要拉到新版本才知道，所以 `update check` 的 `maapilot.blocked` 只提前写明最后一行那几种）：
 
 | 错误码 | 情形 |
 |---|---|
-| `dirty` | 入库的文件被改过（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
-| `not_on_main` | 不在 main 分支 |
+| `dirty` | 改过的入库文件，新版本也改了（没入库的文件和 `private/` 不算；`.claude/skills` 是目录联接或复制的一份时也不算，程序会让 git 别管它） |
+| `not_on_main` | 当前分支或提交上，有发布标签里没有的提交 |
 | `diverged` | main 上有发布标签里没有的提交 |
 | `not_git` / `no_git` / `git_failed` | 不是 git 下载的 / 没有 git / git 读不了 |
 
-成功：`{what, updated, from, to, commit, env_synced, url, notes, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
+成功：`{what, updated, from, to, commit, env_synced, url, notes, switched_from, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
 Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；换不了按上面退回旧版本。
 
 `network`（退出码 1）：拉不到 GitHub。
 
-`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
+`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。Windows 上再试一次发布包：把缓存里或新下载的包直接铺进这两个目录，不删目录（`via: "安装包"`，针对 `maa update` 报 `os error 4395` 删不掉目录的环境），还不成再盖回备份。成没成都重读本机版本。
 `maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
 
 ## memory —— 用户偏好（不碰模拟器）
