@@ -723,6 +723,7 @@ def brief_lines(d: dict) -> list[str]:
     u = d.get("update") or {}
     if u.get("lines"):
         lines.append("版本更新（maapilot-update）：" + "；".join(u["lines"]))
+    lines.append("启动检查不联网：回复用户之前先跑一次 maapilot update check。")
     for x in d.get("sources") or []:
         lines.append(f"外部数据：{x['message']}" + (f"，{x['effect']}" if x.get("effect") else "")
                      + "（要开发者修；用户问起或受影响时用玩家的话说明，见 maapilot-recovery）")

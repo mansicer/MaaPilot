@@ -304,7 +304,7 @@ def cmd_apply(args) -> dict:
 def register(sub) -> None:
     g = sub.add_parser("update", help="MaaPilot、maa-cli、MaaCore 的更新：查新版本、更新")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
-    p = gs.add_parser("check", help="有没有新版本（联网查，最多十几秒）")
+    p = gs.add_parser("check", help="有没有新版本（联网查，平时十几秒内）")
     p.add_argument("--refresh", action="store_true", help=argparse.SUPPRESS)  # 现在每次都查；旧版说明里还写着它，留着别报错
     p.set_defaults(func=cmd_check, command="update check")
     p = gs.add_parser("told", help="这些新版本告诉过用户了（过一阵子还没更新会再列出来）")

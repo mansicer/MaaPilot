@@ -1,6 +1,6 @@
 ---
 name: maapilot-update
-description: 更新 MaaPilot 和 MAA via MaaPilot —— 日常或启动检查发现新版本时告诉用户、问要不要更新，用户同意后更新；好几天查不到版本信息时告诉用户。Use when a daily run result or the startup check carries update, or the user asks 更新 MaaPilot / 更新 MAA / 现在是什么版本 (update / upgrade / version). 游戏客户端的更新见 maapilot-events。
+description: 更新 MaaPilot 和 MAA via MaaPilot —— 开会话或日常发现新版本时告诉用户、问要不要更新，用户同意后更新；好几天查不到版本信息时告诉用户。Use when `update check` at session start or a daily run result shows a new version or lost, or the user asks 更新 MaaPilot / 更新 MAA / 现在是什么版本 (update / upgrade / version). 游戏客户端的更新见 maapilot-events。
 ---
 
 # maapilot-update：更新 MaaPilot 和 MAA
@@ -12,7 +12,7 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 
 ## 什么时候说
 
-开会话时、用户问起时：`maapilot update check`（每次都联网查，最多十几秒）看详情；日常结果里有 `update`（`lines` 是要点）也一样。
+开会话时、用户问起时：`maapilot update check`（每次都联网查，平时十几秒内；刚从 0.3.0 更新上来的第一次要先搬 MAA 的数据，可能几分钟，能放后台就放后台）看详情；日常结果里有 `update`（`lines` 是要点）也一样。
 
 - **`due` 不为空（有新版本）**：说清每一样从几更新到几、这版有什么（从 `notes` 里挑对用户有用的几句，用玩家的话，没有 `notes` 就说看不到更新说明），问要不要现在更新。
   一次只问一样，MaaPilot 优先。说完 `maapilot update told maapilot`（`due` 里说过的都写上）。

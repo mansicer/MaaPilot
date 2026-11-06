@@ -31,7 +31,8 @@ MAAPILOT_REPO = "mansicer/MaaPilot"
 MAAPILOT_GIT = f"https://github.com/{MAAPILOT_REPO}.git"
 MAAPILOT_API = f"https://api.github.com/repos/{MAAPILOT_REPO}/releases/latest"
 MAA_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
-TIMEOUT_S = 15                  # 整次检查最多等这么久：网不好时不能拖住开场和日常
+TIMEOUT_S = 8                   # 一次网络等待：第一个地址不通时还来得及试下一个
+TOTAL_S = 15                    # 联网部分最多等这么久：网不好时不能拖住开场和日常
 CHECK_LOST_DAYS = 3             # 这么多天没查成功就告诉用户（查更新的路断了）
 RESOURCE_FRESH = timedelta(hours=1)  # 接着跑（--only）时不重复更新资源
 RESOURCE_TIMEOUT_S = 300
@@ -67,7 +68,7 @@ def http_json(url: str) -> dict:
 
 
 def _fetch(urls: tuple[str, ...]) -> dict:
-    """同时拉几个地址：{地址: 内容或异常}，一共最多等 TIMEOUT_S 秒，没回来的是 TimeoutError。
+    """同时拉几个地址：{地址: 内容或异常}，一共最多等 TOTAL_S 秒，没回来的是 TimeoutError。
     urlopen 的 timeout 只管单次等待，慢慢回数据、域名解析卡住都管不住，所以总时间在这里卡。"""
     got: dict = {}
 
@@ -80,10 +81,10 @@ def _fetch(urls: tuple[str, ...]) -> dict:
     threads = [threading.Thread(target=one, args=(u,), daemon=True) for u in urls]
     for t in threads:
         t.start()
-    deadline = time.monotonic() + TIMEOUT_S
+    deadline = time.monotonic() + TOTAL_S
     for t in threads:
         t.join(max(0, deadline - time.monotonic()))
-    return {u: got.get(u, TimeoutError(f"{TIMEOUT_S} 秒内没查到")) for u in urls}
+    return {u: got.get(u, TimeoutError(f"{TOTAL_S} 秒内没查到")) for u in urls}
 
 
 def _release(source: str, d: dict | Exception) -> dict:
@@ -116,9 +117,11 @@ def local_versions() -> dict:
 
 
 def refresh() -> dict:
-    """重新查一次（联网，最多 TIMEOUT_S 秒）。查不到的项留上次的结果、原因写进 errors，不抛错。"""
+    """重新查一次（联网部分最多 TOTAL_S 秒，之前的 `maa version` 另算）。查不到的项留上次的结果、原因写进 errors，不抛错。"""
     errors: dict = {}
-    new: dict = {"local": local_versions(), "tried_at": load().get("tried_at") or _now().isoformat(timespec="seconds")}
+    last = load()
+    local = {**(last.get("local") or {}), **{k: v for k, v in local_versions().items() if v}}  # maa 这次跑不了：别当成没装，新版本提醒会断
+    new: dict = {"local": local, "tried_at": last.get("tried_at") or _now().isoformat(timespec="seconds")}
     got = _fetch((MAAPILOT_API, MAA_API))
     try:
         new.update(maapilot=_release("maapilot_release", got[MAAPILOT_API]), at=_now().isoformat(timespec="seconds"))

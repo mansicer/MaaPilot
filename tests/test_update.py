@@ -152,7 +152,7 @@ def test_brief_shows_update(monkeypatch):
     assert doctor.update_brief() is None
 
 
-def test_check_command_uses_cache_unless_refresh(capsys, monkeypatch):
+def test_check_command_always_asks(capsys, monkeypatch):
     online(monkeypatch)
     calls = []
     real = updates.refresh
@@ -183,7 +183,7 @@ def test_hung_network_is_cut_off_and_the_other_answer_kept(monkeypatch):
         return {"tag_name": "v9.9.9"}
 
     monkeypatch.setattr(updates, "http_json", fake)
-    monkeypatch.setattr(updates, "TIMEOUT_S", 0.05)
+    monkeypatch.setattr(updates, "TOTAL_S", 0.05)
     started = time.monotonic()
     d = updates.refresh()
     stop.set()
@@ -681,9 +681,24 @@ def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
     assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message and e.value.data == {"version": "6.21.1"}
 
 
-def test_startup_stays_offline(monkeypatch):
+def test_startup_stays_offline_and_asks_for_a_check(monkeypatch):
     monkeypatch.setattr(updates, "refresh", lambda: pytest.fail("启动检查不该联网"))
     assert doctor.update_brief() is None
+    base = {"setup_done": True, "goals": None, "goals_active": 0, "last_daily": None, "update": None}
+    stopped = {"unexplained": {"originite": -1}}
+    for stop in (None, stopped):                                        # 对账停机时日常不跑，只能靠这一行
+        assert any("update check" in l for l in doctor.brief_lines({**base, "guard_stop": stop}))
+    assert not any("update check" in l for l in doctor.brief_lines({**base, "setup_done": False, "guard_stop": None}))
+
+
+def test_refresh_keeps_local_versions_when_maa_fails(monkeypatch):
+    online(monkeypatch)
+    monkeypatch.setattr(updates, "local_versions", lambda: {"maa_cli": "0.7.7", "maa_core": "6.21.1"})
+    updates.refresh()
+    for broken in ({}, {"maa_cli": None, "maa_core": None}):
+        monkeypatch.setattr(updates, "local_versions", lambda b=broken: b)
+        st = updates.status(updates.refresh())
+        assert st["maa-core"]["current"] == "6.21.1" and "maa-core" in st["due"]
 
 
 def test_killed_update_is_recovered_first(core, monkeypatch):
