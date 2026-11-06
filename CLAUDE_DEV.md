@@ -50,7 +50,7 @@ MaaPilot/
   现在只留两条（10-20 用户定，开发后期再收）：`guard allow` 询问、`private/skland.json` 拒绝读写；`maapilot` 整个放行，加新命令不用改规则、不用重新生成。
   以后加例外写进 `policy.COMMANDS`（例外写的命令得真有，`test_exceptions_name_real_commands`）。
   Claude Code 的自动模式可能拦下改 `.claude/settings.json`（算改自己的权限）：那时请用户自己跑 `maapilot dev rules`。
-- 查用户的 agent 哪里出错、用错命令：`maapilot dev review [--since 3d] [--exclude <会话>]`（读命令记录和 Claude Code 会话记录，见 docs/cli.md「dev」），不用手动翻会话记录。
+- 查用户的 agent 哪里出错、用错命令：直接看命令记录 `private/log/<日期>.jsonl` 和 Claude Code 的会话记录（`~/.claude/projects/` 下按仓库路径命名的目录），不另外做工具。
 - **规则写死的命令必须在模拟器上测过才算做完**（用户 2026-10-13 定）：快捷命令、导航、识图 / 识字、点击坐标、页面判断、读数解析这类固定规则，
   单元测试和截图回归之外，还要在真模拟器上实际跑通一次（按下面「碰模拟器前」的规矩），把实测结果写进提交说明或汇报。没实测的要明说"还没上模拟器"，不能算完成。
 - 进页面只走 `maapilot/crew/nav.py`（`goto`、`goto_room`），快捷操作里不自己点坐标导航；认得的遮挡只加点了不花东西的（`maapilot/crew/overlays.py`）。

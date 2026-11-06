@@ -147,3 +147,12 @@ def test_install_check_expectations_follow_policy():
     from maapilot.tools import host_cmd
     for want, cmd in host_cmd.EXPECT:
         assert policy.CODEX[policy.decide(cmd, "codex")] == want, cmd
+
+
+def test_dev_not_in_help(capsys):
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.suppress(SystemExit):
+        cli.build_parser().parse_args(["--help"])
+    assert "dev" not in buf.getvalue().split("doctor", 1)[-1]

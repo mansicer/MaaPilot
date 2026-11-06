@@ -1020,25 +1020,6 @@ Codex 看 `$CODEX_HOME/config.toml` 的 `[projects."<路径>"] trust_level`（�
 
 ## dev —— 开发用（不给用户的 agent）
 
-`maapilot dev review [--since 3d|12h|<日期>|<时间>] [--session <编号>]… [--exclude <编号>]… [--include-dev] [--transcripts <目录>] [--limit N]`：
-代替手动翻会话记录，看用户的 agent（和 v0.1 定时日常叫起的无头 agent）哪里出错、哪里用错了命令。只读，不碰模拟器，自己不写命令记录。默认看最近 3 天。
-
-- 命令记录 `private/log/<日期>.jsonl`（`log`）：`failures` 按命令 + 错误码归类（次数、最后一次、原话、哪几次日常）；`misuse` 参数写错（退出码 2，带 `argv`）；
-  `repeated` 同一条命令（参数也一样）失败两次以上；`shortcut_then_manual` 快捷操作（`op upgrade / mastery`、`craft`、`state op`）失败后 30 分钟内接着手动 `input …` 的。
-- 会话记录（`transcripts`）：目录按仓库路径推出（Claude Code 的规则：路径里非字母数字的字符换成 `-`，放在 `~/.claude/projects/` 下；在 git worktree 里跑时用主仓库的路径），`--transcripts` 可以改。
-  每个会话：`label`（v0.1 定时日常叫起的无头 agent 写成"日常 <运行编号> <项>"，对照 `private/log/agent-*.jsonl`）、开头的提示、`denied` 被拒的工具调用（权限没放行、用户拒绝）、
-  `maapilot_failed` 退出码不为 0 的 maapilot 命令（命令、退出码、错误码、原话）、`tool_errors` 其他工具出错、`memory_edits` 成功改了用户偏好的操作（失败、被拒的不算，只读不算；`{file, tool, change}`，`change` 是改成的内容，用命令改的是命令）、`bash_nonstandard` 不是"一条 `maapilot …`"形式的 Bash
-  （管道、`&&`、`;`、`cat`、`grep`……；引号里的 `|` 不算）、`result` 最后的"结果：…"。
-  不看：`--exclude` 的、当前会话（环境变量 `CLAUDE_CODE_SESSION_ID`）、开发会话（改过 `maapilot/`、`tests/`、`docs/`、skill、`CLAUDE*.md`，跑过 pytest、git commit，
-  或 agent 名以 dev 开头；`--include-dev` 也看）。`--session` 点名的会话照看不误。
-- `data.lines` 是给人看的几行要点。
-
-```json
-{"since": "2026-10-10T16:00+08:00", "lines": ["命令记录 656 行，失败 14", "  失败 craft / shortcut_failed ×3：…", "会话 9 个（排除 7）", "  6aa16058 日常 20261011-1640 goals …：被拒 1、maapilot 失败 6、非标准 Bash 14/64；结果：完成"],
- "log": {"rows": 656, "failed": 14, "failures": [{"command", "error", "exit", "count", "last_at", "message", "runs"}], "misuse": […], "repeated": […], "shortcut_then_manual": […]},
- "transcripts": {"dir": "…", "sessions": [{"session", "label", "start", "end", "prompt", "result", "bash", "denied"?, "maapilot_failed"?, "tool_errors"?, "bash_nonstandard"?}], "excluded": [{"session", "why"}]}}
-```
-
 `maapilot dev rules [--check] [--root <目录>]`：按 `maapilot/policy.py` 生成两个宿主的权限规则文件和本文件里抄的设置（见「Claude Code 权限设置」）。
 `data`：`{"files": [{"path", "changed"}], "written"}`；`--check` 只核对、不写，有不一样的退出码 1 `rules_out_of_date`（`data.files` 照样带上）。
 
