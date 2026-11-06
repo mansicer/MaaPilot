@@ -56,3 +56,20 @@ def test_failed_copy_leaves_nothing_half_done(old, monkeypatch):
 def test_own_setting_wins(old, monkeypatch):
     monkeypatch.setenv("MAA_DATA_DIR", "/my/maa")
     assert maa.env()["MAA_DATA_DIR"] == "/my/maa" and not maa.data_dir().exists()
+
+
+def test_doctor_looks_in_the_project_folder(old, monkeypatch):
+    from maapilot.tools import doctor
+
+    class Probe:
+        def __init__(self):
+            self.envs = []
+
+        def run(self, argv, timeout=15, env=None):
+            self.envs.append(env)
+            return doctor.Proc(0, b"/x\n", b"")
+    probe = Probe()
+    ctx = doctor.Ctx(True, probe)
+    doctor.maa_version(ctx)
+    doctor.maa_dir(ctx, "resource")
+    assert [e["MAA_DATA_DIR"] for e in probe.envs] == [str(maa.data_dir())] * 2

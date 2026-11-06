@@ -235,7 +235,8 @@ def installed_games(ctx: Ctx) -> list[dict] | None:
 
 def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
     from maapilot import config
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"])
+    from maapilot.crew import maa as crew_maa
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"], env=crew_maa.env())
     cli = core = None
     for line in r.text.splitlines():
         if m := re.search(r"maa-?cli\s+v?(\S+)", line, re.I):
@@ -251,7 +252,8 @@ def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
 
 def maa_dir(ctx: Ctx, which: str) -> Path | None:
     from maapilot import config
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which])
+    from maapilot.crew import maa as crew_maa
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which], env=crew_maa.env())
     lines = [l.strip() for l in r.text.splitlines() if l.strip()]
     return Path(lines[-1]) if r.returncode == 0 and lines else None
 
