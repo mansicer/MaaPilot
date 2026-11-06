@@ -131,6 +131,23 @@ def test_review_log_and_transcripts(tmp_path, capsys, monkeypatch):
     assert not any("dev review" in ln for ln in (paths.LOGS / f"{common.now():%Y-%m-%d}.jsonl").read_text(encoding="utf-8").splitlines())
 
 
+def test_review_shows_memory_edits(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    tdir = tmp_path / "t"
+    tdir.mkdir()
+    rows = [_use("1", "Write", 5, file_path="/x/private/memory/sanity.md", content="快到期的理智液可以用"),
+            _use("2", "Bash", 4, command="rm private/memory/old.md"),
+            _use("3", "Bash", 3, command="cat private/memory/a.md"),
+            _use("4", "Write", 2, file_path="/x/private/goals.md", content="y")]
+    (tdir / "s.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
+    code, env = run(capsys, "dev", "review", "--transcripts", str(tdir), "--since", "1d")
+    assert code == 0, env
+    s = env["data"]["transcripts"]["sessions"][0]
+    assert s["memory_edits"] == [{"file": "sanity.md", "tool": "Write", "change": "快到期的理智液可以用"},
+                                 {"file": "（命令）", "tool": "Bash", "change": "rm private/memory/old.md"}]
+    assert any("改偏好" in ln for ln in env["data"]["lines"])
+
+
 def test_review_session_filter_and_exclude(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "cccc3333-other")
     tdir = _fixture(tmp_path)

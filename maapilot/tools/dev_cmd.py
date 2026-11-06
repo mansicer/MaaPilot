@@ -32,6 +32,8 @@ DENIED = ("Permission for this tool use was denied", "Permission for this action
 # agent 该用的 Bash 形式：一条 maapilot 命令（不接管道、&&、;、重定向、$()），或放行的 sleep 300
 _STANDARD = re.compile(r"^(maapilot\s[^|;&<>`$\n]*|maapilot|sleep 300)$")
 _QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|\'[^\']*\'')         # 引号里的 | ; 等不算（如 --find "a|b"）
+_MEMORY_PATH = re.compile(r"[/\\]private[/\\]memory[/\\]")
+_MEMORY_BASH = re.compile(r"(>|\b(?:rm|mv|cp|tee|sed -i)\b).*private[/\\]memory|private[/\\]memory.*(>|\b(?:rm|mv)\b)")
 # 开发会话的迹象：改代码、跑测试、提交
 _DEV_PATH = re.compile(r"/(maapilot|tests|docs)/|/\.(claude|agents)/skills/|(CLAUDE|CLAUDE_DEV|AGENTS)\.md$")
 _DEV_BASH = re.compile(r"\bpytest\b|\bgit (commit|diff|add)\b|CLAUDE_DEV\.md")
@@ -206,7 +208,7 @@ def _maapilot_cmd(cmd: str) -> str | None:
 def read_session(path: Path, since: datetime) -> dict | None:
     uses: dict[str, dict] = {}
     s = {"id": path.stem, "start": None, "end": None, "prompt": None, "dev": None, "agent_name": None,
-         "denied": [], "tool_errors": [], "maapilot_failed": [], "bash_nonstandard": [], "bash_total": 0,
+         "denied": [], "tool_errors": [], "maapilot_failed": [], "bash_nonstandard": [], "memory_edits": [], "bash_total": 0,
          "result": None, "in_window": False}
     try:
         fh = open(path, encoding="utf-8")
@@ -245,10 +247,15 @@ def read_session(path: Path, since: datetime) -> dict | None:
                     name = x.get("name")
                     if name in ("Edit", "Write", "NotebookEdit") and _DEV_PATH.search(str(inp.get("file_path", ""))):
                         s["dev"] = s["dev"] or f"改了 {Path(str(inp['file_path'])).name}"
+                    if new and name in ("Edit", "Write") and _MEMORY_PATH.search(str(inp.get("file_path", ""))):
+                        s["memory_edits"].append({"file": Path(str(inp["file_path"])).name, "tool": name,
+                                                  "change": _short(inp.get("new_string") or inp.get("content"), 120)})
                     if name == "Bash":
                         cmd = str(inp.get("command", "")).strip()
                         if _DEV_BASH.search(cmd):
                             s["dev"] = s["dev"] or f"跑了 {_short(cmd, 40)}"
+                        if new and _MEMORY_BASH.search(cmd):
+                            s["memory_edits"].append({"file": "（命令）", "tool": name, "change": _short(cmd, 120)})
                         if new:
                             s["bash_total"] += 1
                             bare = _QUOTED.sub('""', cmd)
@@ -307,6 +314,8 @@ def summarize_session(s: dict, label: str | None, limit: int) -> dict:
         out["maapilot_failed"] = _group(s["maapilot_failed"], lambda d: (d["command"], d["exit"], d["error"]), limit)
     if s["tool_errors"]:
         out["tool_errors"] = _group(s["tool_errors"], lambda d: (d["tool"], d["error"][:60]), limit)
+    if s["memory_edits"]:
+        out["memory_edits"] = s["memory_edits"][:limit]
     if nonstd:
         out["bash_nonstandard"] = {"count": len(nonstd),
                                    "by_first_word": dict(Counter(n["first"] for n in nonstd).most_common(8)),
@@ -372,6 +381,8 @@ def _lines(log: dict, tr: dict) -> list[str]:
                 bits.append(f"{name} {sum(x.get('count', 1) for x in s[k])}")
         if s.get("bash_nonstandard"):
             bits.append(f"非标准 Bash {s['bash_nonstandard']['count']}/{s['bash']}")
+        if s.get("memory_edits"):
+            bits.append("改偏好 " + "、".join(sorted({m["file"] for m in s["memory_edits"]})))
         out.append(f"  {s['session'][:8]} {s['label'] or _short(s['prompt'], 30)} {s['start'] or ''}："
                    + ("、".join(bits) or "没问题") + (f"；{_short(s['result'], 60)}" if s.get("result") else ""))
     return out
