@@ -123,6 +123,7 @@ def _run(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | None,
         _seen_overlays(r)
         r.data["news"] = _news()
         r.data["update"] = _update()
+        r.data.pop("memory_tidy", None)                  # --only 接着跑时读回了上一段的：这期间可能已经整理过
         if _memory_tidy():
             r.data["memory_tidy"] = True
         r.data["lines"] = reportmod.summary_lines(r.data)   # 给 agent 转述：维护时段、到期和变动的目标……
