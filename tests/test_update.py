@@ -86,8 +86,22 @@ def test_maa_core_lookup_tracked_on_its_own(monkeypatch):
     assert doctor.update_brief()["core_lost"]
 
 
-def test_never_checked_counts_as_lost():
-    assert updates.status()["lost"] and "从没" in updates.lines()[0]
+def test_never_checked_is_not_lost():
+    st = updates.status()
+    assert not st["lost"] and not st["maa-core"]["lost"] and updates.lines() == [] and doctor.update_brief() is None
+
+
+def test_first_failures_wait_three_days(monkeypatch):
+    def down(url):
+        raise OSError("连不上")
+    monkeypatch.setattr(updates, "http_json", down)
+    d = updates.refresh()
+    assert not updates.status(d)["lost"] and d["tried_at"]
+    first = d["tried_at"]
+    assert updates.refresh()["tried_at"] == first                # 再查不重新计时
+    d["tried_at"] = days_ago(3)
+    st = updates.status(d)
+    assert st["lost"] and st["maa-core"]["lost"] and "从没" in updates.lines(st)[0]
 
 
 def test_bad_release_format_is_recorded(monkeypatch):
@@ -404,17 +418,100 @@ def test_verify_loads_real_code():
 
 # --- MaaCore -----------------------------------------------------------------------------------------------------------
 
-def test_apply_core_runs_maa_update(monkeypatch):
+@pytest.fixture
+def core(monkeypatch, tmp_path):
+    """假的 maa-cli 本体目录：lib 里有 MaaCore 就读得出版本；run 换成测试里的 maa update。"""
+    from maapilot.crew import maacore
     online(monkeypatch, core="6.21.4")
-    versions = iter([{"maa_core": "6.21.1"}, {"maa_core": "6.21.4"}])
-    monkeypatch.setattr(updates, "local_versions", lambda: next(versions))
-    argvs = []
+    lib, res = tmp_path / "lib", tmp_path / "resource"
+    lib.mkdir()
+    res.mkdir()
+    (lib / "MaaCore.dll").write_text("6.21.1", encoding="utf-8")
+    (res / "tasks.json").write_text("old", encoding="utf-8")
 
-    class Done:
-        returncode, stdout, stderr = 0, "", ""
-    monkeypatch.setattr(update_cmd.procs, "run_text", lambda argv, **kw: argvs.append(argv) or Done())
+    def installed():
+        f = lib / "MaaCore.dll"
+        return f.read_text(encoding="utf-8") if f.exists() else None
+    monkeypatch.setattr(maacore, "_maa_dir", lambda which: {"library": lib, "resource": res}[which])
+    monkeypatch.setattr(maacore, "cli_core", lambda: (f"v{installed()}", lib) if installed() else None)
+    monkeypatch.setattr(updates, "local_versions", lambda: {"maa_core": installed()})
+    update_cmd.check(refresh=True)
+    return lib, res, maacore
+
+
+def maa_update(monkeypatch, fn):
+    def run(argv, **kw):
+        if argv[-1] != "update":
+            return Run()
+        fn()
+        return Run(0 if fn.__name__ != "wiped" else 1, stderr="Failed to remove dir (os error 4395)")
+    monkeypatch.setattr(update_cmd.procs, "run_text", run)
+
+
+def test_apply_core_updates_and_drops_backup(core, monkeypatch):
+    lib, res, maacore = core
+
+    def installs():
+        assert (maacore._backup_root() / "library" / "MaaCore.dll").exists()    # 先备份
+        (lib / "MaaCore.dll").write_text("6.21.4", encoding="utf-8")
+    maa_update(monkeypatch, installs)
     r = update_cmd.apply_maa_core()
-    assert r["updated"] and (r["from"], r["to"]) == ("6.21.1", "6.21.4") and argvs[-1][-1] == "update"
+    assert r["updated"] and (r["from"], r["to"]) == ("6.21.1", "6.21.4") and not maacore._backup_root().exists()
+
+
+def test_failed_core_update_restores_old_version(core, monkeypatch):
+    """maa update 先删后装：删到一半失败，MaaCore 没了（11-06 Windows 上 os error 4395）。"""
+    lib, res, maacore = core
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+    maa_update(monkeypatch, wiped)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed" and "4395" in e.value.message and "6.21.1" in e.value.message
+    assert (lib / "MaaCore.dll").read_text(encoding="utf-8") == "6.21.1" and "网络能上" not in e.value.hint
+    assert updates.status()["maa-core"]["current"] == "6.21.1" and not maacore._backup_root().exists()
+
+
+def test_core_update_without_a_working_core_counts_as_failed(core, monkeypatch):
+    lib, res, maacore = core
+
+    def installs_nothing():
+        (lib / "MaaCore.dll").unlink()
+    maa_update(monkeypatch, installs_nothing)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed" and (lib / "MaaCore.dll").exists()
+
+
+def test_says_so_when_core_cannot_be_restored(core, monkeypatch):
+    lib, res, maacore = core
+
+    def wiped():
+        (lib / "MaaCore.dll").unlink()
+    maa_update(monkeypatch, wiped)
+    monkeypatch.setattr(maacore, "restore_core", lambda saved: False)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_core_broken" and e.value.data["backup"]
+    assert maacore._backup_root().exists() and updates.status()["maa-core"]["current"] is None   # 不再报旧版本
+
+
+def test_core_not_touched_when_backup_fails(core, monkeypatch):
+    lib, res, maacore = core
+
+    def full(*a, **kw):
+        raise OSError("磁盘满了")
+    monkeypatch.setattr(maacore, "backup_core", full)
+    maa_update(monkeypatch, lambda: pytest.fail("不该跑 maa update"))
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maa_core()
+    assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message
+
+
+def test_core_notes_shown(monkeypatch):
+    online(monkeypatch)
+    assert updates.status(updates.refresh())["maa-core"]["notes"]
 
 
 # --- MAA 资源 ----------------------------------------------------------------------------------------------------------

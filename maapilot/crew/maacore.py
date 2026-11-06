@@ -158,6 +158,37 @@ def _maa_dir(which: str) -> Path | None:
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
 
 
+def _backup_root() -> Path:
+    return paths.PRIVATE / "cache" / "maa-core-backup"
+
+
+def backup_core() -> dict[str, str]:
+    """把 maa-cli 的本体和自带资源复制一份：maa update 先删后装，半路失败时本体就没了。→ {原目录: 备份目录}。"""
+    dst = _backup_root()
+    shutil.rmtree(dst, ignore_errors=True)
+    saved = {}
+    for which in ("library", "resource"):
+        src = _maa_dir(which)
+        if src and src.is_dir():
+            shutil.copytree(src, dst / which)
+            saved[str(src)] = str(dst / which)
+    return saved
+
+
+def restore_core(saved: dict[str, str]) -> bool:
+    """备份盖回去（不先删：这些目录可能就是删不掉才失败的）。→ 本体能用了没有。"""
+    try:
+        for src, bak in saved.items():
+            shutil.copytree(bak, src, dirs_exist_ok=True)
+    except OSError:
+        return False
+    return cli_core() is not None
+
+
+def drop_backup() -> None:
+    shutil.rmtree(_backup_root(), ignore_errors=True)
+
+
 def hot_update_dir() -> Path | None:
     """maa-cli 热更新的资源目录；拿不到 → None。"""
     p = _maa_dir("hot-update")

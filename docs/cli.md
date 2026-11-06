@@ -950,7 +950,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 | `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份） |
 
 目标是用户不和更新断联：没有关掉检查的开关；缓存 20 小时算旧，`daily run` 开头（维护中也查）和 `update check` 重查；查不到不算错，留上次的结果，
-原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（从没查过也算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
+原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（一次都没查成就从第一次查算起；还没查过不算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
 `due`：有新版本、还没告诉用户的；`update told` 之后不再列，**7 天**后还没更新再列一次，出了更新的版本马上再列。
 
 | 命令 | 行为 |
@@ -964,7 +964,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 {"maapilot": {"current": "0.2.2", "commit": "553f177", "latest": "0.3.0", "update": true, "url": "https://github.com/…",
               "published": "…", "notes": "<更新说明，外来的文字>", "blocked": null},
  "maa-cli": {"current": "0.7.5", "latest": "0.7.7", "update": true},
- "maa-core": {"current": "6.21.1", "latest": "6.21.4", "update": true, "url": "…", "at": "…", "age_days": 0, "lost": false},
+ "maa-core": {"current": "6.21.1", "latest": "6.21.4", "update": true, "url": "…", "notes": "<更新说明，外来的文字>", "at": "…", "age_days": 0, "lost": false},
  "at": "…", "age_days": 0, "lost": false, "errors": {}, "due": ["maapilot", "maa-cli", "maa-core"]}
 ```
 
@@ -988,7 +988,10 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 成功：`{what, updated, from, to, commit, env_synced, url, notes, reread, next}`。`reread`：这次会话要重读的说明（skill 下次加载时自然是新的）。`next`：再查一次，新版本可能抬高了 `MAA_CLI_TESTED`。
 Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；换不了按上面退回旧版本。
 
-`network`（退出码 1）：拉不到 GitHub。`maa_update_failed`（退出码 1）：`maa update` 没成功，原来的版本还在。
+`network`（退出码 1）：拉不到 GitHub。
+
+`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`，跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
+`maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份也没恢复成，MAA 用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。
 
 ## memory —— 用户偏好（不碰模拟器）
 

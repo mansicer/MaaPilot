@@ -174,20 +174,43 @@ def apply_maa_cli() -> dict:
     return {"what": "maa-cli", "updated": True, "from": e["current"], "to": r["version"], "core": r.get("core")}
 
 
-def apply_maa_core() -> dict:
+def _maa_update() -> str | None:
+    """跑 maa update，再确认 MaaCore 真能用。→ 没成的原因；成了 → None。"""
     from maapilot import config
-    from maapilot.crew import maa as crew_maa
+    from maapilot.crew import maa as crew_maa, maacore
+    try:
+        p = procs.run_text([config.tool("maa"), "update"], timeout=MAA_UPDATE_TIMEOUT_S, env=crew_maa.env())
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"maa update 跑不了：{e}"
+    if p.returncode != 0:
+        return f"maa update 没成功（退出码 {p.returncode}）：{(p.stderr or p.stdout or '').strip()[-300:]}"
+    return None if maacore.cli_core() else "maa update 跑完了，但读不出 MaaCore"
+
+
+def apply_maa_core() -> dict:
+    from maapilot.crew import maacore
     st = check(refresh=True)
     e = st["maa-core"]
     if not e["update"]:
         return {"what": "maa-core", "updated": False, "version": e["current"], "latest": e["latest"]}
     with holding("update apply maa-core", job="update apply"):
-        p = procs.run_text([config.tool("maa"), "update"], timeout=MAA_UPDATE_TIMEOUT_S, env=crew_maa.env())
-    if p.returncode != 0:
-        raise CliError("maa_update_failed", f"maa update 没成功（退出码 {p.returncode}）：{(p.stderr or p.stdout or '').strip()[-300:]}",
-                       exit=FAILED, hint="网络能上 GitHub 吗？原来的版本还在，再试一次或下次再更新")
-    updates.reread_local()
+        try:
+            saved = maacore.backup_core()
+        except OSError as err:
+            raise CliError("maa_update_failed", f"备份不了原来的 MaaCore，没有更新：{err}", exit=FAILED,
+                           hint="原来的版本没动；看看磁盘空间和文件权限") from None
+        err = _maa_update()
+        restored = err is None or maacore.restore_core(saved)
+        if restored:
+            maacore.drop_backup()
+    updates.reread_local()                               # 成没成都重读：别留着已经不对的版本
     cur = (updates.load().get("local") or {}).get("maa_core")
+    if not restored:
+        raise CliError("maa_core_broken", f"{err}；备份也没恢复成，MAA 现在用不了", exit=FAILED, data={"backup": saved},
+                       hint="日常也跑不了，马上告诉用户；用 doctor 看情况，备份在 data.backup 里")
+    if err:
+        raise CliError("maa_update_failed", f"{err}；已恢复原来的版本 {cur}", exit=FAILED, data={"version": cur},
+                       hint="MAA 照旧能用，把原因告诉用户（不一定是网络问题，看错误原文）")
     return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"]}
 
 

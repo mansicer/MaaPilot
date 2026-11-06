@@ -1,13 +1,14 @@
 """MaaPilot 自己、maa-cli、MaaCore 有没有新版本（不碰模拟器）。契约见 docs/cli.md「update」。
 
 目标是用户不和更新断联，所以：
-- 新版本信息只看 GitHub Releases。没有关掉检查的开关；连续查不成功也不悄悄过去：超过 CHECK_LOST_DAYS 天没查成功，`status()` 的 `lost` 为真，启动检查、日常都写明。
+- 新版本信息只看 GitHub Releases。没有关掉检查的开关；连续查不成功也不悄悄过去：超过 CHECK_LOST_DAYS 天没查成功（一次都没成功过就从第一次查算起），`status()` 的 `lost` 为真，启动检查、日常都写明。还没查过不算。
 - 告诉过用户（`told`）只管一阵子：超过 REMIND_DAYS 天还没更新，再列进 `due`。
 
 - MAA 资源不问用户：日常开头 `maa hot-update`，maa-cli 跑任务前也会自己更新（cli.toml 的 resource.auto_update）。
   更新不成任务照跑，连着 CHECK_LOST_DAYS 天不成才告诉用户。
 
-缓存在 private/state/update.json：`{at, maa_core_at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
+缓存在 private/state/update.json：`{at, maa_core_at, tried_at, maapilot, maa_core, local, errors, resource, told: {<名字>: {version, at}}}`。
+`tried_at` 是第一次查的时间。
 `at`、`maa_core_at` 是最近一次查成功 MaaPilot、MaaCore 新版本的时间（各记各的：一边查不到不能被另一边盖住）；`resource` 是 `{at（最近一次更新成功）, commit, commit_at, error}`。
 """
 from __future__ import annotations
@@ -100,7 +101,7 @@ def local_versions() -> dict:
 def refresh() -> dict:
     """重新查一次（联网，要几秒到几十秒）。查不到的项留上次的结果、原因写进 errors，不抛错。"""
     errors: dict = {}
-    new: dict = {"local": local_versions()}
+    new: dict = {"local": local_versions(), "tried_at": load().get("tried_at") or _now().isoformat(timespec="seconds")}
     try:
         new.update(maapilot=_release("maapilot_release", MAAPILOT_API), at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 限流、连不上、格式变了：留上次的，连着几天这样就告诉用户
@@ -185,6 +186,12 @@ def _behind(cur, latest) -> bool:
     return bool(cur and latest) and toolchain.version_tuple(cur) < toolchain.version_tuple(latest)
 
 
+def _lost(at, d: dict) -> bool:
+    """查更新的路断了：最近一次成功（没成功过就是第一次查）到现在够久。还没查过 → False。"""
+    age = _age(at or d.get("tried_at"))
+    return age is not None and age.days >= CHECK_LOST_DAYS
+
+
 def status(d: dict | None = None) -> dict:
     """{maapilot, maa-cli, maa-core, at, age_days, lost, errors, due}。只读缓存，不联网。"""
     d = load() if d is None else d
@@ -197,12 +204,12 @@ def status(d: dict | None = None) -> dict:
                         "published": p.get("published"), "notes": p.get("notes") or ""},
            "maa-cli": _maa_cli(d),
            "maa-core": {"current": cur, "latest": c.get("version"), "update": _behind(cur, c.get("version")), "url": c.get("url"),
-                        "at": d.get("maa_core_at"), "age_days": None if core_age is None else core_age.days,
-                        "lost": core_age is None or core_age.days >= CHECK_LOST_DAYS},
+                        "notes": c.get("notes") or "", "at": d.get("maa_core_at"),
+                        "age_days": None if core_age is None else core_age.days, "lost": _lost(d.get("maa_core_at"), d)},
            "maa-resource": _resource(d)}
     age = _age(d.get("at"))
     out.update(at=d.get("at"), age_days=None if age is None else age.days, errors=d.get("errors") or {},
-               lost=age is None or age.days >= CHECK_LOST_DAYS)
+               lost=_lost(d.get("at"), d))
     out["due"] = [w for w in WHATS if out[w]["update"] and _due(w, out[w]["latest"], d)]
     return out
 
