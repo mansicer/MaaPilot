@@ -308,6 +308,13 @@ def test_skills_link_folder_does_not_block_update(repo):
     assert git(repo, "status", "--porcelain", "--untracked-files=no") == ""
 
 
+def test_refused_branch_leaves_index_alone(repo):
+    link_tracked_but_a_folder(repo)
+    git(repo, "switch", "-qc", "other")
+    assert update_cmd.blocked()["code"] == "not_on_main"
+    assert git(repo, "ls-files", "-t", ".claude/skills").startswith("H")
+
+
 @pytest.mark.parametrize("args", [("restore", ".claude/skills"), ("reset", "--hard"), ("stash",), ("checkout", "-f", "main")])
 def test_skills_link_folder_survives_git_cleanups(repo, args):
     link_tracked_but_a_folder(repo)

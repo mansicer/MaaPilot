@@ -150,8 +150,9 @@ def install(*, timeout_s: float = 600) -> dict:
 def _maa_dir(which: str) -> Path | None:
     """`maa dir <which>`；拿不到 → None。"""
     from maapilot import config
+    from maapilot.crew import maa as crew_maa
     try:
-        out = procs.run_text([config.tool("maa"), "dir", which], timeout=20)
+        out = procs.run_text([config.tool("maa"), "dir", which], timeout=20, env=crew_maa.env())
     except (OSError, subprocess.TimeoutExpired):
         return None
     return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None

@@ -46,12 +46,12 @@ def blocked() -> dict | None:
             return {"code": "git_failed", "message": "git 读不了这个文件夹", "hint": "先修好 git（doctor）"}
     except (OSError, subprocess.SubprocessError):
         return {"code": "no_git", "message": "这台电脑上跑不了 git", "hint": "先装 git"}
-    from maapilot.tools import doctor
-    doctor.keep_skills_link()                          # 不然 Windows 的目录联接在 git 眼里是"文件被删了"
     branch = _out("symbolic-ref", "--short", "HEAD")
     if branch != BRANCH:
         return {"code": "not_on_main", "message": f"现在不在 {BRANCH} 分支（{branch or '没有分支'}）",
                 "hint": f"问用户后 git switch {BRANCH}"}
+    from maapilot.tools import doctor
+    doctor.keep_skills_link()                          # 不然 Windows 的目录联接在 git 眼里是"文件被删了"
     dirty = (_git("status", "--porcelain", "--untracked-files=no").stdout or "").splitlines()
     if dirty:
         return {"code": "dirty", "message": "项目文件被改过：" + "、".join(l[3:] for l in dirty[:5]),
