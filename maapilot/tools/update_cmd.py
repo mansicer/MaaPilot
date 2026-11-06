@@ -208,17 +208,6 @@ def _maa_update() -> str | None:
     return None if maacore.cli_core() else "maa update 跑完了，但读不出 MaaCore"
 
 
-def _install_package(want: str) -> bool:
-    """maa update 走不通时，把发布包直接铺进去。→ 装上了这个版本没有。"""
-    from maapilot.crew import maacore
-    try:
-        maacore.install_into_cli()
-    except Exception:                                    # noqa: BLE001 - 下载、解包、复制都可能出错：调用方照样报 maa update 的错、恢复备份
-        return False
-    core = maacore.cli_core()
-    return bool(core) and core[0].removeprefix("v") == want
-
-
 def apply_maa_core() -> dict:
     from maapilot.crew import maacore
     st = check(refresh=True)
@@ -232,10 +221,6 @@ def apply_maa_core() -> dict:
             raise CliError("maa_update_failed", f"备份不了原来的 MaaCore，没有更新：{err}", exit=FAILED, data={"version": e["current"]},
                            hint="原来的版本没动；看看磁盘空间和文件权限") from None
         err = _maa_update()
-        via = "maa update"
-        if err and WINDOWS and maacore.restore_core(saved):  # 有些 Windows 环境里 maa update 删不掉目录（os error 4395）
-            if _install_package(e["latest"]):
-                err, via = None, "安装包"
         restored = err is None or maacore.restore_core(saved)
         if restored:
             maacore.drop_backup()
@@ -247,7 +232,7 @@ def apply_maa_core() -> dict:
     if err:
         raise CliError("maa_update_failed", f"{err}；已恢复原来的版本 {cur}", exit=FAILED, data={"version": cur},
                        hint="MAA 照旧能用，把原因告诉用户（不一定是网络问题，看错误原文）")
-    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"], "via": via}
+    return {"what": "maa-core", "updated": True, "from": e["current"], "to": cur, "latest": e["latest"]}
 
 
 def apply_resource() -> dict:

@@ -910,6 +910,9 @@ v0.1 的 `report seen`（记"告诉过用户没有"）去掉了：日常就在�
 
 ## tools —— 项目里的 maa-cli 和 adb（不碰模拟器）
 
+maa-cli 的数据（MaaCore、资源、热更新资源）放在 `.tools/maa-data/`：程序运行 maa-cli 时设 `MAA_DATA_DIR`。不放系统默认目录，是因为 Windows 上 MSIX 打包的 agent 应用（Claude 桌面版等）会重定向 `%APPDATA%`，`maa update` 在那里删不掉目录（`os error 4395`）。
+第一次用时把原来的数据复制过来（`maa dir data`，原来的不删）；复制不成就接着用原来的目录，下次再试。`MAA_DATA_DIR` 已经设了就照它。缓存和日志还在系统默认目录，`maa dir` 问得到。
+
 maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的 `.tools/`（不进 git）：`.tools/maa-cli/maa`、`.tools/platform-tools/adb`（Windows 带 `.exe`），
 各带一个 `VERSION` 文件。不用 Homebrew / winget，三个系统一样。MaaCore 和资源仍由 maa-cli 下载到它自己的数据目录。
 
@@ -947,7 +950,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 |---|---|---|---|
 | `maapilot` | `maapilot.__version__` | GitHub 上最新的正式 Release（草稿、预发布不算） | 本地 `main` 快进到发布标签 |
 | `maa-cli` | `.tools/` 里装的 | 这个版本的 MaaPilot 实测过的上限（`MAA_CLI_TESTED`），不跟 maa-cli 的最新版 | 同 `tools install maa-cli` |
-| `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份） |
+| `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份，放在 `.tools/maa-data/`） |
 
 目标是用户不和更新断联：没有关掉检查的开关；缓存 20 小时算旧，`daily run` 开头（维护中也查）和 `update check` 重查；查不到不算错，留上次的结果，
 原因写进 `errors`；**3 天**没查到 MaaPilot 的新版本信息 `lost` 为真（一次都没查成就从第一次查算起；还没查过不算），MaaCore 的同样看 `maa-core.lost`（两边各算各的），启动检查和日常结果写明。走系统的代理环境变量（`HTTPS_PROXY`）。
@@ -991,7 +994,7 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 `network`（退出码 1）：拉不到 GitHub。
 
-`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。Windows 上再试一次发布包：把缓存里或新下载的包直接铺进这两个目录，不删目录（`via: "安装包"`，针对 `maa update` 报 `os error 4395` 删不掉目录的环境），还不成再盖回备份。成没成都重读本机版本。
+`update apply maa-core`：`maa update` 是先删后装，所以先把 `maa dir library` 和 `maa dir resource` 备份到 `private/cache/maa-core-backup/`（两个目录缺一个就不更新），跑完确认读得出 MaaCore；没成就把备份盖回去。成没成都重读本机版本。
 `maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
 
 ## memory —— 用户偏好（不碰模拟器）

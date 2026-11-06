@@ -610,63 +610,6 @@ def test_core_not_touched_when_backup_fails(core, monkeypatch, why):
     assert e.value.code == "maa_update_failed" and "没有更新" in e.value.message and e.value.data == {"version": "6.21.1"}
 
 
-def windows_package(tmp_path, monkeypatch, maacore, lib, res, *, tag="v6.21.4"):
-    """假的发布：这个系统的包放在 maa-cli 的缓存目录里（不下载）。"""
-    import zipfile
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    name = f"MAA-{tag}-win-x64.zip"
-    with zipfile.ZipFile(cache / name, "w") as z:
-        z.writestr("MaaCore.dll", tag.removeprefix("v"))
-        z.writestr("start.bat", "x")
-        z.writestr("filelist.txt", "x")
-        z.writestr("externals/onnx.dll", "x")
-        z.writestr("resource/tasks.json", "new")
-    monkeypatch.setattr(update_cmd, "WINDOWS", True)
-    monkeypatch.setattr(maacore, "WINDOWS", True)
-    monkeypatch.setattr(maacore, "_asset_pattern", lambda: __import__("re").compile(r"^MAA-v[\d.]+-win-x64\.zip$"))
-    monkeypatch.setattr(maacore, "_maa_dir", lambda which: {"library": lib, "resource": res, "cache": cache}[which])
-
-    class Rel:
-        def __enter__(self):
-            return __import__("io").BytesIO(json.dumps({"tag_name": tag, "assets": [{"name": name}]}).encode())
-
-        def __exit__(self, *a):
-            return False
-    monkeypatch.setattr(maacore.urllib.request, "urlopen", lambda *a, **kw: Rel())
-
-
-def test_windows_falls_back_to_the_package(core, monkeypatch, tmp_path):
-    lib, res, maacore = core
-
-    def wiped():
-        (lib / "MaaCore.dll").unlink()
-    maa_update(monkeypatch, wiped)
-    windows_package(tmp_path, monkeypatch, maacore, lib, res)
-    r = update_cmd.apply_maa_core()
-    assert r["updated"] and r["to"] == "6.21.4" and r["via"] == "安装包"
-    assert sorted(f.name for f in lib.iterdir()) == ["MaaCore.dll", "onnx.dll"]
-    assert (res / "tasks.json").read_text(encoding="utf-8") == "new" and not maacore._backup_root().exists()
-
-
-def test_package_failure_restores_old_version(core, monkeypatch, tmp_path):
-    lib, res, maacore = core
-
-    def wiped():
-        (lib / "MaaCore.dll").unlink()
-    maa_update(monkeypatch, wiped)
-    monkeypatch.setattr(update_cmd, "WINDOWS", True)
-
-    def fails():
-        (lib / "half.dll").write_text("x", encoding="utf-8")
-        raise OSError("下载失败")
-    monkeypatch.setattr(maacore, "install_into_cli", fails)
-    with pytest.raises(CliError) as e:
-        update_cmd.apply_maa_core()
-    assert e.value.code == "maa_update_failed" and [f.name for f in lib.iterdir()] == ["MaaCore.dll"]
-    assert (lib / "MaaCore.dll").read_text(encoding="utf-8") == "6.21.1"
-
-
 def test_startup_asks_for_a_check_when_stale():
     u = doctor.update_brief(startup=True)
     assert u["check_needed"] and "update check" in u["lines"][-1]

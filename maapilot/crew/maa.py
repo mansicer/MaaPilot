@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from maapilot import paths
+from maapilot import paths, toolchain
 from maapilot.oscompat import fs, procs
 
 TASK_PREFIX = "maapilot-"
@@ -60,8 +60,44 @@ def maa_bin() -> str:
     return shutil.which(t) or t
 
 
+def data_dir() -> Path:
+    """maa-cli 的数据（MaaCore、资源）放在项目里：Windows 上 MSIX 打包的 agent 应用会重定向 %APPDATA%，
+    maa update 在那里删不掉目录（os error 4395）。"""
+    return toolchain.tools_dir() / "maa-data"
+
+
+def _move_data_in(new: Path) -> None:
+    """把原来的数据复制过来（原来的不删）；没有就建空目录。一次到位：复制一半时目录不算建好。"""
+    p = procs.run_text([maa_bin(), "dir", "data"], timeout=20, env={**os.environ, "MAA_CONFIG_DIR": str(config_dir())})
+    if p.returncode != 0:
+        raise OSError(f"maa dir data 退出码 {p.returncode}")
+    old = Path((p.stdout or "").strip())
+    tmp = new.with_name(f"{new.name}.tmp{os.getpid()}")
+    try:
+        if old.name and (old / "lib").is_dir():
+            shutil.copytree(old, tmp, symlinks=True)
+        else:
+            tmp.mkdir(parents=True)
+        tmp.rename(new)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def data_env() -> dict:
+    """跑 maa-cli 时要加的 MAA_DATA_DIR。还搬不过来（maa 跑不了、复制失败）→ 空，接着用原来的目录，下次再试。"""
+    new = data_dir()
+    if "MAA_DATA_DIR" in os.environ:
+        return {}
+    if not new.is_dir():
+        try:
+            _move_data_in(new)
+        except (OSError, subprocess.SubprocessError):
+            return {}
+    return {"MAA_DATA_DIR": str(new)}
+
+
 def env() -> dict:
-    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir())}
+    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir()), **data_env()}
 
 
 def config_missing() -> list[str]:

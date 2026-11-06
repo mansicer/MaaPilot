@@ -38,6 +38,8 @@ def _tmp_private(tmp_path, monkeypatch):
     # 不用本机 maa-cli 真装好的 MaaCore（要测的测试自己换掉）
     from maapilot.crew import maacore
     monkeypatch.setattr(maacore, "cli_core", lambda: None)
+    # 不搬本机 maa-cli 的数据（要测的测试自己删掉这个变量）
+    monkeypatch.setenv("MAA_DATA_DIR", str(tmp_path / "maa-data"))
     # 查新版本不联网、不跑本机的 maa（要测的测试自己换掉）
     from maapilot.knowledge import updates
 

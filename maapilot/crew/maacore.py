@@ -119,34 +119,17 @@ def install(*, timeout_s: float = 600) -> dict:
     have = find()
     if have and have[0] == tag:
         return {"version": tag, "dir": str(have[1]), "installed": False}
+    pat = _asset_pattern()
+    asset = next((a for a in rel.get("assets") or [] if pat.match(a["name"])), None)
+    if asset is None:
+        raise RuntimeError(f"{tag} 的发布里没有这个系统的本体")
     dest = root() / tag
     tmp = root() / f".{tag}.download"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    out = _unpack(_download(rel, tmp, timeout_s), tmp, timeout_s)
-    shutil.rmtree(dest, ignore_errors=True)
-    out.rename(dest)
-    shutil.rmtree(tmp, ignore_errors=True)
-    found = find()
-    return {"version": tag, "dir": str(found[1]) if found else str(dest), "installed": True}
-
-
-def _download(rel: dict, tmp: Path, timeout_s: float) -> Path:
-    """这个系统的发布包：maa-cli 的缓存里下载过就用它，否则下到 tmp。"""
-    pat = _asset_pattern()
-    asset = next((a for a in rel.get("assets") or [] if pat.match(a["name"])), None)
-    if asset is None:
-        raise RuntimeError(f"{rel['tag_name']} 的发布里没有这个系统的本体")
-    cache = _maa_dir("cache")
-    if cache and zipfile.is_zipfile(cache / asset["name"]):
-        return cache / asset["name"]
     archive = tmp / asset["name"]
     with urllib.request.urlopen(asset["browser_download_url"], timeout=timeout_s) as r, archive.open("wb") as f:
         shutil.copyfileobj(r, f)
-    return archive
-
-
-def _unpack(archive: Path, tmp: Path, timeout_s: float) -> Path:
     out = tmp / "x"
     if archive.name.endswith(".zip"):
         # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留。Windows 上用不着这些（PATH 上的 unzip 多半是 MSYS 的，不用）
@@ -157,30 +140,11 @@ def _unpack(archive: Path, tmp: Path, timeout_s: float) -> Path:
     else:
         with tarfile.open(archive) as t:
             t.extractall(out, filter="data")
-    return out
-
-
-def install_into_cli(timeout_s: float = 600) -> str:
-    """Windows 上 maa update 删不掉目录时（os error 4395）：把发布包直接铺进 maa-cli 的 lib 和 resource，不删目录。
-    顶层文件和 externals 下的都放进 lib，resource 放进 resource。失败抛异常，由调用方恢复备份。→ 版本。"""
-    lib, res = _maa_dir("library"), _maa_dir("resource")
-    if lib is None or res is None:
-        raise OSError("找不到 maa-cli 的 MaaCore 目录")
-    with urllib.request.urlopen(urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json"}),
-                                timeout=30) as r:
-        rel = json.load(r)
-    tmp = paths.PRIVATE / "cache" / "maa-core-unpack"
+    shutil.rmtree(dest, ignore_errors=True)
+    out.rename(dest)
     shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir(parents=True)
-    try:
-        out = _unpack(_download(rel, tmp, timeout_s), tmp, timeout_s)
-        for f in [*out.glob("*"), *(out / "externals").rglob("*")]:
-            if f.is_file() and f.suffix != ".bat" and f.name != "filelist.txt":
-                shutil.copy2(f, lib / f.name)
-        shutil.copytree(out / "resource", res, dirs_exist_ok=True)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return rel["tag_name"]
+    found = find()
+    return {"version": tag, "dir": str(found[1]) if found else str(dest), "installed": True}
 
 
 def _maa_dir(which: str) -> Path | None:
