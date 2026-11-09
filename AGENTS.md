@@ -15,6 +15,7 @@
 | Codex（桌面版、命令行） | `docs/harnesses/codex.md` |
 | OpenClaw | `docs/harnesses/openclaw.md` |
 | pi | `docs/harnesses/pi.md` |
+| DSH（DeepSeek Harness） | `docs/harnesses/dsh.md` |
 
 不在表里的 harness：按 `docs/harnesses/README.md` 的通用做法来，跟用户说一声这个 harness 还没有专门的说明。
 
