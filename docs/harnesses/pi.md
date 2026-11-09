@@ -49,12 +49,12 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
 
 ## 实测
 
-- 10-27（macOS，pi 1.2.0 + pi-schedule-prompt 0.4.1，在空目录里测扩展，没有跑 MaaPilot）：
+- 10-27（pi 1.2.0 + pi-schedule-prompt 0.4.1，在空目录里测扩展，没有跑 MaaPilot）：
   - 一次性定时准时响；到点时 agent 正在前台跑命令，提示排队，命令跑完、回完话再送进来，没有丢。
   - 接力：定时醒来的那一轮里建下一个一次性定时，下一个照样准时响。
   - 关掉 pi 后 `pi -c` 回到原会话，没到点的定时照样响；开新会话不响（定时还留在 `.pi/schedule-prompts.json` 里，绑着旧会话）。
 - 同一轮比较过的另两个扩展：@pi-agents/loop（agent 刚忙完时到点，提示发送失败，一次性定时就丢了）不用；@mjakl/pi-cron 也能用，但没发到 npm、用的人少。
-- 10-28（Windows 11，pi 1.4.0 + pi-schedule-prompt，模型 DeepSeek flash，在 MaaPilot 项目里）：
+- 10-28（pi 1.4.0 + pi-schedule-prompt，模型 DeepSeek flash，在 MaaPilot 项目里）：
   - setup 完整走通（信任、skills、读截图、问定时、装扩展、建一次性定时并核对）；前台跑完一次约 36 分钟的 `daily run`。
   - 16:40 的定时日常准时响：先建好下一次（次日 04:40）再 `daily run --trigger schedule`，跑完对账、`daily done`、在会话里汇报，中途没问问题。
   - 偏差（已补进上面和 skill `maapilot-daily`）：给 `daily run` 填了 `timeout: 7200`；刷理智交回后自己 `maa fight` 补刷，没用 `daily run --only farm`，汇报里刷理智一直算失败。
