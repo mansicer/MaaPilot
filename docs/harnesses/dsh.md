@@ -18,9 +18,28 @@ DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼�
 
 - 用桌面版，或者在终端里跑 `dsh web`；`--profile headless`（跑一次就退出）没有定时，定时日常做不了。
 - 打开的工作目录要是 MaaPilot 项目文件夹本身（项目根目录按最近的 `.git` 找）。
-- 请用户在这个工作区把权限切到"完全权限"，说清：不切的话每次跑 MAA 都要点同意，定时日常会卡住；切了以后 DSH 能读写电脑上的任何文件，所以只在 MaaPilot 这个工作区开，别的工作区保持默认。
+- 请用户在这个工作区把权限切到"完全权限"，**最好在这个工作区跑第一条命令之前就切**（沙箱模式下跑命令会给项目文件夹加低完整性标签，见下「Windows：项目文件夹被加上低完整性标签」）。说清：不切的话每次跑 MAA 都要点同意，定时日常会卡住；切了以后 DSH 能读写电脑上的任何文件，所以只在 MaaPilot 这个工作区开，别的工作区保持默认。
+- Windows 上按下面那一节查一次项目文件夹有没有低完整性标签，有就请用户去掉。
 - 装运行环境、装 maa-cli 时，有的命令要在项目文件夹外写东西（例如下载缓存），DSH 会问要不要越界：告诉用户这是装运行环境、点同意。（待实测：具体哪几步会问）
 - 跟用户说清：到点时 DSH 要开着。桌面版关掉窗口只是缩到托盘，定时照样跑；从托盘退出 DSH，定时就停了。
+
+## Windows：项目文件夹被加上低完整性标签（重要）
+
+DSH 的 Windows 沙箱要往工作区写东西时，会给工作区文件夹一次加三样：沙箱身份（`S-1-4-…`）的修改权限、`Everyone` 不许删子项、**低完整性（Low）标签**（DSH 代码里的 `grantWrite`；11-09 实测）。
+之后切成"完全权限"，标签也还留在文件夹上。Windows 会让从带"低"标签的文件夹里启动的程序都以低完整性运行，所以项目里的 `.venv` Python、`maa.exe` 都写不了项目外普通权限的地方：
+- MAA 启动时写 `%LOCALAPPDATA%\loong\maa\cache\StageActivityV2.json` 失败（`os error 5`，拒绝访问），`maa` 命令全部退出码 1；
+- **不只 DSH**：别的 harness（Claude Code、Codex……）在这台电脑上跑 MaaPilot 也一样失败，包括它们的定时日常。
+
+查：MaaPilot 会自己查。被加上了，启动检查（`doctor --brief` 的 `low_integrity`）、`doctor` 的 `integrity` 项都会写明原因和命令，`maa` 命令也会直接报 `low_integrity`（退出码 5），不用再去排查 MAA 的报错。
+手动看：`icacls "<项目文件夹>"`，输出里有 `Mandatory Label\Low Mandatory Level` 就是被加上了。
+修：告诉用户原因，请用户在自己的 PowerShell 里跑（或用户同意后你在普通权限的 shell 里跑；MaaPilot 自己这时已经是低完整性，改不回来）：
+
+```powershell
+icacls "<项目文件夹>" /setintegritylevel "(OI)(CI)M"
+```
+
+（`(OI)(CI)M` 要带引号，不然 PowerShell 把括号当表达式。）改完 `icacls "<项目文件夹>\.venv\Scripts\python.exe"` 应该显示 `Medium`。只改标签，不动文件和读写权限；另外两样不影响 MaaPilot，不用动。
+DSH 再在沙箱模式下对这个工作区跑命令，会把标签重新加上：所以这个工作区一直用"完全权限"。
 
 ## 定时日常
 

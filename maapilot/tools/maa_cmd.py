@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 from maapilot import config
-from maapilot.cliutil import BAD_REQUEST, FAILED, CliError
+from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, FAILED, CliError
 from maapilot.tools import common
 
 # 任务 → (MAA 任务类型, 超时秒数)
@@ -472,6 +472,14 @@ def run(task: str, **opts) -> dict:
     data["evidence"] = collect_evidence(task, started, common.now())
     if data["evidence"].get("shot_now"):
         data["_log"] = {"shot_now": data["evidence"]["shot_now"]}   # 记进命令记录，maa why 也用
+    from maapilot import paths
+    from maapilot.oscompat import integrity
+    li = integrity.low_integrity(paths.ROOT)
+    if li:                                             # Windows：DSH 沙箱给项目加的低完整性标签，MAA 写不了缓存，重试没用
+        from maapilot.tools import doctor
+        data["low_integrity"] = li
+        raise CliError("low_integrity", f"{task} 没做成：" + doctor.LOW_INTEGRITY_WHY, exit=ENVIRONMENT, data=data,
+                       hint=doctor.LOW_INTEGRITY_FIX.format(cmd=li["fix"]))
     if mrun.error:
         raise CliError("maa_failed", mrun.error, hint="maapilot doctor", exit=FAILED, data=data)
     data["errors"] = maa.error_lines(mrun)

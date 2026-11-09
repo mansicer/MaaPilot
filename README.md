@@ -68,6 +68,9 @@ MaaPilot 不绑定具体 Harness，但使用到的模型和Harness应该满足�
 
 DeepSeek Harness，用桌面版或 `dsh web`，选能看图的模型（默认的 `deepseek-flash` 就可以）。定时日常用它的每天重复定时，DSH 要开着（桌面版关掉窗口会缩到托盘，照样跑）。还是实验支持，见 [`docs/harnesses/dsh.md`](docs/harnesses/dsh.md)。
 
+> [!IMPORTANT]
+> Windows 上请在 DSH 里把 MaaPilot 的工作区设成"完全权限"，并且在第一次用之前就设好。DSH 的沙箱会给项目文件夹加上"低完整性"标签，之后项目里的 MAA 写不了自己的缓存，**这台电脑上所有 harness 跑 MaaPilot 都会失败**（包括 Claude Code、Codex 的定时日常）。MaaPilot 会自己检查：被加上了，助手会在会话开头告诉你，并给出去掉它的命令（`icacls "<项目文件夹>" /setintegritylevel "(OI)(CI)M"`，在 PowerShell 里运行），详见 [`docs/harnesses/dsh.md`](docs/harnesses/dsh.md)。
+
 接新的 harness 看 [`docs/harnesses/README.md`](docs/harnesses/README.md)。
 
 ## 亮点功能

@@ -30,6 +30,8 @@
   `daily_open`（上一次日常还没收尾：程序跑完了，目标部分、领奖励、对账、汇报还没做完）：第一句回复就告诉用户，然后按 skill `maapilot-daily`「接着收尾」做完、`daily done` 收尾。
   `legacy_schedule`（还留着旧版用系统定时任务跑的定时日常）：第一句回复就告诉用户，说清它会和会话里的定时重复跑日常，问要不要删掉；
   用户同意后 `maapilot daily unschedule`，再按 skill `maapilot-setup`「定时日常」在会话里定好。
+  `low_integrity`（Windows：项目文件夹被 DSH 的沙箱模式加上了低完整性标签，所有 harness 的 MAA 任务都会失败）：第一句回复就告诉用户原因，
+  用户同意后在普通权限的 shell 里跑它给的命令去掉（MaaPilot 自己改不回来；见 `docs/harnesses/dsh.md`）。
   `news.due` 不为空（新的活动 / 维护公告、维护结束、活动开始，还没跟用户说）：也在第一句回复里说，按 skill `maapilot-events`。
   没有就不用主动汇报，用户问起再说。
 - 设置好了（`next` 不是 `"setup"`、运行环境也在）：回复用户之前先跑一次 `maapilot update check`（启动检查不联网，这条联网查；查不到不算错）。平时十几秒内；刚从 0.3.0 更新上来的第一次要先搬 MAA 的数据，可能几分钟，能放后台就放后台。

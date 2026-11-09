@@ -103,6 +103,7 @@
 | name | 查什么 | 修复建议 |
 |---|---|---|
 | `config` | `private/config.yaml` 在、能解析、`emulator.address` 已填 | 做 setup |
+| `integrity` | 只有 Windows：项目文件夹带"低完整性"标签，或本进程就是低完整性（`folder`、`process` 是两者的级别，`command` 是去掉标签的命令）。**DSH 的沙箱模式**会给工作区加这个标签（切成完全权限后也还留着）：从项目里启动的 Python、MAA 都降成低完整性，MAA 写不了项目外的缓存（`%LOCALAPPDATA%\loong\maa\cache`，os error 5），所有 harness 的 MAA 任务都失败。低完整性的进程改不回标签，`--fix` 不做 | 告诉用户原因，同意后在普通权限的 PowerShell 里跑 `icacls "<项目文件夹>" /setintegritylevel "(OI)(CI)M"`；DSH 的这个工作区一直用完全权限 |
 | `adb` | adb 程序能跑（版本）；程序按 `config.adb_path`（`emulator.adb` 写了路径就照它，写 `adb` 时先用 `.tools/` 里装好的） | `maapilot tools install adb`（Windows 优先用模拟器自带的 adb.exe） |
 | `emulator` | `adb connect` + 设备 online；地址没填或连不上时列出在线的候选（`adb devices` 与常见端口的 `adb connect` 探测） | 开模拟器、打开 ADB 调试、填地址 |
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
@@ -153,6 +154,7 @@
 `lines` 是给会话开头看的几行中文摘要。`daily_open`：没收尾的日常（同 `daily status` 的 `open`，另有 `running`：`daily run` 还在跑；正在跑时带 `step`），没有为 `null`；
 `lines` 里写一行：还在跑 / 还没收尾（做完目标部分、领奖励、对账后 `daily done`）/ 超过 6 小时没收尾（下次 `daily run` 自动收尾）。
 `legacy_schedule`：系统里还留着 v0.1 的定时日常（同 `doctor` 的 `legacy_schedule` 项）时是 `{times, backend}`，`lines` 里提示用户同意后 `daily unschedule`、再用 harness 定好；没有（或看不了）为 `null`。
+`low_integrity`：Windows 上项目文件夹带低完整性标签（同 `doctor` 的 `integrity` 项，DSH 沙箱加的）时是 `{folder, process, fix}`，`lines` 里写原因和去掉的命令，先跟用户说；没有、不是 Windows 为 `null`。
 `last_daily` 取 `private/reports/` 里最新的运行汇报 `<YYYY-MM-DD-HHMM>.json`（读它的 `finished_at` / `at` / `started_at` 与 `ok`）；
 `goals_active` 用 `maapilot.flows.goals.active_count()`。`goals`：进行中的目标（`title`、`object`、`deadline`、`days_left`，同 `goals list`），`lines` 里逐个列出，
 让 agent 做别的事时想着别用掉它们要的材料；读不了为 `null`。`news`：缓存里的官方日程（不联网；只有国服——`server` 是 `Official` 或 `Bilibili`——有缓存时才有，否则 `null`）：
@@ -286,6 +288,7 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 
 失败退出码 1，`error.code`：`maa_failed`（`data.log`、`data.errors` 是日志里最后几行错误）、`offline`（日志里有 GameOffline：掉线 / 服务器维护，
 重登或稍后重试，不用接管）、`not_open`（关卡今天不开）、`maa_unsupported_stage`（MAA 导航不了这个活动关）、`not_raid_mode`（`copilot --raid raid` 开打前关卡详情页不是突袭模式：`data.raid_check.mode` 为 `normal` 是还在常规模式，`unknown` 是认不出模式按钮（不在详情页，如已进编队页，或这关没有突袭），`data.raid_check.shot` 是那张截图；没跑 maa、没花理智，切到突袭、停在详情页再跑）。maa-cli 找不到退出码 1（`maa_failed`，message 是启动失败的原因）。
+没做成时项目文件夹带 Windows 低完整性标签（DSH 沙箱加的，见 `doctor` 的 `integrity`）：退出码 5（`low_integrity`，`data.low_integrity` 同 `doctor --brief`，`hint` 是去掉标签的命令），重试没用，先跟用户说。
 maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa run` 的标准输出里没有 Summary 任务行；`fight` 的日志里既没有 `Current sanity` 也没有 `Mission started`），
 命令照常返回，`data.upstream_format` 是一句说明，同时记进 `sources.json`（maa-cli 的输出格式可能变了，次数、理智、掉落记不到）。
 
