@@ -8,7 +8,7 @@ DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼�
 | 说明文件 | `AGENTS.md`（DSH 直接读，从项目根目录读到工作目录）。`CLAUDE.md` 也会读，但 DSH 不认 `@AGENTS.md` 这种引入，会把它当成一行普通文字，不影响 |
 | skills | `.agents/skills/`（DSH 直接读，不用信任项目） |
 | 启动检查 | 没有启动钩子：`AGENTS.md` 让你开头自己跑一次 `maapilot doctor --brief` |
-| 权限 | 没有按命令的规则：默认的"工作区可写"只拦在项目文件夹外写东西，要越界时问用户。`guard allow` 不会弹确认，`private/skland.json` 也拦不住，靠你守 `AGENTS.md`；程序自己的对账照样在 |
+| 权限 | 没有按命令的规则。**MaaPilot 的工作区要用"完全权限"**（输入框下面的权限选择）：默认的"工作区内修改"沙箱里，MAA 启动不了 adb、写不了自己的缓存目录（在项目外），每跑一次 MAA 都要用户批准一次越界，定时日常没人点就卡住（11-09 实测）。`guard allow` 不会弹确认，`private/skland.json` 也拦不住，靠你守 `AGENTS.md`；程序自己的对账照样在 |
 | PATH | 没有钩子放 `.venv/bin`：`maapilot` 提示找不到时整个会话写 `.venv/bin/maapilot <命令>`。Windows 上 DSH 用 PowerShell 跑命令，写 `.venv\Scripts\maapilot.exe <命令>` |
 | 定时 | `schedule_create` / `schedule_list` / `schedule_edit`，每个时间点一个每天重复的定时，发回这个会话（见下）；DSH 要开着 |
 | 长命令 | 放后台（`run_in_background`），结束时 DSH 会叫醒你；前台最长 10 分钟，超时了会自动转成后台接着跑，不会被杀掉 |
@@ -18,6 +18,7 @@ DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼�
 
 - 用桌面版，或者在终端里跑 `dsh web`；`--profile headless`（跑一次就退出）没有定时，定时日常做不了。
 - 打开的工作目录要是 MaaPilot 项目文件夹本身（项目根目录按最近的 `.git` 找）。
+- 请用户在这个工作区把权限切到"完全权限"，说清：不切的话每次跑 MAA 都要点同意，定时日常会卡住；切了以后 DSH 能读写电脑上的任何文件，所以只在 MaaPilot 这个工作区开，别的工作区保持默认。
 - 装运行环境、装 maa-cli 时，有的命令要在项目文件夹外写东西（例如下载缓存），DSH 会问要不要越界：告诉用户这是装运行环境、点同意。（待实测：具体哪几步会问）
 - 跟用户说清：到点时 DSH 要开着。桌面版关掉窗口只是缩到托盘，定时照样跑；从托盘退出 DSH，定时就停了。
 

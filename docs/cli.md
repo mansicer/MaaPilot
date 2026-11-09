@@ -346,7 +346,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 
 | 命令 | 做什么 |
 |---|---|
-| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、热度高 |
+| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、热度高。悖论模拟关不在关卡数据里，走"原样当关键词"：写这关的名字（悖论模拟页右上角那行字，如"百炼"），写"悖论模拟"搜出来的是不相干的作业 |
 | `copilot show <作业编号>` | 一份作业（编号或 `prts://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
 | `copilot strip <作业编号>` | 去掉作业里所有干员的练度要求（`requirements`），存成 `private/cache/copilot/<编号>_noreq.json`（`maa copilot --ignore-requirements` 还被 MAA 拒绝时，把这个文件交给 `maa copilot`）。`{id, path, removed}` |
 

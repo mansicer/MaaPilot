@@ -68,7 +68,7 @@ harness 没有一次性定时、或一次性的不可靠的，改用每天重复
 | 把某某练到精2、专三、想打某关、这个目标不要了、目标进度 | `maapilot-goals`（判断能不能马上做、要不要写成目标） |
 | 升级、精英化、升技能、专精、模组 | `maapilot-training` |
 | 合成材料、加工站、制造站、基建 | `maapilot-base` |
-| 打某一关、剿灭、推图、模组任务 | `maapilot-battle` |
+| 打某一关、剿灭、推图、模组任务、悖论模拟 | `maapilot-battle` |
 | 任务失败、游戏卡住、掉线、界面不对 | `maapilot-recovery` |
 | 重新设置、换模拟器 | `maapilot-setup` |
 
