@@ -346,25 +346,32 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 
 | 命令 | 做什么 |
 |---|---|
-| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、热度高 |
+| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、一个干员都没写的靠后、没核对到的少（读不到的项，加作业没写要求的干员）、热度高。
+关卡没认出来（`stage_id` 是 `null`，例如悖论模拟、没有游戏数据）时，先在作业站的关卡表（`/arknights/level`）里找这关，按对得上的关的 stageId 去查（对得上几关就每关各查 N 份），再核对每份作业的 `stage`：不是这关的去掉（作业站不认的词会按热度给别的关的作业），记在 `dropped`；`matched_stages` 是对得上的关（关卡号、关名、stageId 一模一样的，没有再找包含的），每份作业加 `stage_label`（如 `悖论模拟·重装·塞雷娅「死路」`）；对得上好几关、去掉了作业、没有游戏数据、关卡表连不上（这时不去掉）都写在 `warning`。悖论模拟关不在关卡数据里，走"原样当关键词"：写这关的名字（悖论模拟页右上角那行字，如"百炼"），写"悖论模拟"搜出来的是不相干的作业 |
 | `copilot show <作业编号>` | 一份作业（编号或 `prts://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
 | `copilot strip <作业编号>` | 去掉作业里所有干员的练度要求（`requirements`），存成 `private/cache/copilot/<编号>_noreq.json`（`maa copilot --ignore-requirements` 还被 MAA 拒绝时，把这个文件交给 `maa copilot`）。`{id, path, removed}` |
 
 ```json
 // copilot find
-{"stage": "YW-8", "stage_id": "act…_08", "keyword": "act…_08", "count": 20, "box_at": "…", "box_source": "skland",
+{"stage": "YW-8", "stage_id": "act…_08", "keyword": "act…_08", "count": 20, "matched_stages": null, "dropped": 0, "warning": null,
+ "box_at": "…", "box_source": "skland",
  "plans": [{"id": 64408, "uri": "prts://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
             "views": 1200, "hot": 35, "like": 40, "dislike": 1, "rating": 9,
             "opers": [{"name": "能天使", "skill": 3, "required": {"elite": 2, "level": 60, "skill_level": 10},
                        "have": true, "current": {"elite": 2, "level": 90, "potential": 1, "skill_level": 7, "mastery": 2, "modules": [...]},
                        "gaps": ["要技能3 专3，现在专2"], "unknown": []}],
-            "groups": [{"name": "…", "opers": [...], "have": true, "best": "…", "gaps": 0}],
-            "missing_ops": ["…", "群攻（任选：…/…）"], "gap_count": 1, "all_owned": false}]}
+            "groups": [{"name": "…", "opers": [...], "have": true, "best": "…", "gaps": 0, "unknown": []}],
+            "missing_ops": ["…", "群攻（任选：…/…）"], "gap_count": 1, "all_owned": false,
+            "unknown_count": 0, "unchecked": [], "meets": false}]}
 ```
 
 - `required` 是作业的 `requirements`（MAA 作业协议：`skill_level` 1–7 是技能等级、8–10 是专精 1–3；`module` 1 χ、2 γ、3 α、4 Δ；`potentiality` 从 1 数）。
 - `gaps`：精英化与等级、技能等级、专精、模组、潜能没到的项（中文）；没有这个干员是 `["没有这个干员"]`。森空岛把没解锁的模组也列出来：有 `locked` 照它，没有就按"没精2 → 没有、等级 ≥2 或装着 → 有、其余不知道"推。
-- `groups` 是可选位（任选一名）：`best` 是有的里面差距最少的，`gaps` 是它的差距数。没有 `box.json` 时 `have`、`current`、`gap_count`、`all_owned` 都是 `null`。
+- `box_source`：`skland`（森空岛，技能、专精、模组都有）或 `maa`（`state box` 的 MAA 识别，只有精英化、等级、潜能）；没有 `box.json` 时 `null`。
+- `groups` 是可选位（任选一名）：`best` 是有的里面差距最少的（一样少时挑读不到的项少、作业写了要求的；所以是"最好核对的"，不一定是练度最高的），`gaps` 是它的差距数，`unknown` 是它读不到的项。没有 `box.json` 时 `have`、`current`、`gap_count`、`all_owned`、`unknown_count`、`meets` 都是 `null`，`unchecked` 是 `[]`。
+- **`gap_count` 是 0 不等于满足要求**，看 `meets`：`true` 是人都有、没有差距、也没有没核对到的；`false` 是缺人或有差距；`null` 是说不准，原因列在 `unchecked`（中文）：
+  用到的干员里读不到的项（"遥：技能等级、专精读不到，没对照"，`unknown_count` 是项数；多半是没接森空岛）、作业没写练度要求的干员（"作业没写练度要求，只核对了有没有这名干员：…"；要求全写 0 也算没写）、作业里一个干员都没写的（"作业里没写干员，没法核对"）。干员还没有作业要的那个技能时，算差距，不再说"专精读不到"。
+  读不到的项不能当成够：开打前先读出来（`state skland`；没接森空岛时技能等级用 `state op <干员>`，专精、模组看干员页），自己对着 `required` 比。
 - `rating`：评分人数不够时为 `null`。连不上作业站退出码 1（`network`）；没有这份作业退出码 2（`not_found`）；编号不是数字退出码 2（`bad_arguments`）；`strip` 读不出作业内容退出码 1（`bad_plan`）。
 
 ## skland —— 森空岛（非官方接口）
