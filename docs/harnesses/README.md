@@ -10,6 +10,7 @@ MaaPilot 只做和游戏相关的部分（`AGENTS.md`、skills、`maapilot` 工�
 | Codex（桌面版、命令行） | [`codex.md`](codex.md) |
 | OpenClaw | [`openclaw.md`](openclaw.md) |
 | pi | [`pi.md`](pi.md) |
+| DSH（DeepSeek Harness） | [`dsh.md`](dsh.md) |
 
 ## 要 harness 提供什么
 
