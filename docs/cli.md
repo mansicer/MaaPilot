@@ -61,6 +61,8 @@
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
 | `update check / told` | 否（`check` 联网） | 放行 | A |
 | `memory tidied` / `memory import` | 否 | 放行 | A |
+| `feedback draft / show / redact / list / discard` | 否（`draft` 跑不碰模拟器的环境检查） | 放行 | A |
+| `feedback send` | 否（联网：上传给开发者的服务器） | 放行（用户在对话里同意后才跑，AGENTS.md 硬规则 10） | A |
 | `update apply maapilot\|maa-cli\|maa-core\|maa-resource` | 否（拿锁，换程序） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
 | `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
@@ -1025,6 +1027,62 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 `maa_update_failed`（退出码 1）：没更新成，原来的版本已恢复（`data.version`），也包括备份不了、什么都没动的情况。`maa_core_broken`（退出码 1）：备份没有恢复干净，或者重装也没成，MAA 可能用不了，`data.backup` 是 `{原目录: 备份目录}`，备份留着。恢复时也删掉备份里没有的文件，不留新旧混杂。
 再跑一次 `update apply maa-core`：上次没走完留下的备份（被杀了、恢复失败）先恢复（`recovered`），不会被新备份盖掉。MaaCore 读不出或资源不全时，不管有没有新版本都重装（`maa install --force`）。
 
+## feedback —— 用户反馈（不碰模拟器；只有 `send` 联网）
+
+用户想把使用上的问题告诉开发者时用。分两步：`draft` 在本机起草（什么都不上传），agent 在对话里给用户看过、用户同意后 `send` 上传。
+流程和怎么跟用户说见 skill `maapilot-feedback`；AGENTS.md 硬规则 10：没有用户在对话里亲口同意不发。
+
+| 命令 | 做什么 |
+|---|---|
+| `feedback draft --text <用户原话> --session-file <文件> --harness <名字> --model <型号> [--category bug\|experience\|idea\|other] [--harness-version V] [--effort E] [--contact C] [--raw-session-file <文件>] [--shot <png>]… [--maa-log] [--mask <字样>]… [--no-checks]` | 收集、脱敏，存成草稿 `private/feedback/<编号>/`。`--session-file` 是 agent 写的会话经过，`--raw-session-file` 是 agent 自己整理的带工具调用细节的原始记录（程序不读 harness 的会话文件）；`--shot` 只收 `private/` 下的 PNG，最多 4 张；`--maa-log` 带最近一份 maa-cli 日志的最后 200 行。`--raw-session-file`、`--shot`、`--maa-log`、`--contact` 用户同意才带 |
+| `feedback show <编号> [--part info\|session\|raw-session\|maa-log] [--offset N]` | 草稿的概况；`--part` 另给那一部分脱敏后的文字（`part: {name, chars, offset, text, more}`，一次 20000 字，`more` 为真就加 `--offset` 接着取） |
+| `feedback redact <编号> [--mask <字样>]… [--remove raw-session\|maa-log\|shots\|contact]… [--text <新原话>] [--session-file <文件>] [--raw-session-file <文件>]` | 改草稿：再隐去字样（原样匹配，对所有文字生效，记在本机的 `state.json` 里）、去掉某一部分、换掉文字。改完 `digest` 变了 |
+| `feedback send <编号> --digest <digest>` | 上传。`--digest` 是给用户看过的那一版的 |
+| `feedback list` | `{drafts: [{id, status, created_at, sent_at, server_id}]}` |
+| `feedback discard <编号>` | 删掉一份没发的草稿（发过的留着） |
+
+`draft` / `show` / `redact` 的 `data`：
+
+```json
+{"id": "fb-20261120-231317-634e", "status": "draft", "digest": "d2b4d3b12320462a", "dir": "private/feedback/fb-…",
+ "upload_bytes": 1749, "too_big": false, "max_bytes": 5242880,
+ "parts": [{"file": "feedback.json", "bytes": 2210}, {"file": "session.md", "bytes": 512, "chars": 180}],
+ "includes": {"session": true, "raw_session": false, "maa_log": false, "shots": [], "contact": false,
+              "checks": 12, "journal": 40, "last_daily": true},
+ "category": "bug", "harness": {"name": "…", "version": null, "env": {…}}, "model": {"name": "…", "effort": null},
+ "scrubbed": {"路径": 2, "邮箱": 1}, "masks": 0, "url": "https://maapilot.sicer.top/feedback"}
+```
+
+要上传的内容就是 `bundle/` 里的文件，一个字节不多：
+
+- `feedback.json`：`{schema, id, created_at, category, text, contact, harness: {name, version, env}, model: {name, effort}, auto}`。
+  `harness.env` 是环境变量里说明在哪个 harness 里的那些（`CLAUDE*`、`CODEX*`…）：`names` 只有名字，`values` 只有值不是个人信息的几个（入口、版本、思考强度）。
+  `auto` 是程序收集的：`environment`（MaaPilot 版本和提交、系统、架构、Python、`setup_done`、`server`）、
+  `checks`（`doctor --offline` 各项的 `name / ok / required / detail`，加上 maa-cli 和 MaaCore 版本）、
+  `journal`（最近 40 条命令记录的骨架：`at / command / ok / exit / duration_s / error`，`error` 只留错误代码或异常类型；**参数和结果摘要不带**）、
+  `last_daily`（最近一次日常每一项的 `task / ok / code` 和状态）、`sources`（格式出了问题的外部数据源）。
+- `session.md`、`session-raw.txt`、`maa-log.txt`、`shots/<n>.png`：带了才有。
+
+不在里面的：命令的参数和结果（货币数量、干员名）、目标、用户偏好、配置、森空岛的任何东西。
+
+**脱敏**（`maapilot/tools/scrub.py`，对 `bundle/` 里所有文字）：按这台电脑上的真实值原样替换——项目文件夹 → `<项目>`、家目录 → `<家目录>`、
+系统用户名 → `<用户>`（整词）、`emulator.address` → `<模拟器地址>`、森空岛的 uid / 昵称 → `<UID>` / `<昵称>`、`--mask` 指定的 → `<已隐去>`；
+再按形状替换邮箱、IPv4 地址、`/Users/<名字>` 和 `C:\Users\<名字>`、长得像 token 的一段。`scrubbed` 是每一类换了几处。图片不处理。
+这是兜底：agent 写会话记录时先脱敏，最后用户看过才发。
+
+**发送**：把 `bundle/` 打成 zip，`multipart/form-data` POST 到 `https://maapilot.sicer.top/feedback`（环境变量 `MAAPILOT_FEEDBACK_URL` 可以指到别处，开发用），
+两个字段：`manifest`（JSON：`schema, id, created_at, category, maapilot, digest, bytes, preview, sha256, files`；`preview` 是脱敏后的用户原话开头 80 个字，服务器通知开发者时显示）和 `bundle`（zip）；
+请求头 `X-MaaPilot-Feedback: 1`。服务器回 `{"id": "…"}`。成功后 `data`：`{sent, id, server_id, sent_at, bytes}`，草稿标成 `sent`。
+
+| error.code | 退出码 | 什么情况 |
+|---|---|---|
+| `draft_changed` | 2 | `--digest` 和草稿现在的内容对不上（给用户看过之后改过）。没有发；`data.digest` 是现在的，重新给用户看 |
+| `too_big` | 2 | 包超过 5 MB（或服务器回 413）。去掉截图或原始会话记录 |
+| `too_long` / `bad_file` | 2 | 文字太长（原话、会话经过 20 万字，原始记录 300 万字）、文件读不了或是空的、截图不在 `private/` 下 |
+| `no_draft` / `bad_id` / `no_part` / `already_sent` | 2 | 没有这份草稿、编号不对、草稿里没有这一部分、已经发过 |
+| `needs_user` | 3 | 日常在跑或没收尾：不发，草稿留着 |
+| `network` / `upload_failed` / `rate_limited` | 1 | 连不上、服务器没收下（`data.status`）、发得太勤。草稿还在，稍后原样再发 |
+
 ## memory —— 用户偏好（不碰模拟器）
 
 `maapilot memory tidied`：记下这次整理偏好的时间（`private/memory/.last-tidy`），`data`：`{tidied_at}`。偏好文件由 agent 直接读写，这条只管提醒的时间，见 skill `maapilot-memory`。
@@ -1087,6 +1145,7 @@ private/
   shots/             截图
   debug/             MaaFramework 调试输出、快捷操作失败时的截图
   guard/             snapshot.json  allowances.jsonl  stop.json  dirty.json
+  feedback/          反馈草稿和发过的反馈：<编号>/bundle/ 是要上传的全部内容，<编号>/state.json 是本机的记录（不上传）；agent 写的会话经过也先放这里
   memory/            用户偏好（MEMORY.md 是目录；.imported-from-claude 是从 Claude Code 自动记忆搬过一次的记号；.last-tidy 是上次整理的时间）
   maa-config/        本项目的 maa-cli 配置目录（MAA_CONFIG_DIR）：cli.toml  profiles/default.toml  tasks/maapilot-*.toml
   lock.json          模拟器锁
