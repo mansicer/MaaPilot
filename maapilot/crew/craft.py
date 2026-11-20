@@ -129,7 +129,7 @@ def read_label(g: Game, img=None) -> tuple[int, int] | None:
     readings = [reading.parse_have_need(h.text) for h in g.ocr(ING_ROI, img)]
     for channel, th in LABEL_READS:
         b, roi = reading.binarize(img, LABEL_ROI, threshold=th, channel=channel, scale=2)
-        readings.append(reading.parse_have_need("".join(h.text for h in g.ocr(roi, b))))
+        readings.append(reading.have_need_of(g.ocr(roi, b)))
     return reading.vote(readings)
 
 

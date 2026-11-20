@@ -211,11 +211,65 @@ def sanity_from_image(game, img) -> int | None:
     return merge_ones("".join(c.text for c in hits), ones)
 
 
-def parse_topbar(hits) -> dict | None:
+# 合成玉、源石的数后面紧跟一个"+"号圆钮（白色实心圆，中间一个深色的十字）。旧的 OCR 模型把它读成"+"（去掉就行），
+# 新模型（PP-OCRv6，MAA 2026-11-02 起）会把它读成"0"：源石 16 读成 160。光看字分不出来，要看图：
+# 在这段字的框里按列切出白色的块，数字窄而高（宽 11–16、高 23–28、白的占四成以下），圆钮又宽又满（约 30×32、占六成）。
+# 框里最右一块是圆钮、读出的数又正好比数字的块多一位、多的那位是 0 → 那个 0 是圆钮，去掉。别的情况不动。
+PLUS_WHITE = 215                  # 白：三个通道都高于它
+PLUS_MIN_W = 22                   # 圆钮的宽（真机约 28–32；数字最宽 16）
+PLUS_MIN_FILL = 0.5               # 圆钮的白色占比（约 0.6；数字 ≤ 0.41）
+DIGIT_W_PER_H = 0.6               # 一位数字的宽大约是字高的 0.6（两位粘在一起的块按这个折成两位）
+
+
+def _white_runs(img, box) -> list[tuple[int, int, float]]:
+    """box 里按列切出的白色块，从左到右：[(宽, 高, 白的占比)]。杂点（宽不到 4）不算。"""
+    import numpy as np
+    x, y, w, h = box
+    m = img[max(y, 0):y + h, max(x, 0):x + w].min(axis=2) > PLUS_WHITE
+    cols = np.append(m.any(axis=0), False)
+    out, start = [], None
+    for i, c in enumerate(cols):
+        if c and start is None:
+            start = i
+        elif not c and start is not None:
+            block = m[:, start:i]
+            rows = np.flatnonzero(block.any(axis=1))
+            if i - start >= 4:
+                out.append((i - start, int(rows[-1] - rows[0] + 1), float(block[rows[0]:rows[-1] + 1].mean())))
+            start = None
+    return out
+
+
+def plus_read_as_zero(img, hit) -> bool:
+    """这段顶栏的数，末尾的"0"其实是后面的"+"号圆钮？（见上面的说明；拿不准一律 False，照原样用。）"""
+    import numpy as np
+    if not isinstance(img, np.ndarray) or img.ndim != 3:
+        return False
+    text = hit.text.strip()
+    digits = _EDGE_JUNK.sub("", text).translate(_DIGITS)
+    if "+" in text or not digits.isdigit() or len(digits) < 2 or not digits.endswith("0"):
+        return False
+    runs = _white_runs(img, hit.box)
+    if len(runs) < 2:
+        return False
+    w, h, fill = runs[-1]
+    if not (w >= PLUS_MIN_W and w >= 0.8 * h and fill >= PLUS_MIN_FILL):
+        return False
+    glyph_h = max(r[1] for r in runs[:-1])
+    n = sum(max(1, round(r[0] / (glyph_h * DIGIT_W_PER_H))) for r in runs[:-1] if r[1] >= glyph_h * 0.6)
+    return len(digits) == n + 1
+
+
+def parse_topbar(hits, img=None) -> dict | None:
     """首页顶栏 → {lmd, orundum, originite}（精确值，不像仓库识别那样把上万的数取整）。
-    按位置取：源石最右、合成玉在它左边；龙门币（最左）读不出时为 None，不影响前两样。少于两个数 → None。"""
+    按位置取：源石最右、合成玉在它左边；龙门币（最左）读不出时为 None，不影响前两样。少于两个数 → None。
+    img（这次 OCR 用的截图）给了就核对"+"号圆钮有没有被读成末尾的 0（plus_read_as_zero）。"""
+    def number(h) -> int | None:
+        n = _number(h.text)
+        return n // 10 if n is not None and img is not None and plus_read_as_zero(img, h) else n
+
     nums = sorted((h.box[0], n) for h in hits if h.box[1] < TOPBAR_MAX_Y and h.box[3] >= TOPBAR_MIN_H
-                  and ":" not in h.text and (n := _number(h.text)) is not None)   # 带冒号的是日期时间
+                  and ":" not in h.text and (n := number(h)) is not None)   # 带冒号的是日期时间
     nums = [(x, n) for x, n in nums if x >= 650]
     if len(nums) < 2 or len(nums) > 3:
         return None
@@ -233,7 +287,7 @@ def read_home(game=None) -> tuple[dict | None, tuple[int, int] | None, object]:
         pass
     img = game.screencap()
     hits = game.ocr(HOME_ROI, img)
-    return parse_topbar(hits), home_sanity(game, img, hits), game
+    return parse_topbar(hits, img), home_sanity(game, img, hits), game
 
 
 def home_sanity(game, img, hits) -> tuple[int, int] | None:

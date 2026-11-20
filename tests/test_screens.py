@@ -64,13 +64,41 @@ def test_home_sanity_dark(game, value):
 
 @pytest.mark.parametrize("value, top", [
     (130, {"lmd": 9621162, "orundum": 19866, "originite": 26}),
-    pytest.param(110, {"lmd": 9397902, "orundum": 19066, "originite": 16},
-                 marks=xfail_on("v6", "源石 16 读成 160")),
+    (110, {"lmd": 9397902, "orundum": 19066, "originite": 16}),       # v6 模型把"16+"的"+"号圆钮读成 0（160）
 ])
 def test_home_topbar(game, value, top):
     from maapilot.tools import state
     g = show(game, f"home_{value}")
-    assert state.parse_topbar(g.ocr(state.HOME_ROI, g.screencap())) == top
+    img = g.screencap()
+    assert state.parse_topbar(g.ocr(state.HOME_ROI, img), img) == top
+
+
+# 顶栏的"+"号圆钮被读成末尾的 0（v6 模型，源石 16 → 160）：看图判断，只在"最右一块是圆钮、读出的数正好多一位 0"时去掉
+@pytest.mark.parametrize("text, box, plus_is_zero", [
+    ("160", (1101, 20, 86, 44), True),             # v6 真读出来的样子
+    ("16+", (1104, 21, 81, 41), False),            # 读出了"+"：照旧去掉"+"就行
+    ("16", (1101, 20, 86, 44), False),             # 位数和图上的数字一样多：不动
+    ("190660", (902, 36, 129, 47), True),          # 合成玉 19066 后面的圆钮
+    ("19066", (902, 36, 129, 47), False),
+    ("19060", (902, 36, 129, 47), False),          # 本来就以 0 结尾、位数对得上：不动
+    ("93979020", (717, 54, 124, 46), False),       # 龙门币后面没有圆钮：不动
+    ("1600", (1101, 20, 86, 44), False),           # 多了两位：拿不准，不动
+])
+def test_topbar_plus_read_as_zero(game, text, box, plus_is_zero):
+    from types import SimpleNamespace
+
+    from maapilot.tools import state
+    img = show(game, "home_110").screencap()
+    assert state.plus_read_as_zero(img, SimpleNamespace(text=text, box=box)) is plus_is_zero
+
+
+def test_topbar_without_image_is_unchanged(game):
+    """不给截图就不核对圆钮（照原样用读出来的数）。"""
+    from types import SimpleNamespace
+
+    from maapilot.tools import state
+    hits = [SimpleNamespace(text="19066+", box=(902, 36, 129, 47)), SimpleNamespace(text="160", box=(1101, 20, 86, 44))]
+    assert state.parse_topbar(hits) == {"lmd": None, "orundum": 19066, "originite": 160}
 
 
 def test_image_game_records_taps_without_device(game):
@@ -114,8 +142,6 @@ CRAFT = [
     ("craft_异铁块_0-2", "异铁块", 1),
 ]
 
-CRAFT_LABEL_V6 = {"craft_五水研磨石_1-1": "有/要 1/1 读成 41/1"}      # 份数还是对的（test_craft_count）
-
 
 @needs_recipes
 @pytest.mark.parametrize("name, item, count", CRAFT)
@@ -125,9 +151,7 @@ def test_craft_count(game, name, item, count):
 
 
 @needs_recipes
-@pytest.mark.parametrize("name", [
-    pytest.param(n, marks=xfail_on("v6", CRAFT_LABEL_V6[n])) if n in CRAFT_LABEL_V6 else n
-    for n in (c[0] if isinstance(c, tuple) else c.values[0] for c in CRAFT)])
+@pytest.mark.parametrize("name", [c[0] if isinstance(c, tuple) else c.values[0] for c in CRAFT])
 def test_craft_label(game, name):
     """不光份数对，有/要两个数都要读对（文件名里是正确答案）。"""
     from maapilot.crew import craft
@@ -197,7 +221,6 @@ def test_store_tabs(game):
 
 
 # ---- 干员列表 -------------------------------------------------------------------
-@xfail_on("v6", "第一张卡的等级 90 读成 9")
 def test_oplist_first_card_level(game):
     """第一张卡的等级"90"读成"9o"（小写 o），以前只认大写 O，排序方向就判断不了。"""
     from maapilot.crew import oplist

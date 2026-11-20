@@ -98,6 +98,14 @@ def split_by_need(text: str, need: int) -> tuple[int, int] | None:
     return None
 
 
+def have_need_of(hits) -> tuple[int, int] | None:
+    """一次 OCR 的几段字 → (有, 要)。正好有一段自己就读得出"有/要"的用它（旁边的杂点不拼进去：新的 OCR 模型常在
+    标签左边多认出一个"4""2"，拼起来 1/1 就成了 41/1）；没有、或不止一种说法 → 照旧把几段拼起来再认。"""
+    texts = [h.text for h in hits]
+    own = {p for t in texts if (p := parse_have_need(t)) is not None}
+    return own.pop() if len(own) == 1 else parse_have_need("".join(texts))
+
+
 def vote(readings: Sequence[tuple[int, int] | None]) -> tuple[int, int] | None:
     """几种读法的结果投票：读到的里面最多的那个；并列（两种读法说法不同）→ None。"""
     c = Counter(r for r in readings if r is not None)
@@ -114,7 +122,7 @@ def vote(readings: Sequence[tuple[int, int] | None]) -> tuple[int, int] | None:
 def binarize(img, roi: tuple[int, int, int, int], *, threshold: int, channel: str = "max", scale: int = 1):
     """把截图里 roi 这块变成白底黑字给 OCR：亮的笔画（白字、黄字、红字）→ 黑，其余 → 白。
     channel：判断"亮"用哪个通道——"max"（RGB 最大值，白 / 红 / 黄字都亮）、"min_rg"（R、G 较小的那个：白字和黄字亮，
-    蓝底不亮，专精确认框用）。scale>1 时放大后贴到一张白的 1280×720 图上（小字放大了好认）。
+    蓝底不亮，专精确认框用）、"min"（三个通道最小的：只有白字亮，黄、红都不亮）。scale>1 时放大后贴到一张白的 1280×720 图上（小字放大了好认）。
     → (新图, 新图上要识别的 roi)。img 是 BGR（MaaFramework 截图的格式）。"""
     import numpy as np
     x, y, w, h = roi
@@ -123,6 +131,8 @@ def binarize(img, roi: tuple[int, int, int, int], *, threshold: int, channel: st
         v = reg.max(axis=2)
     elif channel == "min_rg":
         v = np.minimum(reg[:, :, 2], reg[:, :, 1])
+    elif channel == "min":
+        v = reg.min(axis=2)
     else:
         raise ValueError(f"unknown channel {channel!r}")
     sub = np.where(v >= threshold, 0, 255).astype(np.uint8)
