@@ -457,6 +457,36 @@ def check_skills_link(ctx: Ctx) -> dict:
                  required=False, state=state)
 
 
+LOW_INTEGRITY_WHY = ("项目文件夹被加上了 Windows 的低完整性标签（DSH 的沙箱模式在工作区上加的，切成完全权限后也还留着）："
+                     "项目里启动的程序（Python、MAA）都以低完整性运行，MAA 写不了自己的缓存，"
+                     "这台电脑上所有 harness 跑 MaaPilot 的 MAA 任务都会失败")
+LOW_INTEGRITY_FIX = ("告诉用户原因，用户同意后在普通权限的 PowerShell 里运行（低完整性的进程、包括 MaaPilot 自己改不回来）：{cmd}；"
+                     "用 DSH 的话，MaaPilot 的工作区一直用完全权限，不然沙箱会再加上")
+LOW_PROCESS_WHY = ("MaaPilot 正以 Windows 的低完整性运行（项目文件夹本身没有低完整性标签）：多半是 DSH 还在沙箱模式（工作区内修改）；"
+                   "MAA 写不了自己的缓存，MAA 任务都会失败")
+LOW_PROCESS_FIX = ("告诉用户原因，请用户把 DSH 里 MaaPilot 这个工作区的权限切成完全权限，再重新开始；去掉文件夹标签的 icacls 这时没用。"
+                   "不是 DSH 的，请用户在普通权限的 PowerShell 里 icacls \"{exe}\" 看它是不是 Low")
+
+
+def low_integrity_text(li: dict) -> tuple[str, str]:
+    """low_integrity 的结果 → (原因, 怎么办)：文件夹带标签和只有进程低，修法不一样。"""
+    if li.get("kind") == "process":
+        import sys
+        return LOW_PROCESS_WHY, LOW_PROCESS_FIX.format(exe=sys.executable)
+    return LOW_INTEGRITY_WHY, LOW_INTEGRITY_FIX.format(cmd=li["fix"])
+
+
+def check_integrity(ctx: Ctx) -> dict:
+    """Windows：项目文件夹带低完整性标签（或本进程就是低完整性）。见 oscompat.integrity。"""
+    from maapilot.oscompat import integrity
+    bad = integrity.low_integrity(paths.ROOT)
+    if bad is None:
+        return _item("integrity", True, "项目文件夹没有低完整性标签" if integrity.WINDOWS else "只有 Windows 要查")
+    why, fix = low_integrity_text(bad)
+    return _item("integrity", False, why, fix, kind=bad.get("kind"), folder=bad["folder"], process=bad["process"],
+                 command=bad["fix"])
+
+
 def check_setup(ctx: Ctx) -> dict:
     if paths.SETUP.exists():
         return _item("setup", True, "setup 已完成", required=False)
@@ -464,7 +494,7 @@ def check_setup(ctx: Ctx) -> dict:
 
 
 DEVICE_CHECKS = ("emulator", "screen", "input", "game")
-CHECKS = [("config", check_config), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
+CHECKS = [("config", check_config), ("integrity", check_integrity), ("adb", check_adb), ("emulator", check_emulator), ("screen", check_screen),
           ("input", check_input), ("maa_cli", check_maa_cli), ("agent_config", check_agent_config), ("maa_config", check_maa_config),
           ("maa_core", check_maa_core), ("ocr_model", check_ocr_model), ("game_data", check_game_data), ("game", check_game),
           ("legacy_schedule", check_legacy_schedule), ("skills_link", check_skills_link), ("setup", check_setup)]
@@ -580,6 +610,7 @@ def brief(probe: Probe | None = None) -> dict:
     data = {"setup_done": setup_done, "goals_active": goals_active(), "guard_stop": stop,
             "last_daily": last_daily(), "daily_open": daily_open_brief(),
             "legacy_schedule": legacy_schedule_brief(probe or PROBE),
+            "low_integrity": low_integrity_brief(),
             "next": "setup" if not setup_done else ("guard" if stop else None)}
     from maapilot import version
     data["version"] = version.info()
@@ -613,6 +644,15 @@ def legacy_schedule_brief(probe: Probe) -> dict | None:
     except Exception:                                   # noqa: BLE001
         return None
     return {"times": info["times"], "backend": info["backend"]} if info.get("installed") else None
+
+
+def low_integrity_brief() -> dict | None:
+    """Windows：项目文件夹带低完整性标签（DSH 沙箱加的）→ {folder, process, fix}；没有 / 不是 Windows / 读不了 → None。"""
+    try:
+        from maapilot.oscompat import integrity
+        return integrity.low_integrity(paths.ROOT)
+    except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
+        return None
 
 
 def memory_brief() -> dict | None:
@@ -681,14 +721,24 @@ def update_brief() -> dict | None:
         return None
 
 
+def _low_integrity_line(li: dict) -> str:
+    why, fix = low_integrity_text(li)
+    return why + "。" + fix + "。先跟用户说这件事。"
+
+
 def brief_lines(d: dict) -> list[str]:
     if not d["setup_done"]:
-        return ["MaaPilot 还没设置：用户一开口（说什么都行）就进入 maapilot-setup（先跟用户打招呼，说明要做几步）。"]
+        lines = ["MaaPilot 还没设置：用户一开口（说什么都行）就进入 maapilot-setup（先跟用户打招呼，说明要做几步）。"]
+        if d.get("low_integrity"):                     # DSH 新用户多半在沙箱模式下第一次设置：装运行环境之前就要说
+            lines.append(_low_integrity_line(d["low_integrity"]))
+        return lines
     lines = []
     if d["guard_stop"]:
         u = d["guard_stop"].get("unexplained") or {}
         what = "、".join(f"{'源石' if k == 'originite' else '合成玉'}少了 {-v}" for k, v in u.items())
         lines.append(f"对账停机中：{what}，没经用户同意。先告诉用户、问清楚。")
+    if d.get("low_integrity"):
+        lines.append(_low_integrity_line(d["low_integrity"]))
     goals = d.get("goals")
     if goals:
         lines.append(f"进行中的目标 {len(goals)} 个（做别的事前想想会不会用掉它们要的材料）：" + "；".join(

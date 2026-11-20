@@ -70,6 +70,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `legacy_schedule` | 还留着旧版的系统定时任务：见第 4 步「旧版的定时任务」，用户同意后 `maapilot daily unschedule` |
+| `integrity` | 只有 Windows：项目文件夹带低完整性标签，或 MaaPilot 以低完整性运行（多半是 DSH 的沙箱模式），不修好 MAA 跑不起来。照这一项的 `fix` 告诉用户原因：文件夹带标签的，用户同意后在普通权限的 PowerShell 里跑它给的 `icacls` 命令；只是进程低的，请用户把 DSH 的工作区切成完全权限 |
 | `agent_config` | `config.yaml` 里还写着旧版的 `agent`（现在用不到了）：跟用户说一声，同意后删掉那几行 |
 
 你所在 harness 的文件（AGENTS.md「你所在的 harness」）里有「setup 时要多做的」，照着做完（例如信任这个文件夹，项目的权限规则才生效）。
