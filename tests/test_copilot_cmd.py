@@ -20,6 +20,9 @@ ROSTER = {"ops": {"遥": [0, 1, 2], "德克萨斯": [0, 1], "能天使": [0, 1, 
           "others": {"沙地兽", "安全起重机"}}
 
 
+REAL_ROSTER = copilot_cmd._roster
+
+
 @pytest.fixture(autouse=True)
 def roster(monkeypatch):
     # 不管这台电脑有没有游戏数据
@@ -425,10 +428,10 @@ def test_plan_stage_written_as_code(keyword_site, capsys):
 def test_on_stage():
     ids = {"main_16-13"}
     mk = lambda st: {"stage": st}
-    page = [mk("main_16-13"), mk("16-13"), mk("main_16-13#s"), mk("obt/main/level_main_16-13")]
+    page = [mk("main_16-13"), mk("16-13"), mk("main_16-13#s"), mk("obt/main/level_main_16-13"), mk("level_main_16-13")]
     assert copilot_cmd.on_stage(page, ids) == page                       # 作业站认得这关：关卡号写法的也算
     mixed = page + [mk("act55side_s01")]                                 # 混进了别的关：只留 stageId 对得上的
-    assert copilot_cmd.on_stage(mixed, ids) == [page[0], page[2], page[3]]
+    assert copilot_cmd.on_stage(mixed, ids) == [page[0], page[2], page[3], page[4]]
 
 
 def test_find_site_ignores_stage(site, capsys):
@@ -437,6 +440,44 @@ def test_find_site_ignores_stage(site, capsys):
     code, out = run(capsys, "copilot", "find", "YW-4")
     d = out["data"]
     assert d["plans"] == [] and d["dropped"] == 5 and "作业站没给这关的作业" in d["warning"]
+    assert d["total"] == 0 and d["more"] is False                       # 不是这关的总数
+
+
+def test_find_raid_stage(site, capsys, monkeypatch):
+    # 本机认出的是突袭（<id>#f#）：按同一关查，作业里写的不带后缀也算
+    from maapilot.knowledge import stages
+    monkeypatch.setattr(stages, "resolve_stage", lambda t: SimpleNamespace(stage_id="act52side_04#f#", code="YW-4",
+                                                                           name="某关"))
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    d = out["data"]
+    assert len(d["plans"]) == 4 and d["dropped"] == 0 and "levelKeyword=act52side_04&" in site.urls[0]
+    assert d["plans"][0]["stage_label"] == "YW-4「某关」"
+
+
+def test_find_level_table_unreachable(site, capsys, monkeypatch):
+    from maapilot.knowledge import stages
+    def unknown(t):
+        raise stages.UnknownStageError(t)
+    monkeypatch.setattr(stages, "resolve_stage", unknown)
+    site.levels = False
+    site.plans = {p["id"]: p for p in _many(25)}
+    code, out = run(capsys, "copilot", "find", "act52side_04")
+    d = out["data"]
+    assert d["matched_stages"] is None and d["looked"] == 20 and d["total"] == 25 and d["more"] is True
+    assert "连不上作业站的关卡表" in d["warning"]
+
+
+def test_roster_from_character_table(monkeypatch):
+    from maapilot.knowledge import gamedata
+    sk = lambda *ph: [{"unlockCond": {"phase": f"PHASE_{x}"}} for x in ph]
+    table = {"char_002_amiya": {"name": "阿米娅", "profession": "CASTER", "skills": sk(0, 1, 2)},
+             "trap_627_xb2amy": {"name": "阿米娅", "profession": "TRAP", "skills": []},
+             "token_10034_ray_sndbst": {"name": "沙地兽", "profession": "TOKEN", "skills": sk(0)},
+             "trap_031_sleep": {"name": "安全起重机", "profession": "TRAP", "skills": []},
+             "char_100_x": {"name": "三技能精1", "profession": "SNIPER", "skills": sk(0, 1, 1)}}
+    monkeypatch.setattr(gamedata, "_character_table", lambda: table)
+    got = REAL_ROSTER()                                  # 夹具换掉了 copilot_cmd._roster，这里用原来的
+    assert got["ops"] == {"阿米娅": [0, 1, 2], "三技能精1": [0, 1, 1]} and got["others"] == {"沙地兽", "安全起重机"}
 
 
 def test_find_local_data_stale(keyword_site, capsys, monkeypatch):

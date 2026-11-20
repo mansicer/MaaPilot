@@ -349,7 +349,8 @@ def _stage_keyword(text: str) -> tuple[dict | None, bool]:
         return None, True
     code, name = getattr(ref, "code", None), getattr(ref, "name", None)
     label = f"{code}「{name}」" if code and name else (code or name or ref.stage_id)
-    return {"stage_id": ref.stage_id, "level_id": None, "label": label}, True
+    # 突袭是 <id>#f#：作业站按同一关的 stageId 查、作业里也写不带后缀的
+    return {"stage_id": ref.stage_id.split("#")[0], "level_id": None, "label": label}, True
 
 
 def levels() -> list[dict] | None:
@@ -379,9 +380,7 @@ def match_levels(keyword: str, table: list[dict]) -> list[dict]:
 def _plan_stage(p: dict) -> str:
     """作业写的关卡 → stageId 的样子：去掉 #f#（突袭）、#s 之类的后缀；写成 levelId（obt/main/level_main_1-7）的取最后一段。"""
     s = (p.get("stage") or "").split("#")[0]
-    if "/" in s:
-        s = s.rsplit("/", 1)[1].removeprefix("level_")
-    return s
+    return s.rsplit("/", 1)[-1].removeprefix("level_")
 
 
 def on_stage(plans: list[dict], ids: set[str]) -> list[dict]:
@@ -409,23 +408,24 @@ def _locally_unknown(stage_id: str) -> bool:
 def collect(targets: list[dict], box: dict | None, mtypes: dict, roster: dict | None, pages: int) -> dict:
     """按每关的 stageId 一页页查、标注、核对关卡；有一份满足要求（meets）就不再往后翻。没有练度时只看第一页。"""
     ids = {t["stage_id"] for t in targets}
+    label = {t["stage_id"]: t["label"] for t in targets}
     plans, seen, dropped, total, more = [], set(), 0, 0, False
     last = pages if box is not None else 1
     for t in targets:
         for page in range(1, last + 1):
             raw, has_next, n = query(t["stage_id"], page)
-            if page == 1:
-                total += n or 0
             raw = [r for r in raw if r.get("id") not in seen]
             seen |= {r.get("id") for r in raw}
             got = [annotate(r, box, mtypes, roster) for r in raw]
             kept = on_stage(got, ids)
             dropped += len(got) - len(kept)
             for p in kept:
-                p["stage_label"] = t["label"]
+                p["stage_label"] = label.get(_plan_stage(p), t["label"])
             plans += kept
-            if len(kept) < len(got):                     # 作业站没认这关：往后翻也是别的关的
+            if len(kept) < len(got):                     # 作业站没认这关：往后翻也是别的关的，总数也是全站的
                 break
+            if page == 1:
+                total += n or 0
             if not has_next or any(p["meets"] for p in kept):
                 more = more or has_next
                 break
