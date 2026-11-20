@@ -14,6 +14,17 @@ from maapilot import cli, paths
 from maapilot.tools import common, copilot_cmd
 
 MTYPES = {"uniequip_002_yao": "X", "uniequip_003_yao": "Y"}
+# 游戏数据里的名字：各技能解锁要精几；召唤物、装置
+ROSTER = {"ops": {"遥": [0, 1, 2], "德克萨斯": [0, 1], "能天使": [0, 1, 2], "史尔特尔": [0, 1, 2],
+                  "B": [0, 1], "C": [0, 1], "E": [0, 1, 2]},
+          "others": {"沙地兽", "安全起重机"}}
+
+
+@pytest.fixture(autouse=True)
+def roster(monkeypatch):
+    # 不管这台电脑有没有游戏数据
+    monkeypatch.setattr(copilot_cmd, "_roster", lambda: ROSTER)
+    return ROSTER
 
 
 def plan(pid, opers, groups=(), hot=100.0, title=None, actions=3, stage="act52side_04"):
@@ -51,9 +62,10 @@ LEVELS = [
 
 
 class FakeSite:
-    def __init__(self, plans, levels=None):
+    def __init__(self, plans, levels=None, assoc=None):
         self.plans = {p["id"]: p for p in plans}
         self.levels = LEVELS if levels is None else levels
+        self.assoc = assoc or {}                        # 作业编号 → 作业站把它算在哪关（作业把关卡写成关卡号的）
         self.urls = []
 
     def __call__(self, url):
@@ -64,10 +76,14 @@ class FakeSite:
             return {"status_code": 200, "data": self.levels}
         if "/copilot/query" in url:
             # 作业站：认得的 stageId 只给这关的；不认得的词不管它，按热度给（所以会混进别的关）
-            kw = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("levelKeyword", [""])[0]
-            same = [p for p in self.plans.values() if json.loads(p["content"])["stage_name"].split("#")[0] == kw]
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            kw, size, page = q.get("levelKeyword", [""])[0], int(q["limit"][0]), int(q["page"][0])
+            same = [p for p in self.plans.values()
+                    if self.assoc.get(p["id"], json.loads(p["content"])["stage_name"].split("#")[0]) == kw]
             data = same or list(self.plans.values())
-            return {"status_code": 200, "data": {"has_next": False, "page": 1, "total": len(data), "data": data}}
+            chunk = data[(page - 1) * size:page * size]
+            return {"status_code": 200, "data": {"has_next": page * size < len(data), "page": page,
+                                                 "total": len(data), "data": chunk}}
         pid = int(url.rsplit("/", 1)[1])
         if pid not in self.plans:
             return {"status_code": 404, "message": "作业不存在"}
@@ -155,7 +171,10 @@ def test_find_sorts_and_annotates(site, capsys):
     assert code == 0, out
     d = out["data"]
     assert d["stage_id"] == "act52side_04" and d["box_source"] == "skland"
-    assert "levelKeyword=act52side_04" in site.urls[0] and "order_by=hot" in site.urls[0] and "limit=5" in site.urls[0]
+    assert "levelKeyword=act52side_04" in site.urls[0] and "order_by=hot" in site.urls[0] and "page=1" in site.urls[0]
+    assert d["looked"] == 4 and d["total"] == 4 and d["more"] is False and d["count"] == 4
+    assert d["matched_stages"] == [{"stage_id": "act52side_04", "level_id": None, "label": "act52side_04"}]
+    assert all(p["stage_label"] == "act52side_04" for p in d["plans"])
     # 都有的在前，差距少的在前，没核对到的少的在前（4 的可选位挑的德克萨斯作业没写要求），再按热度
     assert [p["id"] for p in d["plans"]] == [2, 4, 1, 3]
     p2, p4, p1, p3 = d["plans"]
@@ -176,14 +195,14 @@ def test_find_sorts_and_annotates(site, capsys):
 
 
 def test_find_without_box(site, capsys):
-    code, out = run(capsys, "copilot", "find", "1-7")            # 认不出 → 当关键词；关卡表里也没有 → 作业都去掉
+    code, out = run(capsys, "copilot", "find", "1-7")            # 认不出、关卡表里也没有 → 不查
     assert code == 0
     d = out["data"]
-    assert d["stage_id"] is None and d["keyword"] == "1-7" and d["box_at"] is None and d["box_source"] is None
-    assert d["plans"] == [] and d["dropped"] == 4
+    assert d["stage_id"] is None and d["box_at"] is None and d["box_source"] is None
+    assert d["plans"] == [] and d["dropped"] == 0 and d["matched_stages"] == [] and "没有「1-7」" in d["warning"]
     code, out = run(capsys, "copilot", "find", "YW-4")
     d = out["data"]
-    assert d["plans"] and d["warning"] is None and d["matched_stages"] is None
+    assert d["plans"] and d["warning"] is None and d["matched_stages"][0]["stage_id"] == "act52side_04"
     assert all(o["have"] is None for p in d["plans"] for o in p["opers"])
     assert all(p["all_owned"] is None and p["gap_count"] is None for p in d["plans"])
     assert all(p["meets"] is None and p["unknown_count"] is None and p["unchecked"] == [] for p in d["plans"])
@@ -229,7 +248,9 @@ def test_unusual_plans():
     assert p["meets"] is None and p["unchecked"] == ["作业没写练度要求，只核对了有没有这名干员：E"]
     # 一个干员都没写：说不准，不算满足
     p = copilot_cmd.annotate(plan(9, []), ops, MTYPES)
-    assert p["meets"] is None and p["unchecked"] == ["作业里没写干员，没法核对"]
+    assert p["meets"] is None and p["unchecked"] == ["作业里没写干员（只写了 3 个动作），没法核对"]
+    p = copilot_cmd.annotate(plan(9, [], actions=0), ops, MTYPES)
+    assert p["unchecked"] == ["作业里没写干员，没法核对"]
 
 
 @pytest.fixture
@@ -284,8 +305,9 @@ def test_find_without_game_data(site, capsys, monkeypatch):
 def test_find_keyword_unknown_drops_all(keyword_site, capsys):
     code, out = run(capsys, "copilot", "find", "不存在的关")
     d = out["data"]
-    assert code == 0 and d["plans"] == [] and d["dropped"] == 4 and d["matched_stages"] == []
+    assert code == 0 and d["plans"] == [] and d["dropped"] == 0 and d["matched_stages"] == []
     assert "没有「不存在的关」这一关" in d["warning"]
+    assert not any("/copilot/query" in u for u in keyword_site.urls)    # 作业站不认的词会给别的关的作业：不查
 
 
 def test_find_keyword_no_level_table(keyword_site, capsys):
@@ -301,6 +323,148 @@ def test_empty_plan_sorts_after():
     b = copilot_cmd.annotate(plan(2, [{"name": "遥", "skill": 2, "requirements": req(level=1, skill_level=7)}], hot=1),
                              ops, MTYPES)
     assert [p["id"] for p in sorted([a, b], key=copilot_cmd._sort_key)] == [2, 1]
+
+
+# --- 技能解锁、召唤物 ----------------------------------------------------------------------
+
+def test_skill_unlock():
+    ops = {"E": {"elite": 1, "level": 60, "potential": 1}, "德克萨斯": {"elite": 2, "level": 1, "potential": 1}}
+    # MAA 识别的练度也有精英化：精1 用不了 3 技能
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 3, "requirements": req(elite=1, level=1, skill_level=7)}]),
+                             ops, MTYPES)
+    assert p["opers"][0]["gaps"] == ["技能3要精2才解锁，现在精1"] and p["meets"] is False
+    assert p["opers"][0]["unknown"] == ["技能等级"]
+    # 精英化要求已经不够时只说一次
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 3, "requirements": req(level=1, skill_level=0)}]), ops, MTYPES)
+    assert p["opers"][0]["gaps"] == ["要精2 1级，现在精1 60级"]
+    # 作业没写要求，也照样核对技能
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 3}]), ops, MTYPES)
+    assert p["meets"] is False and p["gap_count"] == 1
+    # 只有两个技能
+    p = copilot_cmd.annotate(plan(9, [{"name": "德克萨斯", "skill": 3}]), ops, MTYPES)
+    assert p["opers"][0]["gaps"] == ["没有技能3（这名干员只有 2 个技能）"]
+    # 解锁了的没有差距
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 2, "requirements": req(elite=1, level=1, skill_level=0)}]),
+                             ops, MTYPES)
+    assert p["opers"][0]["gaps"] == [] and p["meets"] is True
+
+
+def test_skill_unlock_without_game_data():
+    # 没有游戏数据：退回看森空岛列出来的技能
+    ops = {"E": {"elite": 1, "level": 60, "potential": 1, "skill_level": 7,
+                 "skills": [{"index": 1, "mastery": 0}, {"index": 2, "mastery": 0}], "modules": []}}
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 3, "requirements": req(elite=1, level=1, skill_level=7)}]),
+                             ops, MTYPES, roster=None)
+    assert p["opers"][0]["gaps"] == ["现在还没有技能3"]
+    p = copilot_cmd.annotate(plan(9, [{"name": "E", "skill": 3}]), {"E": {"elite": 1, "level": 60}}, MTYPES, roster=None)
+    assert p["opers"][0]["gaps"] == []                   # 说不准：不算差距
+
+
+def test_summons_are_not_operators():
+    ops = {"遥": BOX_SKLAND["遥"]}
+    r = req(level=1, skill_level=7)
+    p = copilot_cmd.annotate(plan(9, [{"name": "遥", "skill": 2, "requirements": r}, {"name": "沙地兽", "skill": 0}],
+                                  groups=[{"name": "装置", "opers": [{"name": "安全起重机"}]}]), ops, MTYPES)
+    assert p["missing_ops"] == [] and p["all_owned"] and p["meets"] is True
+    assert p["opers"][1]["summon"] is True and p["opers"][1]["have"] is None and p["groups"][0]["have"] is None
+    p = copilot_cmd.annotate(plan(9, [{"name": "沙地兽"}]), ops, MTYPES)
+    assert p["meets"] is None and p["unchecked"] == ["作业里没写干员（只写了召唤物、装置：沙地兽），没法核对"]
+    # 不认识的名字：照干员核对（仓库里没有就是缺），另外提醒游戏数据可能太旧
+    assert copilot_cmd._unknown_names([copilot_cmd.annotate(plan(9, [{"name": "新干员"}]), ops, MTYPES)], ROSTER) == ["新干员"]
+
+
+# --- 翻页、关卡核对 ---------------------------------------------------------------------------
+
+def _many(n, stage="act52side_04", start=100, req_=None):
+    return [plan(start + i, [{"name": "遥", "skill": 2, "requirements": req_ or req(level=90)}], hot=1000 - i, stage=stage)
+            for i in range(n)]
+
+
+def test_find_pages_until_meets(monkeypatch, site, capsys):
+    box(BOX_SKLAND)
+    plans = _many(45) + [plan(999, [{"name": "遥", "skill": 2, "requirements": req(level=1, skill_level=7)}], hot=1)]
+    site.plans = {p["id"]: p for p in plans}
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    d = out["data"]
+    # 前 45 份都差等级；第 46 份（第 3 页）满足：翻到它为止，排在最前
+    assert code == 0 and d["looked"] == 46 and d["total"] == 46 and d["more"] is False
+    assert d["plans"][0]["id"] == 999 and d["plans"][0]["meets"] is True and d["count"] == 20 and len(d["plans"]) == 20
+    assert sum("/copilot/query" in u for u in site.urls) == 3
+    # 第一页就有满足的：不再往后翻
+    site.urls.clear()
+    site.plans = {p["id"]: p for p in [plans[-1]] + _many(45)}
+    site.plans[999] = plan(999, [{"name": "遥", "skill": 2, "requirements": req(level=1, skill_level=7)}], hot=5000)
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    assert out["data"]["looked"] == 20 and out["data"]["more"] is True and sum("/copilot/query" in u for u in site.urls) == 1
+    # --pages 限制翻几页
+    site.urls.clear()
+    site.plans = {p["id"]: p for p in _many(45)}
+    code, out = run(capsys, "copilot", "find", "YW-4", "--pages", "2", "--limit", "3")
+    d = out["data"]
+    assert d["looked"] == 40 and d["more"] is True and d["count"] == 3 and len(d["plans"]) == 3
+
+
+def test_find_without_box_reads_one_page(site, capsys):
+    site.plans = {p["id"]: p for p in _many(45)}
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    assert out["data"]["looked"] == 20 and out["data"]["more"] is True
+    assert sum("/copilot/query" in u for u in site.urls) == 1
+
+
+def test_plan_stage_written_as_code(keyword_site, capsys):
+    # 作业把关卡写成关卡号（CW-EX-4）或 levelId：作业站按这关给的，算这关
+    keyword_site.plans[15] = plan(15, [{"name": "遥"}], stage="CW-EX-4")
+    keyword_site.plans[16] = plan(16, [{"name": "遥"}], stage="activities/act25side/level_act25side_ex04")
+    keyword_site.assoc = {15: "act25side_ex04", 16: "act25side_ex04"}
+    code, out = run(capsys, "copilot", "find", "CW-EX-4")
+    d = out["data"]
+    assert sorted(p["id"] for p in d["plans"]) == [11, 13, 15, 16] and d["dropped"] == 0
+    assert all(p["stage_label"] == "活动关卡·孤星·CW-EX-4「死路」" for p in d["plans"])
+
+
+def test_on_stage():
+    ids = {"main_16-13"}
+    mk = lambda st: {"stage": st}
+    page = [mk("main_16-13"), mk("16-13"), mk("main_16-13#s"), mk("obt/main/level_main_16-13")]
+    assert copilot_cmd.on_stage(page, ids) == page                       # 作业站认得这关：关卡号写法的也算
+    mixed = page + [mk("act55side_s01")]                                 # 混进了别的关：只留 stageId 对得上的
+    assert copilot_cmd.on_stage(mixed, ids) == [page[0], page[2], page[3]]
+
+
+def test_find_site_ignores_stage(site, capsys):
+    # 本机认得、作业站不认得这关（作业站的关卡表还没更新）：作业站按热度给了别的关的，全部去掉、说清楚
+    site.plans = {p["id"]: p for p in _many(5, stage="act55side_s01")}
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    d = out["data"]
+    assert d["plans"] == [] and d["dropped"] == 5 and "作业站没给这关的作业" in d["warning"]
+
+
+def test_find_local_data_stale(keyword_site, capsys, monkeypatch):
+    # 本机有游戏数据却认不出：作业站的关卡表认得 → 提醒本机数据可能太旧（悖论模拟本来就不在本机数据里，不提醒）
+    code, out = run(capsys, "copilot", "find", "CW-EX-4")
+    assert "可能太旧" in out["data"]["warning"]
+    code, out = run(capsys, "copilot", "find", "塞雷娅")
+    assert "可能太旧" not in (out["data"]["warning"] or "")
+
+
+def test_find_unknown_names_warn(site, capsys):
+    site.plans[50] = plan(50, [{"name": "新干员"}])
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    assert "不认识的名字（新干员）" in out["data"]["warning"]
+
+
+def test_find_and_show_are_logged(site, capsys):
+    from maapilot.tools import log_summary
+    box(BOX_SKLAND)
+    code, out = run(capsys, "copilot", "find", "YW-4")
+    s = log_summary.summarize("copilot find", out["data"])
+    assert s["stage"] == "YW-4" and s["looked"] == 4 and s["top"][0] == {
+        "id": 2, "stage": "act52side_04", "meets": True, "gap_count": 0}
+    code, out = run(capsys, "copilot", "show", "3")
+    s = log_summary.summarize("copilot show", out["data"])
+    assert s == {"id": 3, "stage": "act52side_04", "missing_ops": ["史尔特尔"], "meets": False, "gap_count": 1}
+    rows = [json.loads(line) for f in paths.LOGS.glob("*.jsonl") for line in f.read_text(encoding="utf-8").splitlines()]
+    assert [r["command"] for r in rows if r.get("command", "").startswith("copilot")] == ["copilot find", "copilot show"]
 
 
 def test_network_error(monkeypatch, capsys):

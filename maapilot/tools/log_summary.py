@@ -190,6 +190,23 @@ def _calc_need(d):
     return {k: v for k, v in out.items() if v is not None}
 
 
+def _plan_brief(p: dict) -> dict:
+    out = {**_pick(p, "id", "stage"), "meets": p.get("meets"), "gap_count": p.get("gap_count")}
+    if p.get("missing_ops"):
+        out["missing_ops"] = p["missing_ops"]
+    return out
+
+
+def _copilot_find(d):
+    out = _pick(d, "stage", "stage_id", "count", "looked", "total", "more", "dropped", "warning")
+    out["top"] = [_plan_brief(p) for p in (d.get("plans") or [])[:3] if isinstance(p, dict)]
+    return out
+
+
+def _copilot_show(d):
+    return _plan_brief(d)
+
+
 SUMMARIES = {
     "state sanity": _sanity, "state depot": _depot, "state box": _box, "state skland": _skland, "state op": _state_op,
     "guard snapshot": _guard, "guard check": _guard,
@@ -198,6 +215,7 @@ SUMMARIES = {
     "goals add": _goal, "goals update": _goal, "goals remove": _goal, "goals move": _goals_move,
     "goals expire": _goals_expire,
     "calc need": _calc_need,
+    "copilot find": _copilot_find, "copilot show": _copilot_show,
 }
 
 
