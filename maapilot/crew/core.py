@@ -16,7 +16,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 from PIL import Image
@@ -53,7 +53,7 @@ DRAG_REST_MS = 100     # 拖到终点停多久再松开
 _STAMPED = re.compile(r"_\d{8}-\d{6}(-\d+)?\.png$")
 
 
-def _hit_json(h: "OcrHit") -> dict:
+def _hit_json(h: OcrHit) -> dict:
     return {"text": h.text, "box": list(h.box), "score": round(h.score, 3)}
 
 
@@ -105,7 +105,7 @@ class Game:
             if not self.tasker.bind(self.res, self.ctrl):
                 raise RuntimeError("tasker bind failed")
         self.debug = debug
-        self._shot: Optional[np.ndarray] = None
+        self._shot: np.ndarray | None = None
 
     # ---- screen -----------------------------------------------------------
     def screencap(self) -> np.ndarray:
@@ -117,7 +117,7 @@ class Game:
         """The device's raw resolution (clicks are given in the reference space; MaaFramework maps them)."""
         return tuple(self.ctrl.resolution)
 
-    def save_to(self, path: Path, img: Optional[np.ndarray] = None, *, quality: int = 90) -> Path:
+    def save_to(self, path: Path, img: np.ndarray | None = None, *, quality: int = 90) -> Path:
         """Save a screenshot (the last one unless `img` is given) as JPEG at `path`, creating its directory."""
         img = img if img is not None else (self._shot if self._shot is not None else self.screencap())
         path = Path(path)
@@ -161,7 +161,7 @@ class Game:
         return d
 
     # ---- ocr --------------------------------------------------------------
-    def ocr(self, roi: tuple[int, int, int, int] = FULL_ROI, img: Optional[np.ndarray] = None,
+    def ocr(self, roi: tuple[int, int, int, int] = FULL_ROI, img: np.ndarray | None = None,
             expected: Sequence[str] = ()) -> list[OcrHit]:
         if self.tasker is None:
             raise RuntimeError("Game(ocr=False) 没有加载 OCR 资源")
@@ -173,19 +173,18 @@ class Game:
             if reco is None:
                 continue
             for r in reco.all_results:
-                raw = r.raw if hasattr(r, "raw") else getattr(r, "__dict__", {})
                 hits.append(OcrHit(text=str(r.text), box=tuple(r.box), score=float(getattr(r, "score", 0.0))))
         self._recent_ocr().append({"roi": list(roi), "hits": [_hit_json(h) for h in hits]})
         return hits
 
-    def find(self, pattern: str, roi=FULL_ROI, img=None) -> Optional[OcrHit]:
+    def find(self, pattern: str, roi=FULL_ROI, img=None) -> OcrHit | None:
         rx = re.compile(pattern)
         for h in self.ocr(roi, img):
             if rx.search(h.text):
                 return h
         return None
 
-    def find_word(self, word: str, roi=FULL_ROI, img=None, vocab: Sequence[str] = ()) -> Optional[OcrHit]:
+    def find_word(self, word: str, roi=FULL_ROI, img=None, vocab: Sequence[str] = ()) -> OcrHit | None:
         """像 find，但按词认：OCR 读错一个字也算（三个字以上的词；`reading.matches`）。
         vocab 写同一处可能出现的别的词，免得把差一个字的别的词认成 word。"""
         from maapilot.crew import reading
@@ -298,7 +297,7 @@ def load_image(path: Path | str) -> np.ndarray:
     return np.ascontiguousarray(np.asarray(im)[:, :, ::-1])
 
 
-def _image_controller(game: "ImageGame"):
+def _image_controller(game: ImageGame):
     """MaaFramework 的自定义控制器：截图返回 game 当前的图片，点击之类直接返回成功。
     （MaaFramework 自带的 DbgController 读图片目录，但 macOS 的 maafw 包里没有它的库。）Tasker 要绑一个控制器才能识别。"""
     from maa.controller import CustomController

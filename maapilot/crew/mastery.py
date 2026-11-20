@@ -10,8 +10,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from pathlib import Path
-from typing import Callable, Mapping, Union
+from collections.abc import Callable, Mapping
 
 from maapilot import paths
 from maapilot.crew import overlays, reading
@@ -251,7 +250,7 @@ def rank_by_cost(costs: list[list[tuple[str, int]]], have_need: list[tuple[int, 
     return found[0] if len(found) == 1 else None
 
 
-DepotCounts = Union[Mapping[str, int], Callable[[], Mapping[str, int]]]
+DepotCounts = Mapping[str, int] | Callable[[], Mapping[str, int]]
 
 
 def start_mastery(g: Game, name: str, skill: int, depot: DepotCounts, dry_run: bool = False,

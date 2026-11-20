@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class Overlay:
     pattern: str                              # 正则：在 roi 里的识别文字上找
     roi: tuple[int, int, int, int]
     tap: tuple[int, int]                      # 关掉它点哪（关闭按钮 / 对勾 / 空白处）
-    also: Optional[tuple[str, tuple[int, int, int, int]]] = None   # 还要同时看到的另一处文字（光一处不够认）
+    also: tuple[str, tuple[int, int, int, int]] | None = None   # 还要同时看到的另一处文字（光一处不够认）
     delay: float = 2.0
 
 
@@ -115,7 +115,7 @@ def seen_in_run(run_id: str) -> list[str]:
     return notable(names)
 
 
-def detect(g, img=None, known: Sequence[Overlay] = KNOWN) -> Optional[Overlay]:
+def detect(g, img=None, known: Sequence[Overlay] = KNOWN) -> Overlay | None:
     """这张截图（img；没给就截一张）上有没有认得的遮挡 → 是哪个（没有 → None）。
     每个遮挡在自己的区域里识别（和以前 nav.dismiss_dialogs 的读法一样），同一张图，不重复截图。"""
     img = img if img is not None else g.screencap()
@@ -125,7 +125,7 @@ def detect(g, img=None, known: Sequence[Overlay] = KNOWN) -> Optional[Overlay]:
     return None
 
 
-def dismiss(g, img=None, known: Sequence[Overlay] = KNOWN) -> Optional[str]:
+def dismiss(g, img=None, known: Sequence[Overlay] = KNOWN) -> str | None:
     """看一眼（img 给了就用它），有认得的遮挡就点关掉，返回它的名字；没有 → None，什么都不点。"""
     ov = detect(g, img, known)
     if ov is None:

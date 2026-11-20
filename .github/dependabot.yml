@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # CI 里的 action 固定到提交哈希，由这里提 PR 更新
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

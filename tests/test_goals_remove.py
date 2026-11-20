@@ -6,9 +6,9 @@ import pytest
 from maapilot import cli, paths
 from maapilot.flows import goals
 from maapilot.tools import common
+from tests import resources
 
-HAS_ITEMS = (paths.DATA / "item_table.json").exists()
-needs_items = pytest.mark.skipif(not HAS_ITEMS, reason="没有 data/ 游戏数据表")
+needs_items = resources.needs_data("item_table")
 
 
 def run(capsys, *argv):

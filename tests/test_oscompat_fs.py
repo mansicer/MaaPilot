@@ -21,7 +21,7 @@ def test_atomic_write_leaves_no_tmp_and_writes_lf(tmp_path):
     p = tmp_path / "sub" / "a.json"
     fs.atomic_write_text(p, "一\n二\n")
     fs.atomic_write_text(p, "三\n")
-    assert p.read_bytes() == "三\n".encode("utf-8")
+    assert p.read_bytes() == "三\n".encode()
     assert sorted(x.name for x in p.parent.iterdir()) == ["a.json"]
 
 
@@ -84,7 +84,7 @@ def test_newline_of(tmp_path):
 
 def test_read_text_utf8_strips_bom_and_crlf(tmp_path):
     p = tmp_path / "b.json"
-    p.write_bytes(b"\xef\xbb\xbf" + '{"a": "中"}\r\n'.encode("utf-8"))
+    p.write_bytes(b"\xef\xbb\xbf" + '{"a": "中"}\r\n'.encode())
     assert fs.read_text_utf8(p) == '{"a": "中"}\n'
     from maapilot.tools import common
     assert common.read_json(p) == {"a": "中"}
@@ -113,7 +113,7 @@ def test_config_gbk_is_clear_error(tmp_path):
 def test_config_with_bom(tmp_path):
     from maapilot import config
     p = tmp_path / "config.yaml"
-    p.write_bytes(b"\xef\xbb\xbf" + "emulator:\n  address: 127.0.0.1:16384\n".encode("utf-8"))
+    p.write_bytes(b"\xef\xbb\xbf" + b"emulator:\n  address: 127.0.0.1:16384\n")
     assert config.load(p)["emulator"]["address"] == "127.0.0.1:16384"
 
 

@@ -22,7 +22,7 @@ import re
 import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 

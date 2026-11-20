@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from maapilot import paths
@@ -194,7 +194,7 @@ def _sync(check_only: bool, *, server: str | None, now: datetime | None) -> dict
             continue
         dest = download(file)
         manifest[file] = {"sha256": sha256_file(dest), "git_sha": remote[file],
-                          "fetched_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                          "fetched_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
                           "source_url": source_url(file)}
         result["updated"].append(file)
     write_manifest(manifest)

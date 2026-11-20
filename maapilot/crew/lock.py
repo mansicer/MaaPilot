@@ -116,7 +116,9 @@ class Lock:
         self.released = False
 
     def _mine(self, d: dict | None) -> bool:
-        return bool(d) and d.get("pid") == self.data["pid"] and d.get("host") == self.data["host"] \
+        if not d:
+            return False
+        return d.get("pid") == self.data["pid"] and d.get("host") == self.data["host"] \
             and d.get("acquired_at") == self.data["acquired_at"] and d.get("token") == self.data.get("token")
 
     def heartbeat(self, step: str | None = None) -> None:

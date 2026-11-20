@@ -6,9 +6,9 @@ import pytest
 from maapilot import cli, paths
 from maapilot.flows import goals
 from maapilot.tools import calc, common
+from tests import resources
 
-HAS_DATA = (paths.DATA / "character_table.json").exists() and (paths.DATA / "item_table.json").exists()
-needs_data = pytest.mark.skipif(not HAS_DATA, reason="没有 data/ 游戏数据表")
+needs_data = resources.needs_data("character_table", "item_table")
 
 D32, PEG, BOOK3, GRIND = "30135", "30033", "3303", "30034"   # D32钢、聚酸酯组、技巧概要·卷3、聚酸酯块
 

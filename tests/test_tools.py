@@ -12,10 +12,10 @@ from maapilot import cli, paths
 from maapilot.cliutil import CliError
 from maapilot.crew import lock
 from maapilot.tools import common
+from tests import resources
 from tests.portable import WINDOWS, fake_program
 
-HAS_DATA = (paths.DATA / "character_table.json").exists() and (paths.DATA / "stage_table.json").exists()
-needs_data = pytest.mark.skipif(not HAS_DATA, reason="没有 data/ 游戏数据表")
+needs_data = resources.needs_data("character_table", "stage_table")
 
 
 def run(capsys, *argv):
@@ -91,6 +91,7 @@ def test_parse_summary_and_timeline(tmp_path):
 def test_proxy_failure_is_not_a_drop(tmp_path):
     """代理失败：游戏退回理智，MAA 记成掉落"理智 × 21"。不算掉落、不算用掉的理智，单独报出来。"""
     from types import SimpleNamespace
+
     from maapilot.crew import maa
     from maapilot.tools import maa_cmd
     log = tmp_path / "x.log"
@@ -750,6 +751,7 @@ def test_doctor_brief(capsys, monkeypatch):
     assert any("目标" in l for l in d["lines"])
     # 没收尾的日常
     from datetime import timedelta
+
     from maapilot.flows import daily
     from maapilot.tools import common
     daily._write_open({"run_id": "20261020-0440", "trigger": "schedule", "started_at": common.iso(),
@@ -829,8 +831,8 @@ def test_ocr_sanity_far_below_estimate_is_suspect(monkeypatch):
 
 
 def test_maa_cli_tested_range(monkeypatch):
-    from maapilot.tools import doctor
     from maapilot import toolchain
+    from maapilot.tools import doctor
     monkeypatch.setattr(toolchain, "MAA_CLI_TESTED", ("0.7.5", "0.7.7"))
     assert doctor._ver("v0.8.0-nightly.1792274176+sha.6b0bc89") == (0, 8, 0) and doctor._ver("?") == ()
     assert [doctor.maa_cli_range(v) for v in ("0.7.4", "0.7.5", "0.7.7", "0.7.10", "0.8.0-nightly.1", "?")] == \

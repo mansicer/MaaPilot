@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -79,7 +79,7 @@ def parse(raw: dict, where: str = "shops") -> dict[str, Offer]:
     return out
 
 
-@lru_cache(maxsize=None)
+@cache
 def offers(server: str | None) -> dict[str, Offer]:
     """这个服务器会自动兑换的商品；没有数据文件（或 server 为 None）→ {}。数据文件写错抛 ShopDataError。"""
     if not server:

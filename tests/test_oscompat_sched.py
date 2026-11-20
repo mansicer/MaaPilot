@@ -160,7 +160,7 @@ def test_task_names_and_decode():
     assert sched.task_names(csv_text) == ["\\MaaPilot\\daily-0123abcd", "\\maapilot\\daily-ffffffff"]
     assert sched.decode(codecs.BOM_UTF16_LE + "任务".encode("utf-16-le")) == "任务"
     assert sched.decode("ab任务".encode("utf-16-le")) == "ab任务"                    # 没有 BOM 的 UTF-16
-    assert sched.decode("就绪".encode("utf-8")) == "就绪"
+    assert sched.decode("就绪".encode()) == "就绪"
     n = sched.task_name(Path("/a/MaaPilot"))
     assert n.startswith("\\MaaPilot\\daily-") and len(n) == len("\\MaaPilot\\daily-") + 8
     assert n == sched.task_name("/a/MaaPilot/") and n != sched.task_name("/b/MaaPilot")

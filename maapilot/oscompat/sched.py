@@ -23,7 +23,8 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
+from collections.abc import Callable
 
 from maapilot import paths
 from maapilot.cliutil import ENVIRONMENT, CliError

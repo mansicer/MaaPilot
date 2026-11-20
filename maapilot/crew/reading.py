@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 # ---- 文字：编辑距离 ---------------------------------------------------------------
 
@@ -38,7 +38,7 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-def best_word(text: str, vocab: Iterable[str]) -> Optional[str]:
+def best_word(text: str, vocab: Iterable[str]) -> str | None:
     """text 里认出的是 vocab 里的哪个词：
     - 有词原样出现在 text 里 → 其中最长的（"加工站B105" → 加工站）；
     - 否则距离最近、且在允许范围内（`allowed_distance`）的词；最近的有几个（"异铁炮"离 异铁块 / 异铁组 一样近）→ None。"""
@@ -69,7 +69,7 @@ SLASH_LIKE = "/|｜\\:：;；?？Z"
 _DIGIT_FIX = str.maketrans({"O": "0", "o": "0", "D": "0", "Q": "0"})
 
 
-def parse_have_need(text: str) -> Optional[tuple[int, int]]:
+def parse_have_need(text: str) -> tuple[int, int] | None:
     """"57/15" → (57, 15)。斜杠的形近字也算（只有一个时）；前后粘着的杂点（"c59/2"、"0/2r,"、"-1/1"）去掉。
     认不出（没有分隔符、分隔符不止一个）→ None。"""
     t = re.sub(r"^[^\dOD]*|[^\dOD]*$", "", _clean(text))   # 前后的杂点先去掉（尾巴上的小写 o 是杂点，不是 0）
@@ -85,7 +85,7 @@ def parse_have_need(text: str) -> Optional[tuple[int, int]]:
     return None
 
 
-def split_by_need(text: str, need: int) -> Optional[tuple[int, int]]:
+def split_by_need(text: str, need: int) -> tuple[int, int] | None:
     """斜杠丢了的数字串（"2712"）按已知的"要"切开：末尾是 need 的数字、前面还有数字 → (前面, need)；否则 None。
     "要"必须来自游戏数据，不能来自同一次识别（"6716" 是 16/16 丢了开头的 1，靠它切会切出 67）。"""
     pair = parse_have_need(text)
@@ -98,7 +98,7 @@ def split_by_need(text: str, need: int) -> Optional[tuple[int, int]]:
     return None
 
 
-def vote(readings: Sequence[Optional[tuple[int, int]]]) -> Optional[tuple[int, int]]:
+def vote(readings: Sequence[tuple[int, int] | None]) -> tuple[int, int] | None:
     """几种读法的结果投票：读到的里面最多的那个；并列（两种读法说法不同）→ None。"""
     c = Counter(r for r in readings if r is not None)
     if not c:

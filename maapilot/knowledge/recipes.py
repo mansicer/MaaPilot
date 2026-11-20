@@ -12,7 +12,7 @@ import json
 from functools import lru_cache
 
 from maapilot import paths
-from maapilot.knowledge.gamedata import UnknownNameError, _items
+from maapilot.knowledge.gamedata import UnknownNameError, _items   # noqa: F401 - crew/craft.py 用 recipes.UnknownNameError
 from maapilot.knowledge.items import display_name, resolve_item
 
 STATIONS = {"workshopFormulas": "WORKSHOP", "manufactFormulas": "MANUFACTURE"}
@@ -60,7 +60,7 @@ def build_from_building_data() -> dict[str, dict]:
     return dict(sorted(out.items()))
 
 
-def write_recipes_json() -> "paths.Path":
+def write_recipes_json() -> paths.Path:
     """生成并写 data/recipes.json；返回路径。"""
     built = build_from_building_data()
     p = paths.DATA / "recipes.json"
