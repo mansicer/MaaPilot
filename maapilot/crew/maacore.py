@@ -131,31 +131,45 @@ def install(*, timeout_s: float = 600) -> dict:
     if expected is None:                               # 动态库是要加载进本进程的：没有哈希可对就不装
         raise RuntimeError(f"{tag} 的发布信息里没有 {asset['name']} 的 sha256，没法核对，没有装")
     dest = root() / tag
-    tmp = root() / f".{tag}.download"
+    tmp = root() / ".dl"                              # 名字要短：Windows 上解压时的路径不能比装好后的还长（见 _check_path_length）
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     archive = tmp / asset["name"]
     try:
         toolchain.download(asset["browser_download_url"], archive)
         checksum.check_file(archive, *expected)
-    except BaseException:
-        shutil.rmtree(tmp, ignore_errors=True)         # 没下完、对不上的不留
-        raise
-    out = tmp / "x"
-    if archive.name.endswith(".zip"):
-        # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留。Windows 上用不着这些（PATH 上的 unzip 多半是 MSYS 的，不用）
-        if not WINDOWS and shutil.which("unzip"):
-            procs.run_text(["unzip", "-q", str(archive), "-d", str(out)], timeout=timeout_s, check=True)
+        out = tmp / "x"
+        if archive.name.endswith(".zip"):
+            # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留。Windows 上用不着这些（PATH 上的 unzip 多半是 MSYS 的，不用）
+            if not WINDOWS and shutil.which("unzip"):
+                procs.run_text(["unzip", "-q", str(archive), "-d", str(out)], timeout=timeout_s, check=True)
+            else:
+                with zipfile.ZipFile(archive) as z:
+                    _check_path_length(z.namelist(), out, dest)
+                    z.extractall(out)
         else:
-            zipfile.ZipFile(archive).extractall(out)
-    else:
-        with tarfile.open(archive) as t:
-            t.extractall(out, filter="data")
-    shutil.rmtree(dest, ignore_errors=True)
-    out.rename(dest)
-    shutil.rmtree(tmp, ignore_errors=True)
+            with tarfile.open(archive) as t:
+                t.extractall(out, filter="data")
+        shutil.rmtree(dest, ignore_errors=True)
+        out.rename(dest)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)         # 没下完、对不上、没解开的都不留
     found = find()
     return {"version": tag, "dir": str(found[1]) if found else str(dest), "installed": True}
+
+
+def _check_path_length(names: list[str], *dirs: Path) -> None:
+    """Windows 没开长路径支持时，包里的文件解到 dirs（解压用的临时目录、装好后的目录）下会不会超长。会 → RuntimeError，
+    说清超了多少、怎么办：MAA 的包里有很长的文件名（内置作业），解到一半才失败只会留下一句"找不到文件"。"""
+    from maapilot.oscompat import fs
+    if not WINDOWS or fs.long_paths_enabled():
+        return
+    n, name = max(fs.longest_path(d, names) for d in dirs)
+    if n > fs.WIN_MAX_PATH:
+        raise RuntimeError(
+            f"项目文件夹的路径太深，MaaCore 装不下：包里最长的文件装好后路径有 {n} 个字符，Windows 最多 {fs.WIN_MAX_PATH} 个"
+            f"（超了 {n - fs.WIN_MAX_PATH} 个；最长的是 {name}）。请用户把项目文件夹挪到短一点的位置（例如 C:\\MaaPilot），"
+            f"或者在 Windows 里打开长路径支持（LongPathsEnabled）后再试")
 
 
 def _maa_dir(which: str) -> Path | None:

@@ -111,7 +111,7 @@
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
 | `agent_config` | `config.yaml` 里还写着 v0.1 的设置（`agent`、`schedule_options`、`daily.agent_timeout_min`、`daily.recovery_timeout_min`：定时叫起无头 agent、系统定时用的）：现在不用了，写了也忽略；`legacy` 列出是哪几个。`required: false` | 用户同意后从 `config.yaml` 删掉（不删也不影响） |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
-| `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB；下到的包和发布信息里的 sha256、大小对过才装，对不上不装、`fixed` 里写原因） |
+| `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB；下到的包和发布信息里的 sha256、大小对过才装，对不上不装、`fixed` 里写原因。Windows 上项目文件夹路径太深、又没开长路径支持时装不下（MAA 的包里有很长的文件名）：解压前就停下，`fixed` 里写超了多少个字符，请用户把项目挪到短一点的位置或打开长路径支持） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |

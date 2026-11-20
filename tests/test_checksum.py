@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import subprocess
 import zipfile
 
@@ -106,6 +107,67 @@ def test_maacore_install_rejects_wrong_bytes(core, tmp_path):
         maacore.install()
     assert not (tmp_path / "maa-core" / "v9.9.9").exists()
     assert list((tmp_path / "maa-core").iterdir()) == []                               # 下到的包也删了
+
+
+def test_maacore_install_cleans_up_when_extraction_fails(core, tmp_path, monkeypatch):
+    def boom(self, path=None, members=None, pwd=None):                                 # Windows 上路径太长时就是这样
+        raise FileNotFoundError("path too long")
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", boom)
+    with pytest.raises(FileNotFoundError):
+        maacore.install()
+    assert list((tmp_path / "maa-core").iterdir()) == []                               # 包和解了一半的目录都删了
+
+
+def test_longest_path():
+    from maapilot.oscompat import fs
+    base = paths.PRIVATE / "x"
+    n, name = fs.longest_path(base, ["a.txt", "resource/copilot/long_name.json", "b/"])
+    assert name == "resource/copilot/long_name.json" and n == len(os.path.abspath(base)) + 1 + len(name)
+    assert fs.longest_path(base, []) == (0, "")
+    assert fs.long_paths_enabled() in (True, False)
+
+
+def test_path_length_check_only_on_windows_without_long_paths(tmp_path, monkeypatch):
+    from maapilot.oscompat import fs
+    names = ["MaaCore.dll", "resource/copilot/" + "x" * 300 + ".json"]
+    monkeypatch.setattr(maacore, "WINDOWS", False)
+    maacore._check_path_length(names, tmp_path)                                         # 别的系统不查
+    monkeypatch.setattr(maacore, "WINDOWS", True)
+    monkeypatch.setattr(fs, "long_paths_enabled", lambda: True)
+    maacore._check_path_length(names, tmp_path)                                         # 开了长路径支持也不查
+    monkeypatch.setattr(fs, "long_paths_enabled", lambda: False)
+    with pytest.raises(RuntimeError, match="路径太深") as e:
+        maacore._check_path_length(names, tmp_path)
+    n = fs.longest_path(tmp_path, names)[0]
+    assert f"{n} 个字符" in str(e.value) and f"超了 {n - fs.WIN_MAX_PATH} 个" in str(e.value)
+    maacore._check_path_length(["MaaCore.dll"], tmp_path)                               # 不超的照常
+
+
+def test_path_length_check_uses_the_longer_of_the_two_dirs(tmp_path, monkeypatch):
+    from maapilot.oscompat import fs
+    monkeypatch.setattr(maacore, "WINDOWS", True)
+    monkeypatch.setattr(fs, "long_paths_enabled", lambda: False)
+    short, long_ = tmp_path / "a", tmp_path / ("b" * 40)
+    name = "x" * (fs.WIN_MAX_PATH - len(os.path.abspath(short)) - 1)                    # 放在 short 下刚好不超
+    maacore._check_path_length([name], short)
+    with pytest.raises(RuntimeError):
+        maacore._check_path_length([name], short, long_)
+
+
+def test_maacore_install_stops_before_extracting_when_too_deep(core, tmp_path, monkeypatch):
+    from maapilot.oscompat import fs
+    monkeypatch.setattr(maacore, "WINDOWS", True)
+    monkeypatch.setattr(fs, "long_paths_enabled", lambda: False)
+    monkeypatch.setattr(fs, "WIN_MAX_PATH", 10)                                         # 假装上限很小：什么都超
+    extracted = []
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", lambda self, path=None, members=None, pwd=None: extracted.append(path))
+    with pytest.raises(RuntimeError, match="路径太深"):
+        maacore.install()
+    assert extracted == [] and list((tmp_path / "maa-core").iterdir()) == []
+
+
+def test_maacore_temp_dir_is_not_longer_than_final_dir():
+    assert len(".dl/x") <= len("v6.19.0")                                             # 解压时的路径不比装好后的长
 
 
 def test_maacore_install_refuses_release_without_digest(core, tmp_path):

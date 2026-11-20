@@ -166,3 +166,25 @@ def imwrite(p: Path | str, img, ext: str | None = None) -> bool:
     except (OSError, ValueError, KeyError):
         return False
     return True
+
+
+WIN_MAX_PATH = 259                # Windows 没开长路径支持时，一个路径最多这么多个字符（MAX_PATH 260 含结尾的 0）
+
+
+def long_paths_enabled() -> bool:
+    """这台电脑的路径能不能超过 WIN_MAX_PATH。别的系统总是 True；Windows 看注册表的 LongPathsEnabled（默认没开），读不到按没开算。"""
+    if not WINDOWS:
+        return True
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+            return int(winreg.QueryValueEx(k, "LongPathsEnabled")[0]) == 1
+    except (ImportError, OSError, ValueError, TypeError):
+        return False
+
+
+def longest_path(base: Path | str, names) -> tuple[int, str]:
+    """把 names（压缩包里的相对路径）放到 base 下，最长的那个整条路径有多少个字符。→ (字符数, 那个相对路径)；names 为空 → (0, "")。"""
+    root = len(os.path.abspath(str(base)))
+    name = max(names, key=len, default="")
+    return (root + 1 + len(name) if name else 0), name
