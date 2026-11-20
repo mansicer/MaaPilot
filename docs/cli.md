@@ -348,7 +348,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 |---|---|
 | `copilot find <关卡> [--limit N] [--pages N]` | 关卡 → stageId（同 `data stage` 的认法，重名退出码 2 `ambiguous_stage`；本机认不出——悖论模拟、没有游戏数据、本机数据太旧——就在作业站的关卡表 `/arknights/level` 里找：关卡号、关名、stageId 一模一样的，没有再找包含的，最多查 5 关；关卡表里也没有就不查，`warning` 说换个写法）。
 按每关的 stageId 去作业站按热度一页页查（一页 20 份，每关最多 `--pages` 页，默认 5；有一份 `meets` 为 true 就不再往后翻；没有 `box.json` 时只看第一页），逐份标注，排序后列前 `--limit` 份（默认 20）。排序：干员都有的在前，再按差距数少、一个干员都没写的靠后、没核对到的少（读不到的项，加作业没写要求的干员）、热度高。
-`looked` 是看了几份（核对关卡之后），`total` 是作业站说这关一共几份，`more` 为真是后面还有没看的；`count` 是列出来几份。
+`raid` 为真是本机认出的是突袭（`<stageId>#f#`）：作业站的作业不分常规、突袭，按同一关查，`warning` 提醒挑能打突袭的、打的时候加 `--raid raid`。`looked` 是看了几份（核对关卡之后），`total` 是作业站说这关一共几份，`more` 为真是后面还有没看的；`count` 是列出来几份。
 **核对关卡**：作业站认得这关时只给这关的，作业的 `stage` 写成关卡号（`CW-EX-4`、`16-13`；第 10 章起关卡号和 stageId 差一，不自己换算）、levelId 的也算这关；一页里混着别的关的 stageId（作业站不认这关，按热度给了全站的作业）时只留对得上的，去掉的记在 `dropped`。
 `matched_stages` 是查了的关 `[{stage_id, level_id, label}]`（本机认出的 `level_id` 是 `null`、`label` 如 `1-7「暴君」`；关卡表里的 `label` 如 `悖论模拟·重装·塞雷娅「死路」`），每份作业的 `stage_label` 是它属于哪一关；本机认不出、关卡表也连不上时 `matched_stages` 是 `null`，照原样查一页、不核对关卡。
 `warning`（中文，没有是 `null`）：去掉了作业、全被去掉（作业站没给这关的作业）、对得上好几关、没有游戏数据、本机游戏数据里没有这关（可能太旧；悖论模拟不算）、作业里有本机游戏数据不认识的名字（新干员、数据太旧：这些人的技能解锁没核对）、关卡表连不上。
@@ -358,7 +358,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 
 ```json
 // copilot find
-{"stage": "YW-8", "stage_id": "act…_08", "count": 20, "looked": 46, "total": 120, "more": true,
+{"stage": "YW-8", "stage_id": "act…_08", "raid": false, "count": 20, "looked": 46, "total": 120, "more": true,
  "matched_stages": [{"stage_id": "act…_08", "level_id": null, "label": "YW-8「…」"}], "dropped": 0, "warning": null,
  "box_at": "…", "box_source": "skland",
  "plans": [{"id": 64408, "uri": "prts://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
@@ -377,7 +377,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 - `box_source`：`skland`（森空岛，技能、专精、模组都有）或 `maa`（`state box` 的 MAA 识别，只有精英化、等级、潜能）；没有 `box.json` 时 `null`。
 - `groups` 是可选位（任选一名）：`best` 是有的里面差距最少的（一样少时挑读不到的项少、作业写了要求的；所以是"最好核对的"，不一定是练度最高的），`gaps` 是它的差距数，`unknown` 是它读不到的项。没有 `box.json` 时 `have`、`current`、`gap_count`、`all_owned`、`unknown_count`、`meets` 都是 `null`，`unchecked` 是 `[]`。
 - **`gap_count` 是 0 不等于满足要求**，看 `meets`：`true` 是人都有、没有差距、也没有没核对到的；`false` 是缺人或有差距；`null` 是说不准，原因列在 `unchecked`（中文）：
-  用到的干员里读不到的项（"遥：技能等级、专精读不到，没对照"，`unknown_count` 是项数；多半是没接森空岛）、作业没写练度要求的干员（"作业没写练度要求，只核对了有没有这名干员：…"；要求全写 0 也算没写）、作业里一个干员都没写的（"作业里没写干员，没法核对"，括号里说只写了几个动作、或只写了召唤物）。干员还没有作业要的那个技能时，算差距，不再说"专精读不到"。
+  用到的干员里读不到的项（"遥：技能等级、专精读不到，没对照"，`unknown_count` 是项数；多半是没接森空岛）、作业没写练度要求的干员（"作业没写练度要求，只核对了有没有这名干员：…"；要求全写 0 也算没写）、作业里一个干员都没写的（"作业里没写干员，没法核对"，只写了召唤物的括号里列出来）。干员还没有作业要的那个技能时，算差距，不再说"专精读不到"。
   读不到的项不能当成够：开打前先读出来（`state skland`；没接森空岛时技能等级用 `state op <干员>`，专精、模组看干员页），自己对着 `required` 比。
 - `rating`：评分人数不够时为 `null`。连不上作业站退出码 1（`network`）；没有这份作业退出码 2（`not_found`）；编号不是数字退出码 2（`bad_arguments`）；`strip` 读不出作业内容退出码 1（`bad_plan`）。
 

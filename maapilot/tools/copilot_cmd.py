@@ -304,11 +304,10 @@ def annotate(plan: dict, box: dict | None, mtypes: dict | None = None, roster=_U
             unchecked.append(f"作业没写练度要求，只核对了有没有这名干员：{'、'.join(bare)}")
         p = {"opers": opers, "groups": groups}
         if _empty(p):
+            # 作业站按关查时不给动作，这里不说有几个动作（find、show 说法一样）
             summons = [o["name"] for o in opers + [x for g in groups for x in g["opers"]] if o.get("summon")]
-            n = len(c.get("actions") or [])
-            why = (f"只写了召唤物、装置：{'、'.join(summons)}" if summons
-                   else f"只写了 {n} 个动作" if n else "")
-            unchecked.append(f"作业里没写干员{'（' + why + '）' if why else ''}，没法核对")
+            why = f"（只写了召唤物、装置：{'、'.join(summons)}）" if summons else ""
+            unchecked.append(f"作业里没写干员{why}，没法核对")
         meets = False if missing or gap_count else (None if unchecked else True)
     doc = c.get("doc") or {}
     rated = not plan.get("not_enough_rating") and plan.get("rating_level") is not None
@@ -350,7 +349,8 @@ def _stage_keyword(text: str) -> tuple[dict | None, bool]:
     code, name = getattr(ref, "code", None), getattr(ref, "name", None)
     label = f"{code}「{name}」" if code and name else (code or name or ref.stage_id)
     # 突袭是 <id>#f#：作业站按同一关的 stageId 查、作业里也写不带后缀的
-    return {"stage_id": ref.stage_id.split("#")[0], "level_id": None, "label": label}, True
+    raid = "#f#" in ref.stage_id or getattr(ref, "difficulty", None) == "FOUR_STAR"
+    return {"stage_id": ref.stage_id.split("#")[0], "level_id": None, "label": label, **({"raid": True} if raid else {})}, True
 
 
 def levels() -> list[dict] | None:
@@ -455,6 +455,10 @@ def cmd_find(args) -> dict:
     local, has_data = _stage_keyword(args.stage)
     box, mtypes, roster = load_box(), _module_types(), _roster()
     warn = []
+    raid = bool(local and local.pop("raid", False))
+    if raid:
+        warn.append("这是突袭：作业站的作业不分常规、突袭，下面是这关所有的作业；挑说明里写了能打突袭的，"
+                    "打的时候加 --raid raid（突袭的做法见 maapilot-battle）")
     if local is not None:
         targets = [local]
     else:
@@ -494,7 +498,7 @@ def cmd_find(args) -> dict:
         warn.append(f"作业里有本机游戏数据不认识的名字（{'、'.join(names[:5])}{'…' if len(names) > 5 else ''}）："
                     "可能是新干员、游戏数据太旧（maapilot data sync），这些人的技能解锁没核对")
     plans = sorted(res["plans"], key=_sort_key)
-    return {"stage": args.stage, "stage_id": local and local["stage_id"], "count": min(len(plans), args.limit),
+    return {"stage": args.stage, "stage_id": local and local["stage_id"], "raid": raid, "count": min(len(plans), args.limit),
             "looked": len(plans), "total": res["total"], "more": res["more"],
             "matched_stages": targets, "dropped": res["dropped"], "warning": "；".join(warn) or None,
             **_box_info(box), "plans": plans[:args.limit]}

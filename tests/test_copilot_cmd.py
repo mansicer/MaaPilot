@@ -175,7 +175,7 @@ def test_find_sorts_and_annotates(site, capsys):
     d = out["data"]
     assert d["stage_id"] == "act52side_04" and d["box_source"] == "skland"
     assert "levelKeyword=act52side_04" in site.urls[0] and "order_by=hot" in site.urls[0] and "page=1" in site.urls[0]
-    assert d["looked"] == 4 and d["total"] == 4 and d["more"] is False and d["count"] == 4
+    assert d["looked"] == 4 and d["total"] == 4 and d["more"] is False and d["count"] == 4 and d["raid"] is False
     assert d["matched_stages"] == [{"stage_id": "act52side_04", "level_id": None, "label": "act52side_04"}]
     assert all(p["stage_label"] == "act52side_04" for p in d["plans"])
     # 都有的在前，差距少的在前，没核对到的少的在前（4 的可选位挑的德克萨斯作业没写要求），再按热度
@@ -251,9 +251,7 @@ def test_unusual_plans():
     assert p["meets"] is None and p["unchecked"] == ["作业没写练度要求，只核对了有没有这名干员：E"]
     # 一个干员都没写：说不准，不算满足
     p = copilot_cmd.annotate(plan(9, []), ops, MTYPES)
-    assert p["meets"] is None and p["unchecked"] == ["作业里没写干员（只写了 3 个动作），没法核对"]
-    p = copilot_cmd.annotate(plan(9, [], actions=0), ops, MTYPES)
-    assert p["unchecked"] == ["作业里没写干员，没法核对"]
+    assert p["meets"] is None and p["unchecked"] == ["作业里没写干员，没法核对"]
 
 
 @pytest.fixture
@@ -451,7 +449,8 @@ def test_find_raid_stage(site, capsys, monkeypatch):
     code, out = run(capsys, "copilot", "find", "YW-4")
     d = out["data"]
     assert len(d["plans"]) == 4 and d["dropped"] == 0 and "levelKeyword=act52side_04&" in site.urls[0]
-    assert d["plans"][0]["stage_label"] == "YW-4「某关」"
+    assert d["plans"][0]["stage_label"] == "YW-4「某关」" and d["raid"] is True and d["stage_id"] == "act52side_04"
+    assert d["warning"].startswith("这是突袭")
 
 
 def test_find_level_table_unreachable(site, capsys, monkeypatch):
