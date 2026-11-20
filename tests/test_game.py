@@ -181,7 +181,7 @@ def test_version_errors(env, capsys, monkeypatch, _tmp_private):
     code, out = run(capsys, "game", "version")
     assert code == 5 and out["error"]["code"] == "adb_failed"
 
-    (_tmp_private / "config.yaml").write_text("emulator:\n  address: x\nserver: YoStarEN\n", encoding="utf-8")
+    (_tmp_private / "config.yaml").write_text("emulator:\n  address: x\nserver: Bilibili\n", encoding="utf-8")
     code, out = run(capsys, "game", "version")
     assert code == 2 and out["error"]["code"] == "unsupported_server"
 

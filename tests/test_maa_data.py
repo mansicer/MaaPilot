@@ -109,6 +109,21 @@ def test_doctor_looks_in_the_project_folder(old, monkeypatch):
             return doctor.Proc(0, b"/x\n", b"")
     probe = Probe()
     ctx = doctor.Ctx(True, probe)
+    doctor.maa_version(ctx)                                      # 还没搬：doctor 只看不搬，按原来的目录查
+    assert "MAA_DATA_DIR" not in probe.envs[0] and not maa.data_dir().exists()
+    maa.env()                                                    # 跑 MAA 任务、doctor --fix 时搬
     doctor.maa_version(ctx)
     doctor.maa_dir(ctx, "resource")
-    assert [e["MAA_DATA_DIR"] for e in probe.envs] == [str(maa.data_dir())] * 2
+    assert [e["MAA_DATA_DIR"] for e in probe.envs[1:]] == [str(maa.data_dir())] * 2
+
+
+def test_doctor_fix_moves_the_data(old, monkeypatch):
+    from maapilot.tools import doctor
+    monkeypatch.setattr(maa, "install_config", lambda: [])
+    monkeypatch.setattr(doctor, "OCR_FILES", ())
+    from maapilot.crew import maacore
+    from maapilot.knowledge import datasync
+    monkeypatch.setattr(maacore, "find", lambda: ("v99.0.0", "x"))
+    monkeypatch.setattr(datasync, "missing_tables", lambda: [])
+    doctor.fix()
+    assert (maa.data_dir() / "lib" / "MaaCore.dll").exists()

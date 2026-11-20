@@ -208,13 +208,16 @@ def check_game(ctx: Ctx) -> dict:
     if any(re.search(rf"\b{re.escape(pkg)}/", l) for l in focus):
         return _item("game", True, "游戏在前台", required=False, package=fg, installed=inst)
     other = next((srv for srv, p in config.PACKAGES.items() if p.lower() == (fg or "").lower()), None)
+    unsupported = "MaaPilot 目前只支持官服和 B 服，这个服还用不了：告诉用户"
     if other:
         return _item("game", False, f"前台是明日方舟（{other}，{fg}），和配置的服务器 {config.server(ctx.cfg)} 不一样",
-                     f"把 config.yaml 的 server 改成 {other}", required=False, package=fg, installed=inst)
+                     f"把 config.yaml 的 server 改成 {other}" if other in config.SUPPORTED_SERVERS else unsupported,
+                     required=False, package=fg, installed=inst)
     if inst and not any(g["package"].lower() == pkg.lower() for g in inst):
         names = "、".join(f"{g['server']}（{g['package']}）" for g in inst)
         return _item("game", False, f"模拟器里装的明日方舟是 {names}，和配置的服务器 {config.server(ctx.cfg)} 不一样",
-                     "把 config.yaml 的 server 改成装着的那个", required=False, package=fg, installed=inst)
+                     "把 config.yaml 的 server 改成装着的那个" if any(g["supported"] for g in inst) else unsupported,
+                     required=False, package=fg, installed=inst)
     if not inst and inst is not None:
         return _item("game", False, "模拟器里没装明日方舟", "在模拟器的应用商店里装好明日方舟，并登录一次账号",
                      required=False, package=fg, installed=inst)
@@ -223,20 +226,22 @@ def check_game(ctx: Ctx) -> dict:
 
 
 def installed_games(ctx: Ctx) -> list[dict] | None:
-    """模拟器里装着的明日方舟客户端 [{package, server}]（`pm list packages`，只读）；查不了 → None。"""
+    """模拟器里装着的明日方舟客户端 [{package, server, supported}]（`pm list packages`，只读）；查不了 → None。
+    supported：这个服 MaaPilot 支不支持（`config.SUPPORTED_SERVERS`）。"""
     from maapilot import config
     r = ctx.probe.run([ctx.adb, "-s", ctx.address, "shell", "pm", "list", "packages"], timeout=15)
     if r.returncode != 0:
         return None
     have = {l.strip().removeprefix("package:").strip().lower(): l.strip().removeprefix("package:").strip()
             for l in r.text.splitlines() if l.strip()}
-    return [{"package": have[p.lower()], "server": srv} for srv, p in config.PACKAGES.items() if p.lower() in have]
+    return [{"package": have[p.lower()], "server": srv, "supported": srv in config.SUPPORTED_SERVERS}
+            for srv, p in config.PACKAGES.items() if p.lower() in have]
 
 
 def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
     from maapilot import config
     from maapilot.crew import maa as crew_maa
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"], env=crew_maa.env())
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "version"], env=crew_maa.env(move=False))
     cli = core = None
     for line in r.text.splitlines():
         if m := re.search(r"maa-?cli\s+v?(\S+)", line, re.I):
@@ -253,7 +258,7 @@ def maa_version(ctx: Ctx) -> tuple[str | None, str | None]:
 def maa_dir(ctx: Ctx, which: str) -> Path | None:
     from maapilot import config
     from maapilot.crew import maa as crew_maa
-    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which], env=crew_maa.env())
+    r = ctx.probe.run([config.tool("maa", ctx.cfg), "dir", which], env=crew_maa.env(move=False))
     lines = [l.strip() for l in r.text.splitlines() if l.strip()]
     return Path(lines[-1]) if r.returncode == 0 and lines else None
 
@@ -528,6 +533,14 @@ def fix(probe: Probe | None = None) -> list[dict]:
         except OSError as e:
             done.append({"name": "skills_link", "done": [], "detail": f"建不了链接：{type(e).__name__}: {e}"})
     keep_skills_link()
+    try:
+        from maapilot.tools import memory
+        imported = memory.import_claude()
+        if imported:
+            done.append({"name": "memory", "done": imported, "detail": "从 Claude Code 的自动记忆搬进 private/memory/"})
+    except OSError as e:
+        done.append({"name": "memory", "done": [], "detail": f"偏好没搬成：{type(e).__name__}: {e}"})
+    maa.env()                                           # MAA 的数据还在 maa-cli 默认目录的，搬进项目（不带 --fix 的 doctor 不搬）
     copied = maa.install_config()
     done.append({"name": "maa_config", "done": copied, "detail": f"复制了 {'、'.join(copied)}" if copied else "已经有了"})
     missing = [f for f in OCR_FILES if not (paths.OCR_MODEL / f).exists()]
@@ -656,11 +669,11 @@ def low_integrity_brief() -> dict | None:
 
 
 def memory_brief() -> dict | None:
-    """用户偏好记录（private/memory/MEMORY.md 的目录行）。第一次会把 Claude Code 自动记忆里的搬过来（imported）。"""
+    """用户偏好记录（private/memory/MEMORY.md 的目录行）。只读：Claude Code 自动记忆里还有没搬过来的 → importable（文件名），
+    agent 跑 `memory import` 搬。"""
     try:
         from maapilot.tools import memory
-        imported = memory.import_claude()
-        return {"dir": "private/memory", "index": memory.index_lines(), "imported": imported or None}
+        return {"dir": "private/memory", "index": memory.index_lines(), "importable": memory.importable() or None}
     except Exception:                                   # noqa: BLE001 - 读不了不影响启动检查
         return None
 
@@ -739,6 +752,9 @@ def brief_lines(d: dict) -> list[str]:
         lines.append(f"对账停机中：{what}，没经用户同意。先告诉用户、问清楚。")
     if d.get("low_integrity"):
         lines.append(_low_integrity_line(d["low_integrity"]))
+    if (d.get("memory") or {}).get("importable"):
+        lines.append(f"Claude Code 的自动记忆里有 {len(d['memory']['importable'])} 条以前记的用户偏好还没搬进 private/memory/："
+                     "先跑 maapilot memory import，再看搬过来的偏好。")
     goals = d.get("goals")
     if goals:
         lines.append(f"进行中的目标 {len(goals)} 个（做别的事前想想会不会用掉它们要的材料）：" + "；".join(
@@ -802,10 +818,21 @@ def hook_output(data: dict) -> dict:
     return out
 
 
+def hook_error_output(e: Exception) -> dict:
+    """启动检查自己出错时给钩子的输出：还是钩子的格式，告诉 agent 自己再跑一次看原因。"""
+    text = (f"MaaPilot 启动检查出错了（{type(e).__name__}: {e}）。回复用户之前自己跑一次 maapilot doctor --brief 看原因；"
+            "还是出错就跑 maapilot doctor，把结果告诉用户。")
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+
+
 def cmd(args):
     if args.hook:
-        data = brief()
-        raise cliutil.RawOutput(hook_output(data))
+        try:
+            out = hook_output(brief())
+        except Exception as e:                          # noqa: BLE001 - 钩子的输出只能是钩子的格式、退出码 0：出错也照这个格式说
+            cliutil.log(f"[doctor --hook] {type(e).__name__}: {e}")
+            out = hook_error_output(e)
+        raise cliutil.RawOutput(out)
     if args.brief:
         return brief()
     fixed = fix() if args.fix else None

@@ -426,7 +426,7 @@ def upgrade_one(g: Game, name: str, elite: int, level: int, skill: int | None) -
         cur, mx = read_panel(g, maxes)
         cur_elite = maxes.index(mx)
         known.update(elite=cur_elite, level=cur, start={"elite": cur_elite, "level": cur})
-        print(f"[{name}] now 精{cur_elite} Lv{cur}/{mx}; target 精{elite} Lv{level} skill {skill}")
+        _log(f"[{name}] now 精{cur_elite} Lv{cur}/{mx}; target 精{elite} Lv{level} skill {skill}")
         if not _reached(cur_elite, cur, elite, level):
             while cur_elite < elite:
                 if cur is None or cur < mx:
@@ -438,7 +438,7 @@ def upgrade_one(g: Game, name: str, elite: int, level: int, skill: int | None) -
                 cur_elite += 1
                 cur = 1                                       # promotion resets the level to 1
                 known.update(elite=cur_elite, level=cur)
-                print(f"[{name}] promoted -> 精{cur_elite} Lv{cur}/{mx}")
+                _log(f"[{name}] promoted -> 精{cur_elite} Lv{cur}/{mx}")
             if level > mx:
                 raise UpgradeError(f"target Lv{level} exceeds phase max {mx}")
             if cur is None or cur < level:
@@ -450,16 +450,21 @@ def upgrade_one(g: Game, name: str, elite: int, level: int, skill: int | None) -
                     known["level_unread"] = {"read": seen, "expected": [lo, level]}
                     raise UpgradeError(f"cannot read the level after levelling up (read {seen}, expected Lv{lo}"
                                        + (f"-{level})" if lo < level else ")"))
-                print(f"[{name}] leveled -> Lv{cur}/{mx}")
+                _log(f"[{name}] leveled -> Lv{cur}/{mx}")
         known["reached"] = _reached(cur_elite, cur, elite, level)
         if skill and info["skills"] > 0:
             known["skill"] = skill_to(g, skill)
-            print(f"[{name}] skill rank -> {known['skill']}")
+            _log(f"[{name}] skill rank -> {known['skill']}")
         return dict(known)
     except Exception as e:
         if known["elite"] is not None:
             e.reached = dict(known)
         raise
+
+
+def _log(text: str) -> None:
+    """Progress goes to stderr: stdout carries only the command's JSON."""
+    print(text, file=sys.stderr, flush=True)
 
 
 def run_plan(plan: dict) -> list[dict]:
@@ -471,7 +476,7 @@ def run_plan(plan: dict) -> list[dict]:
         except Exception as e:  # keep going with the next operator, report at the end
             g.save(f"error_{name}")
             results.append({"name": name, "error": str(e)})
-            print(f"[{name}] ERROR: {e}")
+            _log(f"[{name}] ERROR: {e}")
     leave_list_unfiltered(g)
     return results
 

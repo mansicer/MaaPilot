@@ -184,8 +184,12 @@ def test_game_check_lists_installed_clients(cfg):
         "dumpsys window": (0, b"  mCurrentFocus=Window{1 u0 com.android.launcher3/x}\n", b"")}))
     ctx.cfg, ctx.adb, ctx.online = {"emulator": {"address": "emu:1"}, "server": "Official"}, "/usr/bin/adb", True
     item = doctor.check_game(ctx)
-    assert item["installed"] == [{"package": "com.hypergryph.arknights.bilibili", "server": "Bilibili"}]
-    assert not item["ok"] and "Bilibili" in item["detail"]
+    assert item["installed"] == [{"package": "com.hypergryph.arknights.bilibili", "server": "Bilibili", "supported": True}]
+    assert not item["ok"] and "Bilibili" in item["detail"] and "改成" in item["fix"]
+    ctx.probe = Probe({"pm list packages": (0, b"package:com.YoStarEN.Arknights\n", b""),
+                       "dumpsys window": (0, b"  mCurrentFocus=Window{1 u0 com.YoStarEN.Arknights/x}\n", b"")})
+    item = doctor.check_game(ctx)                                    # 国际服：认得出来，但不让改过去
+    assert item["installed"][0]["supported"] is False and "只支持官服和 B 服" in item["fix"]
     ctx.probe = Probe({"pm list packages": (0, b"package:com.android.chrome\n", b""),
                        "dumpsys window": (0, b"", b"")})
     item = doctor.check_game(ctx)

@@ -1,11 +1,10 @@
 """Navigation helpers shared by features (drawer, dialogs, main-story stage pages)."""
 from __future__ import annotations
 
-import re
 import time
 
 from maapilot.crew import overlays
-from maapilot.crew.core import FULL_ROI, REF_W, Game
+from maapilot.crew.core import REF_W, Game
 
 DRAWER = {"首页": (92, 260), "干员": (308, 260), "编队": (237, 190), "终端": (530, 190),
           "基建": (688, 190), "档案": (450, 260)}
@@ -122,25 +121,6 @@ def ensure_home(g: Game, rounds: int = 3) -> bool:
             return True
     g.save("ensure_home_fail")
     return False
-
-
-def goto_main_stage(g: Game, code: str) -> None:
-    """Open the stage page of a main-story stage of the *current* chapter, e.g. "15-15"."""
-    if not g.find(r"推演计分|EPISODE", (0, 600, REF_W, 120)):     # not already on the chapter map
-        goto(g, "终端")
-        g.wait(r"离解复合|进度|前往上一次作战", FULL_ROI, timeout=10)
-        g.tap(760, 185, delay=4.0)                       # the featured (current) chapter card
-    # the map opens centred on the newest stage; earlier stages are to the left
-    moves = [(400, 900)] * 4 + [(900, 400)] * 8
-    for x1, x2 in moves:
-        hit = g.find(rf"^{re.escape(code)}$", (0, 250, REF_W, 400))
-        if hit:
-            g.tap_hit(hit, delay=3.0)
-            g.wait(r"推荐平均等级|开始行动", (900, 170, 380, 520), timeout=10)
-            return
-        g.swipe(x1, 300, x2, 300, duration_ms=500, delay=1.5)
-    g.save("goto_main_stage_fail")
-    raise RuntimeError(f"stage {code} not found on the chapter map")
 
 
 def goto_room(g: Game, room: str) -> None:

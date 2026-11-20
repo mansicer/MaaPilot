@@ -14,7 +14,7 @@ def run(capsys, *argv):
 def test_package_modules_import():
     for m in ["maapilot.crew.core", "maapilot.crew.lock", "maapilot.crew.maa", "maapilot.crew.cost",
               "maapilot.crew.upgrade", "maapilot.crew.mastery", "maapilot.crew.craft", "maapilot.crew.manufacture",
-              "maapilot.crew.shop", "maapilot.crew.infrast_scan", "maapilot.crew.clears", "maapilot.knowledge",
+              "maapilot.crew.shop", "maapilot.crew.clears", "maapilot.knowledge",
               "maapilot.knowledge.datasync", "maapilot.knowledge.live", "maapilot.config"]:
         importlib.import_module(m)
 

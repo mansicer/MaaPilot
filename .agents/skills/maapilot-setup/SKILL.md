@@ -53,9 +53,11 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
      画面是明日方舟、`game` 项的 `package` / `installed` 有明日方舟的，就是它。认出来以后跟用户确认一句（"连上的是开着明日方舟的那个模拟器窗口，对吗？"），用户说对就定下。
      几个都像、或者都不像，才问用户是哪个模拟器（多开时问是哪个窗口）；常见端口：BlueStacks 5555 起、MuMu 12 / MuMu Pro 16384（旧版 7555）、雷电 5555 或 `emulator-5554`、夜神 62001、逍遥 21503。
    - 一个都没有：请用户在模拟器设置里找"ADB 端口 / ADB 地址"并告诉你；还连不上就看连接设置那页的排障。
-3. **服务器**：`doctor` 的 `game` 项里，`package` 是前台应用的包名（游戏开着时），`installed` 是模拟器里装着的明日方舟客户端（游戏没开也有，已经带了对应的 `server`）。
+3. **服务器**：`doctor` 的 `game` 项里，`package` 是前台应用的包名（游戏开着时），`installed` 是模拟器里装着的明日方舟客户端（游戏没开也有，已经带了对应的 `server` 和支不支持 `supported`）。
    只装了一个就用它的 `server`；前台的包名是：`com.hypergryph.arknights` → `Official`，`com.hypergryph.arknights.bilibili` → `Bilibili`，
-   `com.YoStarEN.arknights` / `JP` / `KR` → `YoStarEN` / `YoStarJP` / `YoStarKR`，`tw.txwy.and.arknights` → `txwy`（大小写以实际为准）。认得出就直接填 `server`，认不出才问用户玩的是官服、B 服还是国际服。
+   认得出就直接填 `server`，认不出才问用户玩的是官服还是 B 服。**只支持这两个**：装的是国际服、日服、韩服、繁中服（`supported` 是 `false`）时，
+   告诉用户 MaaPilot 现在还用不了这个服，setup 到这里停下；不要硬填一个（程序读配置时会拒绝）。
+   B 服和官服只有一处不同：游戏客户端要更新时程序不会代劳，到时请用户自己在模拟器里更新。
 
 ## 2. 环境逐项通过
 

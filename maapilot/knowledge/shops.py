@@ -1,6 +1,6 @@
 """商店兑换（见 docs/concepts/knowledge.md「商店兑换」，决策 D135）：养成目标为了补齐材料会自动兑换的商品，按服务器。
 
-数据在 `maapilot.crew/knowledge/shops/<服务器>.yaml`（随代码维护）：游戏数据表里没有商店，价格与限购来自公开资料，文件里注明来源。
+数据在 `maapilot/knowledge/shops/<服务器>.yaml`（随代码维护；B 服用官服那份，见 `SAME_AS`）：游戏数据表里没有商店，价格与限购来自公开资料，文件里注明来源。
 没有这个服务器的文件 = 不自动兑换（规划器照旧把这些物品当成拿不到）。
 
 `offers(server)` → {物品 id: Offer}；`recipes(server, caps)` 把商品写成配方的形状（station "SHOP"，原料是货币），
@@ -39,8 +39,11 @@ class Offer:
                 "limit": self.limit, "period": self.period}
 
 
+SAME_AS = {"bilibili": "official"}        # B 服和官服是同一个游戏内容（商品、价格、限购一样），共用一份
+
+
 def rules_path(server: str) -> Path:
-    return Path(__file__).parent / "shops" / f"{server}.yaml"
+    return Path(__file__).parent / "shops" / f"{SAME_AS.get(server, server)}.yaml"
 
 
 def parse(raw: dict, where: str = "shops") -> dict[str, Offer]:

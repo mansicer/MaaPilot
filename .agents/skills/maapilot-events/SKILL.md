@@ -30,6 +30,7 @@ description: 明日方舟官方日程 via MaaPilot —— 看官方公告里的�
 ## 维护结束：先把游戏更新好
 
 1. `maapilot game version`：`update_needed` 为真就要更新（模拟器上的游戏版本比官网的旧）。为假就跳到第 4 步。
+   B 服（退出码 2 `unsupported_server`）：程序只会更新官服的客户端。请用户自己在模拟器里把游戏更新好，更新好了从第 4 步接着做。
 2. `maapilot game update`：下载官网安装包（约 2 GB）、覆盖安装（账号数据不丢）、核对版本。要十几分钟：
    先告诉用户大概多久。harness 能在后台命令结束时叫醒你的就放后台跑；别的前台跑，命令超时被停下了就再跑一次（下载会接着上次的）。
    失败看 `error.code`：`disk_full`（电脑空间不够，告诉用户要腾多少）、`install_failed`（看 adb 的原话；空间不够、签名不对……）、

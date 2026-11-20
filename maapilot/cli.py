@@ -136,7 +136,7 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         args, extra = parser.parse_known_args(argv)
         if extra and not getattr(args, "accepts_extra", False):
             parser.error(f"unrecognized arguments: {' '.join(extra)}")
-        if getattr(args, "version", False) and not getattr(args, "func", None):
+        if getattr(args, "version", False):          # 带了子命令也只报版本，不执行子命令
             from maapilot import version
             args.func, args.command = (lambda _a: version.info()), "version"
         if not getattr(args, "func", None):
@@ -151,6 +151,9 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         data = e.data
     except KeyboardInterrupt:
         env, code = cliutil.envelope(command, error=CliError("interrupted", "被中断", exit=FAILED)), FAILED
+    except cliutil.Stopped as e:         # 被信号叫停：信封照出，退出码 128+信号
+        code = int(e.code)
+        env = cliutil.envelope(command, error=CliError("interrupted", f"被叫停（{_signal_name(e.signum)}）", exit=code))
     except SystemExit as e:              # --help 等：argparse 自己打印（到 stderr）后退出
         return int(e.code or 0)
     except Exception as e:               # 未料到的错误：信封里给简短原因，栈打到 stderr
@@ -164,6 +167,14 @@ def _main(argv: list[str], out_fd: int | None) -> int:
         with os.fdopen(os.dup(out_fd), "w", encoding="utf-8") as out:
             cliutil.emit(env, out)
     return code
+
+
+def _signal_name(signum: int) -> str:
+    import signal
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return f"信号 {signum}"
 
 
 def _journal(command: str, argv: list[str], args, env: dict, code: int, data, duration_s: float) -> None:

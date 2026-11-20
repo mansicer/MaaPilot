@@ -8,6 +8,7 @@
   `maapilot` 装在项目的虚拟环境 `.venv` 里（setup 时用 uv 建，见 skill `maapilot-setup`）；启动钩子 `bin/session-start` 把 `.venv/bin` 加进本次会话的 PATH，所以直接写 `maapilot`。
 - **版本**：`maapilot --version` → `data: {version, commit, text}`（`version` 是 `maapilot.__version__`；`commit` 是当前提交的前 7 位，直接读 `.git`，
   不是 git 仓库时为 `null`；`text` 给人看，如 `"0.0.1（bff8a50）"`）。`doctor` 和 `doctor --brief` 的 `data.version` 同样是这个。
+  `--version` 后面还带了子命令（`maapilot --version doctor`）也只报版本，不执行子命令。
 - **输出**：stdout 只有一个 JSON 信封，进度与日志写 stderr：
 
   ```json
@@ -16,6 +17,7 @@
   ```
 
   失败时 `data` 可以带有用的部分结果（例如对账差额、失败截图路径）。`hint` 是下一步该做的事。
+  例外只有两个：`doctor --hook` 输出 Claude Code 钩子的格式（出错也是，见「doctor」）；`--help` 把用法写到 stderr，stdout 为空。
 - **退出码**：
 
   | 码 | 含义 | agent 该怎么做 |
@@ -26,6 +28,7 @@
   | 3 | 要用户处理（货币对账不过、对账停机中） | 转述给用户，等用户说 |
   | 4 | 模拟器被占用 | 稍后再试；`lock status` 看谁占着 |
   | 5 | 环境问题（没配置、adb 连不上、maa-cli 没装） | `doctor` |
+  | 128+信号 | 被信号叫停（SIGTERM 143、SIGINT 130…：日常超时杀掉 `maapilot maa …`、用户按了 Ctrl+C）。信封照出，`error.code` 是 `interrupted` | 没做完：看现场再决定重跑 |
 
 - **外部数据的格式变了**：森空岛、MAA 的活动列表 / 任务表、maa-cli 的输出、官方公告、官网安装包地址、企鹅物流、一图流、游戏数据表，
   程序用到的字段对不上时报 `error.code` 为 `upstream_format`（退出码 1，message 写明哪个来源、缺哪个字段，`data: {source, field, effect}`），
@@ -57,7 +60,7 @@
 | `lock status` / `lock release` | 否 | 放行 | A |
 | `news list / show / told` | 否（`list` 联网） | 放行 | A |
 | `update check / told` | 否（`check` 联网） | 放行 | A |
-| `memory tidied` | 否 | 放行 | A |
+| `memory tidied` / `memory import` | 否 | 放行 | A |
 | `update apply maapilot\|maa-cli\|maa-core\|maa-resource` | 否（拿锁，换程序） | 放行 | A |
 | `game version` | 只读（adb 读版本，不拿锁；联网） | 放行 | A |
 | `game update [--download-only] [--keep]` | 操作（只在安装时拿锁） | 放行 | A |
@@ -95,7 +98,10 @@
   `cli.toml`、`profiles/default.toml`）装进本项目的 maa-cli 配置目录 `private/maa-config/`（已有的不覆盖）、缺数据表时 `data sync`、
   没有够新的 MaaCore（maa-cli 那份和单独装的都不够）时从 MAA 的 GitHub 发布下载（见下表 `maa_core`）。
   装软件（maa-cli、adb）不在这里做：由 agent 问过用户后用 `maapilot tools install`（见「tools」）。
-- `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回**，不做逐项检查，只给会话开头要知道的事（见下）。
+  还会把 Claude Code 自动记忆里以前记的用户偏好搬进 `private/memory/`（同 `memory import`），
+  把还留在 maa-cli 默认数据目录里的 MaaCore 和资源搬进项目的 `.tools/maa-data/`（跑 MAA 任务、`update` 时也会搬）。
+  不带 `--fix` 的 `doctor` 不写这些：数据还没搬时按原来的目录检查。
+- `--brief`：给启动钩子用，**不碰模拟器、不联网、1 秒内返回、不写任何文件**，不做逐项检查，只给会话开头要知道的事（见下）。
 
 检查项（`data.checks[].name`）；每项 `{name, ok, detail, fix}`，有的另带字段（`candidates`、`resolution`、`old_entries`…）。
 标 `required: false` 的（`agent_config`、`game`、`legacy_schedule`、`skills_link`、`setup`、`maa_core`）只是提示，不影响 `ok_all`。有必需项没通过时退出码 5（`checks_failed`，`data` 照常给全）。
@@ -114,7 +120,7 @@
 | `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB；下到的包和发布信息里的 sha256、大小对过才装，对不上不装、`fixed` 里写原因。Windows 上项目文件夹路径太深、又没开长路径支持时装不下（MAA 的包里有很长的文件名）：解压前就停下，`fixed` 里写超了多少个字符，请用户把项目挪到短一点的位置或打开长路径支持） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
-| `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
+| `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server, supported}]`（`pm list packages`，游戏没开也能看；查不了为 `null`；`supported` 是这个服支不支持，只有官服和 B 服是 `true`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`（是不支持的服时提示用不了），一个都没装时提示去装 | `maa startup` |
 | `legacy_schedule` | 系统里（crontab / Windows 任务计划程序）还留着 v0.1 的定时日常没有（同 `daily unschedule` 删的那些；`times`、`entries`）：留着会到点自己跑 `daily run`，不通过。更旧的 MaaPilot 的定时（cron：`maapilot job tick`、`bin/daily.sh`；Windows：`\MaaPilot\` 下别的目录的任务）列在 `old_entries`，不算。读不了时不通过（`detail` 写原因）；这台电脑上没有系统定时（Windows 上找不到 schtasks.exe）算通过。`required: false` | 用户同意后 `daily unschedule`，再用 harness 的定时在会话里定好（`maapilot-setup`） |
 | `skills_link` | `.claude/skills`（Claude Code 找 skill 的地方）是指向 `.agents/skills` 的目录；`state`：`file`（Windows 上 git 没建符号链接，检出成文本文件）/ `missing` / `broken` | `doctor --fix`（macOS / Linux 建符号链接，Windows 建目录联接，并标上 `skip-worktree`：不然 `git restore`、`git reset --hard`、`git stash` 会穿过联接清空 `.agents/skills`） |
 | `setup` | `private/setup.json` 在不在 | 做 setup |
@@ -164,9 +170,9 @@
 `lines` 里每个一行（"外部数据：森空岛的数据格式变了（缺 status.ap），理智改用首页识别（要开发者修；…）"）。
 `live_suspects`：可能读错了的现场练度（记下一天后森空岛还比它低，已不再采用；见「goals」的现场练度）：`[{name, at, source, parts}]`，`lines` 里每个一行。
 v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定时、不再记"告诉过用户没有"、不再记会话往里推消息）。
-`memory`：用户偏好记录 `{dir: "private/memory", index: [MEMORY.md 里的 "- …" 行], imported}`（没设置过为 `null`）。偏好由 agent 读写（格式见 `AGENTS.md`「用户偏好」），
-不依赖哪个 agent 的记忆功能。还没有 `private/memory/MEMORY.md`、也没搬过（没有记号文件 `private/memory/.imported-from-claude`）时，启动检查把 Claude Code 给这个项目记的自动记忆复制过来
-（目录已经在也照样搬；同名文件不覆盖；原来的不删），写下记号（来源和时间；之后用户删掉 MEMORY.md 也不会再搬），`imported` 是复制的文件名。
+`memory`：用户偏好记录 `{dir: "private/memory", index: [MEMORY.md 里的 "- …" 行], importable}`（没设置过为 `null`）。偏好由 agent 读写（格式见 `AGENTS.md`「用户偏好」），
+不依赖哪个 agent 的记忆功能。启动检查只看不写：还没有 `private/memory/MEMORY.md`、也没搬过（没有记号文件 `private/memory/.imported-from-claude`），
+而 Claude Code 给这个项目记的自动记忆里有偏好时，`importable` 是能搬过来的文件名（没有为 `null`），`lines` 里有一行让 agent 跑 `memory import`（见「memory」；`doctor --fix` 也会搬）。
 
 ## screen —— 截图与识别（只读，不拿锁）
 
@@ -265,7 +271,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFIG_DIR` 传给 maa-cli，不动用户原有的 maa-cli 配置）；
 任务文件每次生成为 `private/maa-config/tasks/maapilot-<任务>.toml`，maa-cli 的日志在 `private/log/maa/<YYYYmmdd-HHMMSS>-<任务>.log`。
 跑的时候持锁并每分钟心跳（锁不会因为刷图时间长而过期）。maa-cli 自成进程组（超时时整组结束）；`maapilot maa` 自己被叫停
-（SIGTERM / SIGINT / SIGHUP，例如日常超时杀掉它）时先结束 maa-cli 的进程组再退出（退出码 128+信号），正常或出错退出时 maa 还在也会结束掉。
+（SIGTERM / SIGINT / SIGHUP，例如日常超时杀掉它）时先结束 maa-cli 的进程组再退出（退出码 128+信号，信封的 `error.code` 是 `interrupted`），正常或出错退出时 maa 还在也会结束掉。
 
 ```json
 {"task": "fight", "stage": "1-7", "ok": true, "duration_s": 312,
@@ -470,7 +476,7 @@ token 不出现在任何输出、日志、报错里；Claude Code 里 agent 读�
 
 | error.code | 退出码 | 什么情况 |
 |---|---|---|
-| `unsupported_server` | 2 | `server` 不是官服（请用户自己更新） |
+| `unsupported_server` | 2 | `server` 是 B 服：程序只会更新官服的客户端（请用户自己在模拟器里更新）。日常开头查版本时遇到这个就跳过，不提醒 |
 | `adb_failed` | 5 | adb 读不了版本、关不了游戏（`doctor`）；没配置、没填地址同样退出码 5 |
 | `network` | 1 | 连不上官网、下载失败或中断、下载中安装包大小变了（官网刚发新版）；再跑一次会接着下 |
 | `unexpected_download` | 1 | 下载地址跳到别的域名：不下载，告诉用户 |
@@ -785,7 +791,7 @@ v0.2.0 起只有一种做法：**agent 在场**（用户开着的会话里）。
    - 过了期限的目标挪走（同 `goals expire`，挪走的记在 `goals_expired`，`lines` 里提醒 agent 看看还有没有没做完的，例如活动商店没换完；接着跑时并进前几段的）；
    - 官方公告缓存旧了重拉（见「news」；拉不到用旧缓存）。**正在停机维护**（`maintenance_now`）→ MAA 项、对账都不跑，`status: maintenance`、`ok: true`、
      `data.maintenance`（`{cid, title, start, end, forced_update}`），退出码 0（agent 告诉用户、想想对目标的影响，再 `daily done` 收尾）；
-   - 游戏版本（同 `game version`，结果在 `game_version: {installed, latest, update_needed}`；查不了照跑）。要更新 → 停下交给 agent：退出码 1（`handoff`），
+   - 游戏版本（同 `game version`，结果在 `game_version: {installed, latest, update_needed}`；查不了照跑；B 服不查）。要更新 → 停下交给 agent：退出码 1（`handoff`），
      `handoff = {task: "game_update", error, rest, version}`，`rest` 是全部还没跑的项；agent 按 `maapilot-events` 更新好再 `daily run --only <rest>`。
 3. 先 `startup`（配了的话：读仓库要在游戏里），再 `guard snapshot`（上次对账之后动过会花钱的操作时它改做对账，不过就停下，见「guard」）；
    读仓库没成（换日后首页常有弹窗）就再跑一次 `maa startup` 回首页、再读一次，还不成才在汇报里告警、对账以上一次的记录为准。
@@ -1023,6 +1029,11 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 `maapilot memory tidied`：记下这次整理偏好的时间（`private/memory/.last-tidy`），`data`：`{tidied_at}`。偏好文件由 agent 直接读写，这条只管提醒的时间，见 skill `maapilot-memory`。
 
+`maapilot memory import`：一次性搬家。还没有 `private/memory/MEMORY.md`、也没搬过（没有记号文件 `private/memory/.imported-from-claude`）时，
+把 Claude Code 给这个项目记的自动记忆（偏好以前的位置）里的 `.md` 复制过来（目录已经在也照样搬；同名文件不覆盖；原来的不删），
+写下记号（来源和时间；之后用户删掉 MEMORY.md 也不会再搬）。`data`：`{imported: [复制的文件名], index: [MEMORY.md 的目录行]}`；不用搬时 `imported` 是 `[]`。
+启动检查的 `memory.importable` 不为空时跑它。
+
 ---
 
 ## host —— agent 宿主（不碰模拟器）
@@ -1091,7 +1102,7 @@ private/
 |---|---|---|
 | `emulator.address` | adb 地址（setup 找出来填） | 无（必填） |
 | `emulator.adb` | adb 程序 | `adb` |
-| `server` | 客户端（MAA 的 client_type）：`Official` / `Bilibili` / `YoStarEN` / `YoStarJP` / `YoStarKR` / `txwy` | `Official` |
+| `server` | 客户端（MAA 的 client_type）：`Official`（官服）或 `Bilibili`（B 服），大小写要对。只支持这两个：写了别的（国际服 `YoStarEN`、日服、韩服、繁中服，或认不出的字）读配置时就退出码 2（`unsupported_server`），`doctor` 的 `config` 项不通过。B 服和官服只差一处：程序不会更新 B 服的游戏客户端（`game version / update` 退出码 2） | `Official` |
 | `agent` | v0.1 的设置（定时日常叫起哪个无头 agent），v0.2.0 起不用：写了就忽略，`doctor` 的 `agent_config` 提示可以删 | 无 |
 | `tools.maa` / `tools.claude` / `tools.codex` | maa、claude、codex 程序（`maa` 写程序名时先用 `.tools/` 里装好的；claude / codex 给 `host status / install`、`doctor` 找程序用） | `maa` / `claude` / `codex` |
 | `schedule` | 每天定时日常的时间（本机时间，`"HH:MM"` 列表）：程序不按它定时，agent 按它在 harness 里建会话内定时（`maapilot-setup`、docs/harnesses/） | `["04:40", "16:40"]` |
@@ -1103,7 +1114,7 @@ private/
 | `daily.task_timeout_min` | 一个 MAA 日常项最长跑多久（分钟） | `90` |
 | `game.accept_terms` | 游戏更新后弹出《用户协议》《隐私政策》更新时 agent 能不能直接点同意：`null` 还没问过（每次问用户）、`true` 直接点、`false` 每次问；别的值当 `null`（`game version` 的 `accept_terms`） | `null` |
 
-企鹅物流的服务器代码由 `server` 推出（Official/Bilibili → CN，YoStarEN → US，YoStarJP → JP，YoStarKR → KR，txwy → CN）。
+企鹅物流的服务器代码由 `server` 推出（Official/Bilibili → CN）；商店兑换的规则 B 服用官服那份（`maapilot/knowledge/shops.py` 的 `SAME_AS`）。
 
 ### setup.json
 
@@ -1275,6 +1286,7 @@ Windows 上 Codex 经 PowerShell 跑命令，规则看到的是不是这样的�
   `skland token` 让用户自己在终端里跑是 AGENTS.md 的约定，不是权限规则。
 - `guard snapshot` 可以放行：上次对账之后跑过可能花东西的命令时它改做对账（见「guard」），不能拿来抹掉花费。
 - 启动钩子 `bin/session-start` 用 `$CLAUDE_PROJECT_DIR` 定位（不依赖钩子的工作目录）：先往 `$CLAUDE_ENV_FILE` 写一行把 `.venv/bin` 加进 PATH（环境还没建也写，setup 建好后同一会话就能用），再跑 `doctor --hook`：内容同 `--brief`，但输出成 Claude Code 钩子的格式 `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "MaaPilot 启动检查…<--brief 的信封>"}}`（直接输出的 JSON 会被当成钩子的控制字段，不进会话），退出码总是 0。
+  启动检查自己出错时也是这个格式、退出码 0：`additionalContext` 写出错的原因，让 agent 自己跑一次 `doctor --brief`。
   `next` 是 `setup` / `guard` 时另带顶层的 `systemMessage`（直接显示给用户的一行）：钩子不会让 agent 先开口，要用户先说一句，这一行告诉用户"随便说一句就开始"。
   `.venv` 还没建时钩子自己按钩子的格式输出（`no_env`），agent 按 `maapilot-setup`「装运行环境」帮用户建。
 - 启动钩子的输出进会话上下文；`AGENTS.md` 让 agent 看到 `next: "setup"` 时，用户一开口就进入 `maapilot-setup`。
