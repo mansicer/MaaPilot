@@ -53,7 +53,7 @@ ignore = [
 # 类型检查先只管这几块（对账、锁、权限规则、系统兼容层），以后逐包加。oscompat/sched.py 是旧版的系统定时，不查。
 [tool.mypy]
 python_version = "3.12"
-files = ["maapilot/policy.py", "maapilot/tools/guard.py", "maapilot/crew/lock.py",
+files = ["maapilot/policy.py", "maapilot/checksum.py", "maapilot/tools/guard.py", "maapilot/crew/lock.py",
          "maapilot/oscompat/__init__.py", "maapilot/oscompat/fs.py", "maapilot/oscompat/procs.py",
          "maapilot/oscompat/exe.py", "maapilot/oscompat/hints.py", "maapilot/oscompat/venv.py",
          "maapilot/oscompat/integrity.py"]

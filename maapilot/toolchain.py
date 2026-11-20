@@ -18,7 +18,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from maapilot import paths
+from maapilot import checksum, paths
 from maapilot.cliutil import ENVIRONMENT, FAILED, CliError
 from maapilot.oscompat import MACOS, WINDOWS
 
@@ -27,7 +27,28 @@ from maapilot.oscompat import MACOS, WINDOWS
 MAA_CLI_TESTED = ("0.7.5", "0.7.7")
 MAA_CLI_URL = ("https://github.com/MaaAssistantArknights/maa-cli/releases/download/"
                "v{v}/maa_cli-v{v}-{triple}.{ext}")
-ADB_URL = "https://dl.google.com/android/repository/platform-tools-latest-{os}.zip"
+MAA_CLI_REPO = "MaaAssistantArknights/maa-cli"
+# 发布包的 sha256（GitHub 发布信息里每个文件的 digest）：{版本: {三元组: sha256}}。装表里的版本不用联网查哈希；
+# 改 MAA_CLI_TESTED 的上限时把新版本的加进来（tests/test_toolchain.py 会查）。别的版本装的时候去发布信息里查。
+MAA_CLI_SHA256 = {
+    "0.7.7": {
+        "aarch64-apple-darwin": "b12ddd6deda6f811b9dd6c73b2341cbfaf6e31c481b4bfc550ce330580b007af",
+        "x86_64-apple-darwin": "3739d14b02741d9c2d8609d04f609109c8bb59533fabccc1ac54466fca5809f9",
+        "aarch64-pc-windows-msvc": "63ba62bc0a08b6b3abddae7e214ad10e12b63699f3d776bceca579b615d7db45",
+        "x86_64-pc-windows-msvc": "769719108609b48e18d7ebd88855f6125bd455d3b32d051866dafb8e896254c1",
+        "aarch64-unknown-linux-gnu": "dc38518a1b6111bb0b7a8eea63578dacaebc89651bbbc2f7d568c3484e16fb56",
+        "x86_64-unknown-linux-gnu": "b582dd79c3f9b42c3a9b4fb6bcf76cc25bfc96600e83028881c97b0c621876a1",
+    },
+}
+# adb 装固定的版本（不跟 Google 的 latest），哈希才对得上。换版本：改 ADB_VERSION，三个包各下一次、
+# 和 https://dl.google.com/android/repository/repository2-3.xml 里 platform-tools 的 sha1、大小对过，再把 sha256 写到这里
+ADB_VERSION = "37.0.3"
+ADB_URL = "https://dl.google.com/android/repository/platform-tools_r{v}-{os}.zip"
+ADB_SHA256 = {                                         # {包名里的系统: (sha256, 字节数)}
+    "darwin": ("df21339b9371fef9b19264404338dc686f59a88a1dce634b963da344909001d6", 16597626),
+    "linux": ("214548146cadb2ca3508143d8a1d4be4c59de5bb837253e3ede89ed74cf450d1", 9571024),
+    "win": ("89d108360a3bf2924d3bea837239edaccc22fd6ff5befd3787c4348a9fe4f09d", 8188601),
+}
 DOWNLOAD_TIMEOUT_S = 60
 VERSION_FILE = "VERSION"
 
@@ -86,8 +107,33 @@ def maa_cli_url(version: str) -> str:
     return MAA_CLI_URL.format(v=version.removeprefix("v"), triple=triple(), ext="zip" if WINDOWS else "tar.gz")
 
 
+def adb_os() -> str:
+    return "win" if WINDOWS else "darwin" if MACOS else "linux"
+
+
 def adb_url() -> str:
-    return ADB_URL.format(os="windows" if WINDOWS else "darwin" if MACOS else "linux")
+    return ADB_URL.format(v=ADB_VERSION, os=adb_os())
+
+
+def expected_checksum(name: str, version: str, url: str) -> tuple[str, int | None]:
+    """要下的这个包公布的 (sha256, 字节数或 None)。maa-cli 表里的版本、adb：写在上面；maa-cli 别的版本：查 GitHub 发布信息。
+    查不到 → CliError(no_checksum)：没有哈希可对的程序不装。"""
+    if name == "adb":
+        return ADB_SHA256[adb_os()]
+    known = MAA_CLI_SHA256.get(version, {}).get(triple())
+    if known:
+        return known, None
+    asset = url.rsplit("/", 1)[-1]
+    try:
+        found = checksum.release_asset_checksum(MAA_CLI_REPO, f"v{version}", asset)
+    except (OSError, ValueError) as e:
+        raise CliError("no_checksum", f"查不到 maa-cli {version} 的发布信息，没法核对下载的包（{e}）", exit=FAILED,
+                       hint=f"网络能上 api.github.com 吗（没登录每小时只能查 60 次）？过一会儿再试，"
+                            f"或者装实测过的 {MAA_CLI_TESTED[1]}（不用查）") from None
+    if found is None:
+        raise CliError("no_checksum", f"maa-cli {version} 的发布里没有 {asset}，或者没给它的 sha256，没法核对", exit=FAILED,
+                       hint=f"版本号写对了吗？实测过的是 {MAA_CLI_TESTED[1]}")
+    return found
 
 
 def download(url: str, dest: Path) -> None:
@@ -144,12 +190,13 @@ def _swap_in(new_dir: Path, target: Path) -> None:
 
 
 def install(name: str, version: str | None = None, *, fetch=download) -> dict:
-    """下载并装好 maa（maa-cli）或 adb 到 .tools。→ {name, version, path, url, replaced}。fetch：测试换成假的。"""
+    """下载并装好 maa（maa-cli）或 adb 到 .tools。→ {name, version, path, url, replaced, sha256}。fetch：测试换成假的。
+    下载的包先和公布的 sha256（expected_checksum）对过才解压；对不上、查不到哈希都不装。"""
     if name == "maa":
         version = (version or MAA_CLI_TESTED[1]).removeprefix("v")
         url = maa_cli_url(version)
     elif name == "adb":
-        version, url = "latest", adb_url()
+        version, url = ADB_VERSION, adb_url()
     else:
         raise CliError("bad_arguments", f"不认识 {name}（有：maa-cli、adb）", exit=2)
     base = tools_dir()
@@ -157,7 +204,13 @@ def install(name: str, version: str | None = None, *, fetch=download) -> dict:
     work = Path(tempfile.mkdtemp(prefix=f".{DIRS[name]}.", dir=base))
     try:
         archive = work / url.rsplit("/", 1)[-1]
+        sha256, size = expected_checksum(name, version, url)
         fetch(url, archive)
+        try:
+            checksum.check_file(archive, sha256, size)
+        except checksum.Mismatch as e:                 # work 整个删掉（finally），对不上的包不留
+            raise CliError("checksum_mismatch", f"下载的包和公布的对不上，没有装：{e}", exit=FAILED,
+                           hint="多半是没下完或代理改了内容：再试一次；换个网络还是这样就别装，告诉用户") from None
         unpacked = work / "unpacked"
         _extract(archive, unpacked)
         found = _find(unpacked, exe_name(name))
@@ -173,4 +226,4 @@ def install(name: str, version: str | None = None, *, fetch=download) -> dict:
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return {"name": "maa-cli" if name == "maa" else name, "version": version,
-            "path": str(target / exe_name(name)), "url": url, "replaced": replaced}
+            "path": str(target / exe_name(name)), "url": url, "replaced": replaced, "sha256": sha256}

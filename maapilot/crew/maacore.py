@@ -113,7 +113,8 @@ def _asset_pattern() -> re.Pattern:
 
 
 def install(*, timeout_s: float = 600) -> dict:
-    """下载 MAA 最新发布的本体到 private/cache/maa-core/<版本>/。已经有这个版本就不下。"""
+    """下载 MAA 最新发布的本体到 private/cache/maa-core/<版本>/。已经有这个版本就不下。
+    下载的包和发布信息里的 sha256、大小对过才解压；对不上抛 checksum.Mismatch，发布信息没给哈希抛 RuntimeError。"""
     with urllib.request.urlopen(urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json"}),
                                 timeout=30) as r:
         rel = json.load(r)
@@ -125,13 +126,21 @@ def install(*, timeout_s: float = 600) -> dict:
     asset = next((a for a in rel.get("assets") or [] if pat.match(a["name"])), None)
     if asset is None:
         raise RuntimeError(f"{tag} 的发布里没有这个系统的本体")
+    from maapilot import checksum, toolchain
+    expected = checksum.asset_checksum(asset)
+    if expected is None:                               # 动态库是要加载进本进程的：没有哈希可对就不装
+        raise RuntimeError(f"{tag} 的发布信息里没有 {asset['name']} 的 sha256，没法核对，没有装")
     dest = root() / tag
     tmp = root() / f".{tag}.download"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
     archive = tmp / asset["name"]
-    with urllib.request.urlopen(asset["browser_download_url"], timeout=timeout_s) as r, archive.open("wb") as f:
-        shutil.copyfileobj(r, f)
+    try:
+        toolchain.download(asset["browser_download_url"], archive)
+        checksum.check_file(archive, *expected)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)         # 没下完、对不上的不留
+        raise
     out = tmp / "x"
     if archive.name.endswith(".zip"):
         # zipfile 不保留可执行位和符号链接；macOS 自带 unzip 能保留。Windows 上用不着这些（PATH 上的 unzip 多半是 MSYS 的，不用）

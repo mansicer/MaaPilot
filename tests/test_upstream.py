@@ -336,9 +336,11 @@ def test_gamedata_sync_keeps_old_table_and_records(monkeypatch):
     (paths.DATA / "stage_table.json").write_text('{"old": true}', encoding="utf-8")
     bad = fx("gamedata/stage_table.json")
     del bad["stages"]["main_01-07"]["code"]
-    monkeypatch.setattr(datasync, "fetch_remote_shas", lambda files=None: {"stage_table.json": "new"})
+    payload = json.dumps(bad).encode()
+    from maapilot import checksum
+    monkeypatch.setattr(datasync, "fetch_remote_shas", lambda files=None: {"stage_table.json": checksum.git_blob_sha(payload)})
     monkeypatch.setattr(datasync, "missing_tables", lambda: [])
-    monkeypatch.setattr(datasync, "_get", lambda url, timeout=60: json.dumps(bad).encode())
+    monkeypatch.setattr(datasync, "_get", lambda url, timeout=60: payload)
     with pytest.raises(UpstreamFormat, match="stage_table.stages\\[\\].code"):
         datasync.sync()
     assert json.loads((paths.DATA / "stage_table.json").read_text(encoding="utf-8")) == {"old": True}
