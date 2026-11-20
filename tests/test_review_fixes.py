@@ -14,9 +14,9 @@ import pytest
 from maapilot import cli, cliutil, paths
 from maapilot.crew import lock
 from maapilot.tools import common
+from tests import resources
 
-HAS_DATA = (paths.DATA / "character_table.json").exists() and (paths.DATA / "uniequip_table.json").exists()
-needs_data = pytest.mark.skipif(not HAS_DATA, reason="没有 data/ 游戏数据表")
+needs_data = resources.needs_data("character_table", "uniequip_table")
 
 
 def run(capsys, *argv):

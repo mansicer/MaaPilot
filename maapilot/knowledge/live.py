@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 from maapilot import paths
@@ -99,11 +99,11 @@ def _aware(t: datetime) -> datetime:
 
 
 def _now(now: datetime | None) -> datetime:
-    return _aware(now) if now else datetime.now(timezone.utc).astimezone()
+    return _aware(now) if now else datetime.now(UTC).astimezone()
 
 
 def _from_ms(ms) -> datetime | None:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc) if isinstance(ms, (int, float)) else None
+    return datetime.fromtimestamp(ms / 1000, tz=UTC) if isinstance(ms, (int, float)) else None
 
 
 def normalize_stage_id(pid: str, known: set[str]) -> str | None:

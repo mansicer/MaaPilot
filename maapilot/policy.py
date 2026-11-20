@@ -105,7 +105,7 @@ def decide(argv: list[str], host: str = "claude") -> str | None:
 # --- Claude Code -----------------------------------------------------------------------------------------------------
 
 def claude_permissions() -> dict:
-    out = {k: [] for k in KINDS}
+    out: dict[str, list[str]] = {k: [] for k in KINDS}
     for c in COMMANDS:
         for prog in (MAAPILOT if c.decision == DENY else (BARE,)):
             out[c.decision].append(f"Bash({' '.join((prog, *c.words))}:*)")
@@ -149,7 +149,7 @@ def _s(x) -> str:
 
 def _patterns(cmds: list[Cmd]) -> list[list]:
     """同一前缀的合成一条：整组的放进一个列表，`daily run / status …` 写成 ["daily", ["run", "status", …]]。"""
-    whole = [[]] if any(not c.words for c in cmds) else []          # 空前缀：整个程序
+    whole: list[list] = [[]] if any(not c.words for c in cmds) else []          # 空前缀：整个程序
     singles = [c.words[0] for c in cmds if len(c.words) == 1]
     groups: dict[tuple, list[str]] = {}
     for c in cmds:

@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.1.1"]
+dev = ["pytest==9.1.1", "ruff==0.17.6", "mypy==2.4.1", "types-PyYAML", "types-psutil"]
 
 [project.scripts]
 maapilot = "maapilot.cli:main"
@@ -32,3 +32,34 @@ packages = ["maapilot"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "UP"]      # 不开 I（import 排序）：它会把写成几行的长 import 拆成一行一个
+ignore = [
+    "E501",     # 行宽不卡：表格式的数据、带行尾注释的行都长
+    "E741",     # l、O 这类短名在坐标和 OCR 代码里常用
+    "E702",     # 一行两句（a = 1; b = 2）在测试里用来摆数据
+    "E731",     # 把 lambda 赋给名字
+    "B905",     # zip 不写 strict：都是等长的
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F811"]            # 测试从别的测试文件借 fixture（import 进来再当参数名）
+
+# 类型检查先只管这几块（对账、锁、权限规则、系统兼容层），以后逐包加。oscompat/sched.py 是旧版的系统定时，不查。
+[tool.mypy]
+python_version = "3.12"
+files = ["maapilot/policy.py", "maapilot/tools/guard.py", "maapilot/crew/lock.py",
+         "maapilot/oscompat/__init__.py", "maapilot/oscompat/fs.py", "maapilot/oscompat/procs.py",
+         "maapilot/oscompat/exe.py", "maapilot/oscompat/hints.py", "maapilot/oscompat/venv.py",
+         "maapilot/oscompat/integrity.py"]
+ignore_missing_imports = true
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+module = "maapilot.oscompat.*"
+disable_error_code = ["attr-defined"]      # Windows 才有的接口（ctypes.WinDLL、signal.CTRL_BREAK_EVENT……）在别的系统上查不到

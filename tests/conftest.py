@@ -2,6 +2,24 @@
 import pytest
 
 from maapilot import paths
+from tests import resources
+
+resources.use()         # 收集测试之前：数据表、OCR 模型指到测试用的那一份（各测试文件在导入时就看有没有）
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "resource(what): 用到不入库的资源（OCR 模型、游戏数据表）")
+    config.addinivalue_line("markers", "missing_resource(hint): 资源不在，MAAPILOT_TEST_STRICT=1 时算失败")
+
+
+def pytest_report_header(config):
+    return resources.describe()
+
+
+def pytest_runtest_setup(item):
+    m = item.get_closest_marker("missing_resource")
+    if m:
+        pytest.fail(m.args[0], pytrace=False)
 
 
 @pytest.fixture(autouse=True)

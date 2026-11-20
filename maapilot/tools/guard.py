@@ -120,7 +120,7 @@ def _topbar_ok(depot: dict, top: dict | None) -> bool:
 def merge_topbar(depot: dict, top: dict | None) -> dict:
     """仓库识别把上万的数取整（真机：合成玉 16566 认成 16000），单笔几百的花费可能看不出来。
     首页顶栏是精确值，但 OCR 可能读错：和仓库识别对得上才用顶栏的数；有一样对不上就说明顶栏读歪了，都不用。"""
-    if not _topbar_ok(depot, top):
+    if top is None or not _topbar_ok(depot, top):
         return dict(depot)
     return {k: int(top[k]) for k in ITEMS}
 
@@ -231,7 +231,7 @@ def check(values: dict | None = None, *, run_id: str | None = None) -> dict:
     tolerated: set = set()
     allowed, used, unexplained = evaluate(before, after, open_rows, exact=bool(snap.get("exact")) and exact,
                                           tolerated=tolerated)
-    data = {"before": before, "after": after, "allowed": allowed, "unexplained": unexplained}
+    data: dict = {"before": before, "after": after, "allowed": allowed, "unexplained": unexplained}
     if unexplained:
         stop = {"at": common.iso(), "before": before, "after": after, "unexplained": unexplained}
         if run_id or os.environ.get(common.RUN_ID_ENV):
@@ -269,7 +269,7 @@ def allow(item: str, amount: int, reason: str) -> dict:
            "used_amount": 0}
     rows = load_allowances() + [row]
     _save_allowances(rows)
-    out = {"recorded": row}
+    out: dict = {"recorded": row}
     if stopped():
         out["hint"] = "现在停机中：maapilot guard check 对一下，对上了就解除"
     return out

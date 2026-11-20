@@ -7,29 +7,54 @@ on:
   pull_request:
 
 permissions:
-  contents: write          # 推 v* 标签时建 Release 草稿
+  contents: read           # 只有 release 任务要写（见下）
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - name: Install
+        run: uv sync --locked --extra dev --python 3.12
+      - name: Ruff
+        run: uv run --no-sync ruff check
+      - name: Mypy (the modules listed in pyproject.toml)
+        run: uv run --no-sync mypy
+      - name: Permission files match maapilot/policy.py
+        run: uv run --no-sync maapilot dev rules --check
+
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
+        python: ["3.12"]
+        ocr: [v3]
+        include:
+          - { os: ubuntu-latest, python: "3.13", ocr: v3 }
+          - { os: ubuntu-latest, python: "3.14", ocr: v3 }
+          # MAA 2026-11-02 之后的 OCR 模型：新装的用户拿到的是这一代
+          - { os: ubuntu-latest, python: "3.12", ocr: v6 }
+    name: test (${{ matrix.os }}, py${{ matrix.python }}, ocr ${{ matrix.ocr }})
     runs-on: ${{ matrix.os }}
+    env:
+      MAAPILOT_TEST_STRICT: "1"     # OCR 模型、游戏数据表不在时测试失败，不悄悄跳过（tests/resources.py）
+      MAAPILOT_TEST_OCR: ${{ matrix.ocr }}
     steps:
       - name: Keep CRLF conversion on (like a default Windows git), to exercise .gitattributes
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf true
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Install
-        run: |
-          uv venv --python 3.12
-          uv pip install --python .venv -e ".[dev]"
+        run: uv sync --locked --extra dev --python ${{ matrix.python }}
       - name: Tag matches maapilot.__version__
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: uv run --no-sync python -c "import maapilot,sys; t='${{ github.ref_name }}'; sys.exit(0 if t=='v'+maapilot.__version__ else f'标签 {t} 和 maapilot.__version__ {maapilot.__version__} 对不上')"
+        env:
+          TAG: ${{ github.ref_name }}
+        run: uv run --no-sync python -c "import maapilot,os,sys; t=os.environ['TAG']; sys.exit(0 if t=='v'+maapilot.__version__ else f'标签 {t} 和 maapilot.__version__ {maapilot.__version__} 对不上')"
       - name: Import smoke
         run: uv run --no-sync python -c "import maapilot.crew.maa, maapilot.crew.maacore, maapilot.crew.maacore_runner, maapilot.flows.daily, maapilot.cli"
       - name: Startup check (no setup yet)
@@ -40,16 +65,38 @@ jobs:
           out=$(uv run --no-sync maapilot doctor --brief)
           echo "$out"
           echo "$out" | uv run --no-sync python -c "import json,sys; d=json.load(sys.stdin); assert d['data']['next']=='setup', d"
+      - name: Restore test resources (OCR model, game data tables)
+        id: resources
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: tests/.resources
+          key: test-resources-${{ matrix.ocr }}-${{ hashFiles('tests/resources.py') }}
+          enableCrossOsArchive: true
+      - name: Fetch test resources (pinned commits, sha256 checked even on a cache hit)
+        run: uv run --no-sync python -m tests.resources fetch ocr-${{ matrix.ocr }} data
+      - name: Save test resources (right after the fetch, so a failing test run doesn't download again)
+        if: steps.resources.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: tests/.resources
+          key: test-resources-${{ matrix.ocr }}-${{ hashFiles('tests/resources.py') }}
+          enableCrossOsArchive: true
       - name: Tests
         run: uv run --no-sync python -m pytest -q -rsx
 
   release:
-    needs: test
+    needs: [lint, test]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # 推 v* 标签时建 Release 草稿
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" --draft --generate-notes --title "MaaPilot ${{ github.ref_name }}" ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" --draft --generate-notes --title "MaaPilot $TAG" $pre

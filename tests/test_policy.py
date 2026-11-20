@@ -94,7 +94,7 @@ def test_dev_rules_check_and_write(tmp_path, capsys):
     assert "# 手改的" in (tmp_path / policy.CODEX_RULES).read_text(encoding="utf-8")          # --check 不写
     code, out = run_cli(capsys, "dev", "rules", "--root", str(tmp_path))
     assert code == 0 and out["data"]["written"]
-    for p, now, want in policy.generated(ROOT):
+    for p, _now, want in policy.generated(ROOT):
         assert (tmp_path / p).read_bytes() == want.encode("utf-8"), p                       # 换行也是 \n
 
 

@@ -44,7 +44,12 @@ MaaPilot/
 ```
 
 - 代码：`maapilot/tools/`（工具命令）、`maapilot/flows/`（目标、日常）、`maapilot/crew/`（设备与 MAA，旧项目搬来的）、`maapilot/knowledge/`（游戏数据）。
-- 测试：`.venv/bin/python -m pytest -q`，改完要全过。
+- 测试：`.venv/bin/python -m pytest -q`，改完要全过。截图识别和查数据表的测试要用不入库的 OCR 模型、游戏数据表：
+  先 `.venv/bin/python -m tests.resources fetch`（下到 `tests/.resources/`，固定版本、核对哈希；说明见 `tests/resources.py`），
+  没下的话用本机的 `data/` 和 `resource/model/ocr/`，那也没有就跳过（pytest 开头一行写明这次用的是哪份）。CI 里设了 `MAAPILOT_TEST_STRICT=1`：资源不在算失败，不会悄悄一条没跑。
+- 检查：`ruff check`、`mypy`（装 `.[dev]` 后有；规则和 mypy 管的文件在 `pyproject.toml`，mypy 先只管对账、锁、权限规则、系统兼容层）。CI 都跑。
+- 依赖：改了 `pyproject.toml` 的依赖要 `uv lock` 更新 `uv.lock`（CI 用 `uv sync --locked`，对不上会失败）。
+  用户那边的安装和自动更新还是 `pip install -e .`，不读锁文件。
 - **权限规则只改 `maapilot/policy.py`**，再跑 `maapilot dev rules` 生成 `.claude/settings.json` 的 `permissions`、`.codex/rules/maapilot.rules` 和 docs/cli.md 里抄的设置；
   这几处不要手改（`maapilot dev rules --check`、`tests/test_policy.py` 会发现）。
   现在只留两条（10-20 用户定，开发后期再收）：`guard allow` 询问、`private/skland.json` 拒绝读写；`maapilot` 整个放行，加新命令不用改规则、不用重新生成。
@@ -73,6 +78,10 @@ MaaPilot/
 ## 识别回归测试
 
 `tests/test_screens.py` 在真机截图（`tests/fixtures/screens/`）上跑真的 OCR 和读页面的函数，对照人眼看出的答案。修识别的毛病，先加样本再改读法：
+
+OCR 模型有两代：MAA 在 2026-11-02 换了 PaddleOCR 的模型（PP-OCRv3 → PP-OCRv6）。程序用的是 setup 时从 MAA 资源复制的那一份，
+所以老用户是 v3、新装的是 v6，两代都要读对。CI 两代都跑（v6 只在 Ubuntu 上跑一份）；本地 `MAAPILOT_TEST_OCR=v6 .venv/bin/python -m pytest tests/test_screens.py` 换一代跑。
+只在一代上读错、一时修不了的用 `xfail_on("v6", …)` 标。
 
 1. `maapilot screen ocr --image <图> --roi …` 看出错那张截图实际读出了什么。
 2. `.venv/bin/python tests/fixtures/screens/make.py <图> <名> --keep X Y W H …` 做样本：只留被测的区域；用读图工具看一眼，不能留昵称、ID、好友名；文件名带上正确答案（`home_130`）。
@@ -114,7 +123,7 @@ MaaPilot/
   第一个发布的版本是 0.1.0（用户 10-19 定：macOS、Windows 都实机跑通了）。修问题升第三位，有大的新能力（例如接新的 agent）升第二位，1.0.0 等稳定了再说。
 - maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：`maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 记实测过的范围（`tools install` 默认装上限这个版本），发版前把本机升到最新、跑通日常和作业后更新上限。
 - 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送标签，提交开 PR（main 不能直接推）。PR 要用普通合并（merge commit），不用 squash / rebase，标签指的提交才在 main 上。
-  CI 在标签上先跑三个系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
+  CI 在标签上先跑检查（ruff、mypy、权限文件）和各系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
   把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。
   用户的 agent 只认**已发布的正式 Release**（`update check`），草稿和带 `-` 的预发布都收不到；发布后，用户的 agent 会把更新说明转述给用户。
   本地 `main` 快进到标签才算更新（`update apply`），所以标签必须在 main 上；别删、别改已发布的标签。

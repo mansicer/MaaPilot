@@ -1,6 +1,5 @@
 """Locate an operator in the 干员 list and open their page."""
 from __future__ import annotations
-import time
 from maapilot.crew.core import REF_W, Game, OcrHit
 
 CLASS_TAB = {  # right sidebar (1240, y) on the operator list screen

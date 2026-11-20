@@ -6,11 +6,10 @@ Executor: drive the workshop UI to craft the planned batches, lowest tier first.
 """
 from __future__ import annotations
 
-import re
 import time
 
 from maapilot.crew import overlays, reading
-from maapilot.crew.core import REF_W, Game
+from maapilot.crew.core import Game
 from maapilot.knowledge import recipes as _recipes
 
 # 中文名视图（OCR 只认名字）：{名: {count, lmd, costs: {名: n}}}，只含精英材料配方；数据源见 maapilot.knowledge.recipes
@@ -60,7 +59,7 @@ def goto_workshop(g: Game) -> None:
     进加工站用 nav.goto_room（和训练室同一条路：抽屉 → 基建 → 进驻总览）。以前这里自己点左上角 (270,38) 当抽屉，
     从首页出发就进不去：首页没有抽屉，那个位置一直是月签到的图标（nav.open_drawer 一直知道这件事），不是版本更新改的。"""
     from maapilot.crew import nav
-    for attempt in range(4):
+    for _attempt in range(4):
         if g.find(r"离开罗德岛基建", (300, 260, 700, 80)):     # "leave the base?" prompt: stay
             g.tap(443, 495, delay=2.0)
         if g.find(r"加工份数", (1040, 400, 140, 50)):

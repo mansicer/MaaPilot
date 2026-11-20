@@ -19,3 +19,5 @@ debug/
 .openclaw/
 # pi 的定时扩展（pi-schedule-prompt）记的定时，跟会话走
 .pi/schedule-prompts.json
+# 测试用的 OCR 模型、游戏数据表（python -m tests.resources fetch 下载的）
+tests/.resources/

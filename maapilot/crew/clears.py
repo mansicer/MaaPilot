@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import asdict, dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -94,7 +94,7 @@ class StageReading:
 
 # --- 模板与纯识别 ----------------------------------------------------------------------------
 
-@lru_cache(maxsize=None)
+@cache
 def _template(name: str) -> np.ndarray:
     from maapilot.oscompat import fs
     img = fs.imread(TEMPLATES / f"{name}.png")          # 仓库在中文路径下也读得了
@@ -574,7 +574,7 @@ def _open_and_read(g, code: str, hit, titles: dict[str, str] | None = None) -> S
     if g.find(STORY_RE, STORY_ROI, img) is not None:
         return StageReading(code=code, error="story")
     r = None
-    for attempt in range(2):                              # 星的动画没放完、编号还没刷新：等一下再读一次
+    for _attempt in range(2):                             # 星的动画没放完、编号还没刷新：等一下再读一次
         time.sleep(0.8)
         img = g.screencap()
         r = read_detail(img, code, _texts(g.ocr(STAGE_CODE_ROI, img)), _texts(g.ocr(AP_ROI, img)),

@@ -17,7 +17,7 @@ import sys
 import threading
 from contextlib import contextmanager
 from functools import cache
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from maapilot.oscompat import WINDOWS
 

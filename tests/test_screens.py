@@ -4,19 +4,27 @@
 修识别的毛病先把出错的截图做成样本加进来（做法见 CLAUDE_DEV.md「识别回归测试」），看它失败，再改。
 还没修的标 xfail(strict=True)：修好了会变成 XPASS 报错，提醒把 xfail 去掉。
 
-OCR 模型（resource/model/ocr/，不入库）不在时整个文件跳过。
+OCR 模型不入库（tests/resources.py：`python -m tests.resources fetch` 下载固定的版本）；不在时整个文件跳过。
+模型有两代（OCR_GEN："v3" 是 MAA 2026-11-02 之前的，"v6" 是之后的），用户机器上哪一代都有，CI 两代都跑：
+- 只在一代上读错、还没修的：标 `xfail_on("v6", …)`（strict：修好了会报 XPASS）。
+- 记下"模型原样读出来是错的"那几句断言只对那一代成立，写在 `if OCR_GEN == …` 里；读页面的函数两代都要对。
 """
 from pathlib import Path
 
 import pytest
 
-from maapilot import paths
+from tests import resources
 
 SCREENS = Path(__file__).parent / "fixtures" / "screens"
-HAS_OCR = (paths.OCR_MODEL / "rec.onnx").exists() and (paths.OCR_MODEL / "det.onnx").exists()
-HAS_RECIPES = (paths.DATA / "recipes.json").exists()
+OCR_GEN = resources.ocr_gen()
+needs_recipes = resources.needs_data("recipes")
 
-pytestmark = pytest.mark.skipif(not HAS_OCR, reason="没有 OCR 模型（resource/model/ocr/）")
+pytestmark = resources.needs(OCR_GEN is not None, "OCR 模型")
+
+
+def xfail_on(gen: str, reason: str):
+    """这一代模型上读错、还没修的（修好了 XPASS 会报错，提醒去掉）。"""
+    return pytest.mark.xfail(OCR_GEN == gen, reason=f"{gen} 模型：{reason}", strict=True)
 
 
 @pytest.fixture(scope="module")
@@ -56,7 +64,8 @@ def test_home_sanity_dark(game, value):
 
 @pytest.mark.parametrize("value, top", [
     (130, {"lmd": 9621162, "orundum": 19866, "originite": 26}),
-    (110, {"lmd": 9397902, "orundum": 19066, "originite": 16}),
+    pytest.param(110, {"lmd": 9397902, "orundum": 19066, "originite": 16},
+                 marks=xfail_on("v6", "源石 16 读成 160")),
 ])
 def test_home_topbar(game, value, top):
     from maapilot.tools import state
@@ -105,16 +114,20 @@ CRAFT = [
     ("craft_异铁块_0-2", "异铁块", 1),
 ]
 
+CRAFT_LABEL_V6 = {"craft_五水研磨石_1-1": "有/要 1/1 读成 41/1"}      # 份数还是对的（test_craft_count）
 
-@pytest.mark.skipif(not HAS_RECIPES, reason="没有 data/recipes.json")
+
+@needs_recipes
 @pytest.mark.parametrize("name, item, count", CRAFT)
 def test_craft_count(game, name, item, count):
     from maapilot.crew import craft
     assert craft.read_count(show(game, name), item) == count
 
 
-@pytest.mark.skipif(not HAS_RECIPES, reason="没有 data/recipes.json")
-@pytest.mark.parametrize("name", [c[0] if isinstance(c, tuple) else c.values[0] for c in CRAFT])
+@needs_recipes
+@pytest.mark.parametrize("name", [
+    pytest.param(n, marks=xfail_on("v6", CRAFT_LABEL_V6[n])) if n in CRAFT_LABEL_V6 else n
+    for n in (c[0] if isinstance(c, tuple) else c.values[0] for c in CRAFT)])
 def test_craft_label(game, name):
     """不光份数对，有/要两个数都要读对（文件名里是正确答案）。"""
     from maapilot.crew import craft
@@ -122,7 +135,7 @@ def test_craft_label(game, name):
     assert craft.read_label(show(game, name)) == (have, need)
 
 
-@pytest.mark.skipif(not HAS_RECIPES, reason="没有 data/recipes.json")
+@needs_recipes
 def test_craft_set_count_stops_on_toast(game):
     """10-08：16/16 读成 6716 读不出份数，一直点"+"点到弹"材料不足"还在点。现在看到提示条就停，不再点。"""
     from maapilot.crew import craft
@@ -133,7 +146,7 @@ def test_craft_set_count_stops_on_toast(game):
     assert g.actions == [("tap", *craft.BTN_MIN)]
 
 
-@pytest.mark.skipif(not HAS_RECIPES, reason="没有 data/recipes.json")
+@needs_recipes
 def test_craft_set_count_stops_when_unread(game):
     from maapilot.crew import craft
     g = show(game, "home_130")                      # 没有原料标签
@@ -168,7 +181,8 @@ def test_goto_store_from_home_taps_the_button(game):
     from maapilot.crew import nav
     g = show(game, "home_store_entry")
     assert nav.is_home(g)
-    assert [h.text for h in g.ocr((740, 420, 200, 120))] != ["采购中心"]     # 按字认不出
+    if OCR_GEN == "v3":
+        assert [h.text for h in g.ocr((740, 420, 200, 120))] != ["采购中心"]     # 按字认不出（v6 认得出）
     nav.goto(g, "采购中心")
     assert ("tap", *nav.HOME_BUTTONS["采购中心"]) in g.actions
 
@@ -183,6 +197,7 @@ def test_store_tabs(game):
 
 
 # ---- 干员列表 -------------------------------------------------------------------
+@xfail_on("v6", "第一张卡的等级 90 读成 9")
 def test_oplist_first_card_level(game):
     """第一张卡的等级"90"读成"9o"（小写 o），以前只认大写 O，排序方向就判断不了。"""
     from maapilot.crew import oplist
@@ -195,13 +210,15 @@ def test_training_room_busy(game):
     from maapilot.crew import mastery
     g = show(game, "training_busy")
     assert g.find_word(*mastery.PLAN_MARK)                               # 截得紧，读成"办助者"
-    assert [h.text for h in g.ocr(mastery.SLOT_STATE_ROI)] == ["川练中"]      # 原样读还是错的
+    if OCR_GEN == "v3":
+        assert [h.text for h in g.ocr(mastery.SLOT_STATE_ROI)] == ["川练中"]      # 原样读还是错的（v6 读对了）
     assert mastery.slot_busy(g)
 
 
 # ---- screen ocr --image ---------------------------------------------------------
 def _cli(capsys, *argv):
     import json
+
     from maapilot import cli
     code = cli.main(list(argv))
     return code, json.loads(capsys.readouterr().out)
@@ -213,7 +230,7 @@ def test_screen_ocr_on_image(capsys):
     code, env = _cli(capsys, "screen", "ocr", "--image", str(img), "--roi", "640", "15", "640", "265", "--find", "理智")
     assert code == 0, env
     assert env["data"]["path"] == str(img.resolve())
-    assert [h["text"] for h in env["data"]["hits"]] == ["理智/2O5"]
+    assert [h["text"] for h in env["data"]["hits"]] == [{"v3": "理智/2O5"}.get(OCR_GEN, "理智/205")]
 
 
 def test_screen_ocr_bad_image(capsys, tmp_path):

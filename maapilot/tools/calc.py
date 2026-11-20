@@ -136,7 +136,7 @@ def _current_from_box(name: str, target: dict, current: dict, owned: dict | None
 def operator_need(name: str, target: dict, current: dict, box: dict) -> tuple[dict, dict, list[str]]:
     """(need {lmd, exp, items}, from {…}, assumed [...])。current（--from）没给的部分按干员快照 box 算。"""
     from maapilot.knowledge import gamedata as g
-    op = resolve_op_or_fail(name)
+    resolve_op_or_fail(name)                             # 名字不对在这里报错
     c = g.character(name)
     assumed: list[str] = []
     owned = box.get(name)
