@@ -45,10 +45,13 @@ Antigravity 的 `schedule` 工具提供两类参数：`DurationSeconds`（一次
 ## 实测
 
 - 2026-11-16（Windows 11 + 安卓模拟器实机验证，当前仍为实验支持）：
-  - 命令执行与看图：通过 `.venv\Scripts\maapilot.exe` 跑通 `doctor` 全 15 项检查（`ok_all: true`）、`screen shot` + `read_file` 看图识界面、`maa startup`、`state depot`、`state box`、`copilot find` / `show` / `strip`、`news list` / `told`。
+  - 命令执行与看图：通过 `.venv\Scripts\maapilot.exe` 跑通 `doctor`（`ok_all: true`）、`screen shot` + `read_file` 看图识界面、`maa startup`、`state depot`、`state box`、`copilot find` / `show` / `strip`、`news list` / `told`。
   - 后台长命令与手动完整流程：`run_command`（`WaitMsBeforeAsync: 10000`）运行完整手动 `daily run`（含 `startup`、`recruit`、`infrast`、`mall`、`farm` 连战、`award`）及 `maa copilot`（自动编队并三星通关活动关）后，均自动唤醒会话完成 `guard check` 与 `daily done` 收尾。
-  - 定时任务接口：`schedule`（`CronExpression` + `IsDaemon: true` + `ExactTiming: true`）可正常注册每日重复任务，`manage_task`（`list` / `kill`）可查看和取消；2026-11-20 确认服务端重启会停止已有后台定时任务。
+- 2026-11-20（Windows 11 + 安卓模拟器实机验证）：
+  - 工作区自动发现与启动检查：将仓库根目录设为 Active Workspace 开启新会话后，自动加载根目录 `AGENTS.md` 与 `.agents/skills/` 下全部 10 个 `maapilot-*` 技能；跑通 `doctor --brief`、完整 `doctor`（全 16 项检查 `ok_all: true`）与 `update check`。
+  - 守护定时自动唤醒与完整定时日常：通过 `schedule`（`CronExpression`、`IsDaemon: true`、`ExactTiming: true`）注册定时任务并经 `manage_task`（`list`）核对后结束本轮进入空闲状态；到点准时自动唤醒会话，后台执行完整 `daily run --trigger schedule`（含 `startup`、`recruit`、`infrast`、`mall`、`annihilation`、`box`、`farm`、`award`）并在完成后自动唤醒，随后经 `input home` + `read_file` 看首页截图、`guard check` 对账与 `daily done` 收尾，最后用 `manage_task`（`kill` / `list`）删除测试定时并确认清零。
+  - 重启限制确认：确认 Antigravity 服务端重启后会停止已有的后台定时任务，不会自动恢复或补发。
 - 待实测：
-  - 将仓库作为全新 Active Workspace 打开时，`AGENTS.md` 与 `.agents/skills/` 的自动发现及 `/maapilot-setup` 首句初始化流程；
-  - `schedule` 守护 cron 在会话空闲状态下实际到点自动触发并完整跑通一次 `--trigger schedule` 日常；
-  - 多日连续运行的稳定性，以及电脑睡眠唤醒后守护定时的表现。
+  - 全新未初始化环境下的 `/maapilot-setup` 首句初始化流程；
+  - 多日连续运行的稳定性，以及电脑睡眠唤醒后守护定时的表现；
+  - macOS 平台的实机验证。
