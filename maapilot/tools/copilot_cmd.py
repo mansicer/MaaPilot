@@ -6,7 +6,8 @@
   还被 MAA 拒绝时才用）。
 
 练度来自 private/state/box.json：森空岛来源有技能等级、专精、模组；MAA 识别来源只有精英化、等级、潜能，读不到的项算"不知道"，不算差距。
-只列事实（缺谁、差多少），不判断"打不打得过"。
+只列事实（缺谁、差多少），不判断"打不打得过"。"差距 0"不等于满足要求：没核对到的（读不到的项、作业没写要求的干员）列在
+`unchecked`，`meets` 只有人都有、没有差距、也没有没核对到的才是 true。
 
 作业里 requirements 的写法（MAA 作业协议）：skill_level 1–7 是技能等级，8–10 是专精 1–3；module 1 χ、2 γ、3 α、4 Δ，0 / -1 不要求；
 potentiality 从 1 数。联网走 `http_get_json`，测试里换成假的。契约见 docs/cli.md「copilot」。
@@ -181,10 +182,18 @@ def annotate_oper(o: dict, box: dict | None, mtypes: dict) -> dict:
     op = box.get(name)
     cur = current(op, skill, mtypes)
     return {**out, "have": op is not None, "current": cur, "gaps": gaps(req, skill, op, cur, mtypes),
-            "unknown": unknowns(req, cur, mtypes)}
+            "unknown": unknowns(req, cur, mtypes, op, skill)}
 
 
-def unknowns(req: dict, cur: dict | None, mtypes: dict) -> list[str]:
+def has_requirements(req: dict | None) -> bool:
+    """作业真写了练度要求（全写 0、模组 -1、潜能 1 都等于没写）。"""
+    if not req:
+        return False
+    return bool(int(req.get("elite") or 0) or int(req.get("level") or 0) or int(req.get("skill_level") or 0)
+                or int(req.get("module") or 0) > 0 or int(req.get("potentiality") or 0) > 1)
+
+
+def unknowns(req: dict, cur: dict | None, mtypes: dict, op: dict | None = None, skill: int | None = None) -> list[str]:
     """作业有要求、但练度里读不出来、没法对照的项（不算差距）。"""
     if cur is None or not req:
         return []
@@ -192,7 +201,9 @@ def unknowns(req: dict, cur: dict | None, mtypes: dict) -> list[str]:
     sl = int(req.get("skill_level") or 0)
     if sl and cur.get("skill_level") is None:
         out.append("技能等级")
-    if sl >= 8 and cur.get("mastery") is None:
+    skills = op.get("skills") if op else None
+    lacks_skill = isinstance(skills, list) and bool(skill) and not any(x.get("index") == skill for x in skills)
+    if sl >= 8 and cur.get("mastery") is None and not lacks_skill:   # 还没有这个技能：差距里已经说了
         out.append("专精")
     mt = MODULE_TYPES.get(int(req.get("module") or 0))
     if mt:
@@ -212,17 +223,31 @@ def annotate(plan: dict, box: dict | None, mtypes: dict | None = None) -> dict:
     for g in c.get("groups") or []:
         gops = [annotate_oper(o, box, mtypes) for o in g.get("opers") or []]
         owned = [o for o in gops if o["have"]]
-        best = min(owned, key=lambda o: len(o["gaps"]), default=None)
+        # 差距一样时挑读不到的少、作业写了要求的：能核对的人在前
+        best = min(owned, key=lambda o: (len(o["gaps"]), len(o["unknown"]), not has_requirements(o["required"])),
+                   default=None)
         groups.append({"name": g.get("name"), "opers": gops,
                        "have": None if box is None else bool(owned),
-                       "best": best and best["name"], "gaps": len(best["gaps"]) if best else None})
+                       "best": best and best["name"], "gaps": len(best["gaps"]) if best else None,
+                       "unknown": best["unknown"] if best else []})
     missing = [o["name"] for o in opers if o["have"] is False]
     missing += [f"{g['name']}（任选：{'/'.join(o['name'] for o in g['opers'])}）" for g in groups if g["have"] is False]
     if box is None:
-        gap_count, all_owned = None, None
+        gap_count, all_owned, unknown_count, unchecked, meets = None, None, None, [], None
     else:
         gap_count = sum(len(o["gaps"]) for o in opers if o["have"]) + sum(g["gaps"] or 0 for g in groups)
         all_owned = not missing
+        # 用到的人：固定干员里有的，加每个可选位里挑出来的那名
+        used = [o for o in opers if o["have"]]
+        used += [next(o for o in g["opers"] if o["name"] == g["best"]) for g in groups if g["best"]]
+        unknown_count = sum(len(o["unknown"]) for o in used)
+        unchecked = [f"{o['name']}：{'、'.join(o['unknown'])}读不到，没对照" for o in used if o["unknown"]]
+        bare = [o["name"] for o in used if not has_requirements(o["required"])]
+        if bare:
+            unchecked.append(f"作业没写练度要求，只核对了有没有这名干员：{'、'.join(bare)}")
+        if not opers and not groups:
+            unchecked.append("作业里没写干员，没法核对")
+        meets = False if missing or gap_count else (None if unchecked else True)
     doc = c.get("doc") or {}
     rated = not plan.get("not_enough_rating") and plan.get("rating_level") is not None
     return {"id": plan.get("id"), "uri": f"prts://{plan.get('id')}", "title": doc.get("title"),
@@ -231,41 +256,134 @@ def annotate(plan: dict, box: dict | None, mtypes: dict | None = None) -> dict:
             "like": plan.get("like"), "dislike": plan.get("dislike"),
             "rating": plan.get("rating_level") if rated else None,
             "opers": opers, "groups": groups, "missing_ops": missing,
-            "gap_count": gap_count, "all_owned": all_owned}
+            "gap_count": gap_count, "all_owned": all_owned,
+            "unknown_count": unknown_count, "unchecked": unchecked, "meets": meets}
+
+
+def _unchecked_n(p: dict) -> int:
+    """没核对到的有多少：读不到的项，加作业没写要求的干员（每人算一项）。"""
+    used = [o for o in p["opers"] if o["have"]]
+    used += [o for g in p["groups"] for o in g["opers"] if o["name"] == g["best"]]
+    return sum(len(o["unknown"]) + (0 if has_requirements(o["required"]) else 1) for o in used)
 
 
 def _sort_key(p: dict):
-    return (0 if p["all_owned"] else 1, p["gap_count"] if p["gap_count"] is not None else 0, -(p["hot"] or 0))
+    # 一个干员都没写的作业什么都核对不了，排在同样差距的后面
+    empty = not p["opers"] and not p["groups"]
+    return (0 if p["all_owned"] else 1, p["gap_count"] or 0, 1 if empty else 0, _unchecked_n(p), -(p["hot"] or 0))
 
 
 # --- 命令 ------------------------------------------------------------------------------------
 
-def _stage_keyword(text: str) -> tuple[str, str | None]:
-    """关卡 → (查询用的关键词, stageId)；认不出就原样当关键词。"""
+def _stage_keyword(text: str) -> tuple[str, str | None, bool]:
+    """关卡 → (查询用的关键词, stageId, 有没有游戏数据)；认不出就原样当关键词。"""
     from maapilot.knowledge import stages
     try:
         sid = stages.resolve_stage(text).stage_id
     except stages.AmbiguousStageError as e:
         raise CliError("ambiguous_stage", str(e), hint="写成 活动名/编号", exit=BAD_REQUEST) from None
-    except Exception:                                    # noqa: BLE001 - 认不出（或没有数据表）就当关键词
-        return text, None
-    return sid, sid
+    except (FileNotFoundError, OSError):                 # 没有游戏数据表
+        return text, None, False
+    except Exception:                                    # noqa: BLE001 - 认不出就当关键词
+        return text, None, True
+    return sid, sid, True
+
+
+def levels() -> list[dict] | None:
+    """作业站的关卡表（`/arknights/level`）；连不上、看不懂 → None。"""
+    try:
+        d = _api("/arknights/level")
+    except CliError:
+        return None
+    lv = d.get("data")
+    return lv if isinstance(lv, list) else None
+
+
+def match_levels(keyword: str, table: list[dict]) -> list[dict]:
+    """关键词 → 关卡表里对得上的关：关卡号、关名、stageId 一模一样的；一个都没有再找包含关键词的。"""
+    k = keyword.strip()
+    def fields(lv):
+        return [lv.get("cat_three") or "", lv.get("name") or "", lv.get("stage_id") or ""]
+    hit = [lv for lv in table if k in fields(lv)] or [lv for lv in table if k and any(k in f for f in fields(lv))]
+    out = {}
+    for lv in hit:
+        sid = (lv.get("stage_id") or "").split("#")[0]           # 突袭是 <id>#f#，算同一关
+        out.setdefault(sid, {"stage_id": sid, "level_id": lv.get("level_id"),
+                             "label": f"{lv.get('cat_one')}·{lv.get('cat_two')}·{lv.get('cat_three')}「{lv.get('name')}」"})
+    return list(out.values())
+
+
+def _plan_stage(p: dict) -> str:
+    return (p.get("stage") or "").split("#")[0]
+
+
+def find_by_keyword(keyword: str, limit: int, has_data: bool) -> tuple[list[dict], dict]:
+    """关卡没认出来时：先在作业站的关卡表里找这关，按对得上的关的 stageId 去查（作业站不认的词会按热度给别的关的作业），
+    再核对每份作业是不是这几关的，不是的去掉。返回 (作业, 要并进输出的 {matched_stages, dropped, warning})。"""
+    head = "" if has_data else "没有游戏数据（maapilot data sync），关卡没认出来；"
+    table = levels()
+    if table is None:
+        return query(keyword, limit), {
+            "matched_stages": None, "dropped": 0,
+            "warning": head + "关卡没认出来，也连不上作业站的关卡表：下面的作业不一定是这关的，看每份的 stage 再挑"}
+    matched = match_levels(keyword, table)
+    raw, seen = [], set()
+    for m in matched[:5] or [{"stage_id": keyword}]:              # 对不上任何关：照原样查，下面会全部去掉
+        for p in query(m["stage_id"], limit):
+            if p.get("id") not in seen:
+                seen.add(p.get("id"))
+                raw.append(p)
+    return raw, {"matched": matched, "head": head}
+
+
+def check_stage(keyword: str, plans: list[dict], matched: list[dict], head: str) -> tuple[list[dict], dict]:
+    """核对每份作业是不是对得上的关，不是的去掉；返回 (留下的作业, {matched_stages, dropped, warning})。"""
+    ids = {m["stage_id"] for m in matched} | {(m["level_id"] or "") for m in matched}
+    label = {m["stage_id"]: m["label"] for m in matched}
+    kept = []
+    for p in plans:
+        sid = _plan_stage(p)
+        if sid in ids or p.get("stage") in ids:
+            p["stage_label"] = label.get(sid)
+            kept.append(p)
+    dropped = len(plans) - len(kept)
+    warn = []
+    if not matched:
+        warn.append(f"作业站的关卡表里没有「{keyword}」这一关：作业站不认这个词时会按热度给别的关的作业，已经都去掉；"
+                    "换个写法再查（关卡号如 CW-EX-4、关名如「死路」）")
+    elif dropped:
+        warn.append(f"去掉了 {dropped} 份不是这关的作业")
+    if len(matched) > 1:
+        warn.append(f"「{keyword}」对得上 {len(matched)} 关（{'、'.join(m['label'] for m in matched)}）：看每份的 stage_label 分清是哪关")
+    text = "；".join(x for x in [head.rstrip("；"), *warn] if x)
+    return kept, {"matched_stages": matched, "dropped": dropped, "warning": text or None}
 
 
 def _box_info(box: dict | None) -> dict:
     snap = common.read_json(paths.STATE / "box.json") or {}
+    # state box（MAA 识别）写的 box.json 没有 source
     return {"box_at": snap.get("at") if box is not None else None,
-            "box_source": snap.get("source") if box is not None else None}
+            "box_source": (snap.get("source") or "maa") if box is not None else None}
 
 
 def cmd_find(args) -> dict:
     if args.limit < 1:
         raise CliError("bad_arguments", "--limit 至少是 1", exit=BAD_REQUEST)
-    keyword, sid = _stage_keyword(args.stage)
+    keyword, sid, has_data = _stage_keyword(args.stage)
     box = load_box()
     mtypes = _module_types()
-    plans = sorted((annotate(p, box, mtypes) for p in query(keyword, args.limit)), key=_sort_key)
-    return {"stage": args.stage, "stage_id": sid, "keyword": keyword, "count": len(plans), **_box_info(box),
+    extra = {"matched_stages": None, "dropped": 0, "warning": None}
+    if sid is None:
+        raw, info = find_by_keyword(keyword, args.limit, has_data)
+        plans = [annotate(p, box, mtypes) for p in raw]
+        if "matched" in info:
+            plans, extra = check_stage(keyword, plans, info["matched"], info["head"])
+        else:
+            extra = info
+    else:
+        plans = [annotate(p, box, mtypes) for p in query(keyword, args.limit)]
+    plans.sort(key=_sort_key)
+    return {"stage": args.stage, "stage_id": sid, "keyword": keyword, "count": len(plans), **extra, **_box_info(box),
             "plans": plans}
 
 
