@@ -30,9 +30,8 @@ Antigravity 的 `schedule` 工具提供两类参数：`DurationSeconds`（一次
   - `Prompt`：写成自足的一句，例如：`定时日常（04:40）：按 skill maapilot-daily 做；这是每天重复的定时，不用再建`。
 - **列定时**：建之前和建完后都用 `manage_task`（`Action: "list"`）检查已有的 `schedule` 任务，避免重复创建，并核对 cron 表达式是否与设置一致。
 - **改时间 / 取消定时**：用 `manage_task`（`Action: "kill"`，`TaskId` 填列表里的任务 ID）删掉旧的，再按新时间建。
-- **定时绑定在当前会话**：`schedule` 守护任务与创建它的对话绑定；切换到新对话并在新对话重建定时时，请先取消旧对话里的定时任务，避免同一账号在两个会话中重复触发。
+- **定时绑定在当前会话且依赖常驻进程**：`schedule` 守护任务与创建它的对话及后台服务绑定；切换到新对话并重建定时时，请先取消旧对话里的定时任务，避免同一账号在两个会话中重复触发。若电脑重启或 Antigravity 服务重启，正在运行中的后台定时会被停止（不会在开机后自动恢复或补发），需回到会话重新检查并按需补建。
 - **到点醒来**：确认对应的日常任务仍在列表中即可，**不再额外建下一次一次性定时**。
-- 如果用户要求「开机后首次打开电脑时跑」（例如早上 7 点后第一次打开电脑），可结合用户偏好在早上时段设检查 cron（先看 `doctor --brief` 的 `last_daily`，当天 04:00 换日后已跑过则静默跳过，未跑过再执行日常）。
 
 ## 长命令
 
@@ -45,8 +44,11 @@ Antigravity 的 `schedule` 工具提供两类参数：`DurationSeconds`（一次
 
 ## 实测
 
-- 2026-11-16（Windows 11 + 安卓模拟器实机验证）：
-  - 工作区发现与命令执行：通过 `.venv\Scripts\maapilot.exe` 完成 `doctor` 全 15 项检查（`ok_all: true`）、`screen shot`、`read_file` 看图识界面、`maa startup`、`state depot`、`state box`。
-  - 定时日常：`schedule`（`CronExpression` + `IsDaemon: true` + `ExactTiming: true`）成功注册每日重复任务，`manage_task list` 可正常回查任务。
-  - 长命令与完整日常：`run_command` 后台长命令在完整 `daily run`（含 `startup`、`recruit`、`infrast`、`mall`、`farm` 连战、`award`）及 `maa copilot`（自动编队三星通关活动关卡）结束后均正常自动唤醒会话，完成 `guard check` 与 `daily done` 收尾。
-- 待实测：定时日常多日连续常驻触发的稳定性；电脑睡眠唤醒后守护定时的触发表现。
+- 2026-11-16（Windows 11 + 安卓模拟器实机验证，当前仍为实验支持）：
+  - 命令执行与看图：通过 `.venv\Scripts\maapilot.exe` 跑通 `doctor` 全 15 项检查（`ok_all: true`）、`screen shot` + `read_file` 看图识界面、`maa startup`、`state depot`、`state box`、`copilot find` / `show` / `strip`、`news list` / `told`。
+  - 后台长命令与手动完整流程：`run_command`（`WaitMsBeforeAsync: 10000`）运行完整手动 `daily run`（含 `startup`、`recruit`、`infrast`、`mall`、`farm` 连战、`award`）及 `maa copilot`（自动编队并三星通关活动关）后，均自动唤醒会话完成 `guard check` 与 `daily done` 收尾。
+  - 定时任务接口：`schedule`（`CronExpression` + `IsDaemon: true` + `ExactTiming: true`）可正常注册每日重复任务，`manage_task`（`list` / `kill`）可查看和取消；2026-11-20 确认服务端重启会停止已有后台定时任务。
+- 待实测：
+  - 将仓库作为全新 Active Workspace 打开时，`AGENTS.md` 与 `.agents/skills/` 的自动发现及 `/maapilot-setup` 首句初始化流程；
+  - `schedule` 守护 cron 在会话空闲状态下实际到点自动触发并完整跑通一次 `--trigger schedule` 日常；
+  - 多日连续运行的稳定性，以及电脑睡眠唤醒后守护定时的表现。
