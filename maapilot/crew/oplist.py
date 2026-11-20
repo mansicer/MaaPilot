@@ -1,5 +1,9 @@
 """Locate an operator in the 干员 list and open their page."""
 from __future__ import annotations
+
+from collections import Counter
+
+from maapilot.crew import reading
 from maapilot.crew.core import REF_W, Game, OcrHit
 
 CLASS_TAB = {  # right sidebar (1240, y) on the operator list screen
@@ -7,6 +11,8 @@ CLASS_TAB = {  # right sidebar (1240, y) on the operator list screen
     "术师": 430, "医疗": 510, "辅助": 590, "特种": 670,
 }
 _DIGIT_FIX = str.maketrans({"O": "0", "o": "0", "D": "0", "I": "1", "l": "1", "|": "1"})
+FIRST_LEVEL_ROI = (26, 308, 54, 38)                 # 第一张卡左下角的等级数字（"LV"下面、黄圈里面）
+FIRST_LEVEL_READS = ((180, 2), (180, 3), (210, 2))  # (白字的阈值, 放大几倍)
 NAME_ROWS = [(0, 300, REF_W, 100), (0, 620, REF_W, 100)]  # OCR strips for the two card rows
 
 
@@ -35,10 +41,20 @@ def _scroll_to_start(g: Game) -> None:
 
 def _first_card_level(g: Game) -> int | None:
     """The first card's level, None when unread (then the sort direction is unknown; the scan still works)."""
-    for h in g.ocr((20, 295, 80, 60)):
-        t = h.text.strip().translate(_DIGIT_FIX)          # "90" 读成 "9o"（小写 o，10-12 真机）
-        if t.isdigit():
-            return int(t)
+    # 原样认不稳：框得紧，新的 OCR 模型（PP-OCRv6）把"90"切成"9"和杂点；框松一点，旧模型又只剩一个"o"。
+    # 所以只抠白字（等级是白的，外面一圈是黄的）、放大了认几遍，取多数。
+    img = g.screencap()
+    seen: Counter[int] = Counter()
+    for threshold, scale in FIRST_LEVEL_READS:
+        clean, roi = reading.binarize(img, FIRST_LEVEL_ROI, threshold=threshold, channel="min", scale=scale)
+        for hit in g.ocr(roi, clean):
+            t = hit.text.strip().translate(_DIGIT_FIX)    # "90" 读成 "9o"（小写 o，10-12 真机）
+            if t.isdigit() and 1 <= int(t) <= 90:
+                seen[int(t)] += 1
+                break
+    top = seen.most_common(2)
+    if top and (len(top) == 1 or top[0][1] > top[1][1]):
+        return top[0][0]
     g.save("first_card_level_fail")
     return None
 
