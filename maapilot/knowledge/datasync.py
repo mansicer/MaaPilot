@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import urllib.request
 from datetime import datetime, UTC
 from pathlib import Path
@@ -30,6 +31,7 @@ REPO = "Kengxxiao/ArknightsGameData"
 EXCEL_DIR = "zh_CN/gamedata/excel"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/master/{EXCEL_DIR}"
 API_URL = f"https://api.github.com/repos/{REPO}/contents/{EXCEL_DIR}?ref=master"
+BLOB_URL = f"https://api.github.com/repos/{REPO}/git/blobs/{{sha}}"
 MANIFEST_NAME = "manifest.json"
 LIVE_SOURCES = {"penguin": "企鹅物流", "values": "一图流"}   # live.sync() 结果里的来源键 → 显示名
 LIVE_OK = ("ok", "skipped")                                  # 其余值是错误文字（skipped：这个服务器没有该来源）
@@ -148,10 +150,35 @@ def fetch_remote_shas(files: list[str] | None = None) -> dict[str, str]:
     return {e["name"]: e["sha"] for e in listing if e.get("name") in wanted}
 
 
-def download(file: str) -> Path:
+def _get_blob(sha: str) -> bytes:
+    """按 git blob sha 取文件内容（内容和 sha 一一对应，不会拿到旧的）。走 api.github.com，没登录每小时 60 次。"""
+    req = urllib.request.Request(BLOB_URL.format(sha=sha),
+                                 headers={"User-Agent": "maapilot-datasync", "Accept": "application/vnd.github.raw+json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return r.read()
+
+
+def fetch_verified(file: str, git_sha: str, *, get=None, get_blob=None) -> bytes:
+    """下载一张表，内容的 git blob sha 要和目录列表里的 git_sha 一样。raw.githubusercontent.com 在上游刚更新的几分钟里
+    可能还给旧内容：对不上时改按 sha 从 blob 接口取一次；还对不上（或取不到）→ checksum.Mismatch。"""
+    from maapilot import checksum
+    data = (get or _get)(source_url(file), timeout=300)
+    if checksum.git_blob_sha(data) == git_sha:
+        return data
+    try:
+        data = (get_blob or _get_blob)(git_sha)
+    except OSError as e:
+        raise checksum.Mismatch(f"{file} 和目录列表里的哈希对不上，按哈希重取也没成（{e}）") from None
+    if checksum.git_blob_sha(data) != git_sha:
+        raise checksum.Mismatch(f"{file} 和目录列表里的哈希对不上（应为 {git_sha}）")
+    return data
+
+
+def download(file: str, git_sha: str | None = None) -> Path:
+    """下载一张表存到 data/。给了 git_sha（目录列表里的）就先核对内容，对不上抛 checksum.Mismatch、不动本地的表。"""
     dest = paths.DATA / file
     dest.parent.mkdir(parents=True, exist_ok=True)
-    data = _get(source_url(file), timeout=300)
+    data = fetch_verified(file, git_sha) if git_sha else _get(source_url(file), timeout=300)
     check_table(file, json.loads(data))               # 不把半截/错误页、改了格式的表存下来
     tmp = dest.with_suffix(".json.part")
     tmp.write_bytes(data)
@@ -161,7 +188,8 @@ def download(file: str) -> Path:
 
 def sync(check_only: bool = False, *, server: str | None = None, now: datetime | None = None) -> dict:
     """比对 manifest 与远端，下载缺失/变化的表并更新 manifest，需要时重建 data/recipes.json。
-    返回 {"to_update", "updated", "missing", "checked", "not_on_remote", "recipes_rebuilt"}（check_only 时没有最后一项）。
+    返回 {"to_update", "updated", "missing", "checked", "not_on_remote", "unverified", "recipes_rebuilt"}（check_only 时没有
+    最后两项）。`unverified`：下到的内容和 GitHub 目录列表里的哈希对不上的表，本地的没换，下次同步再试。
     官方表的网络失败直接抛异常，由调用方决定是否致命（日常的 sys:data 里非致命）。表的格式变了（缺程序用的字段）：
     不替换本地的表，记进 private/state/sources.json，抛 UpstreamFormat。
 
@@ -185,14 +213,21 @@ def _sync(check_only: bool, *, server: str | None, now: datetime | None) -> dict
     to_update = sorted(set(plan(manifest, remote)) | set(missing))
     result = {"to_update": to_update, "updated": [], "missing": missing, "checked": len(remote),
               "not_on_remote": [f for f in files if f not in remote]}
+    from maapilot import checksum
     if check_only:
         if server is not None:
             result["live"] = live_ages(server, now=now)
         return result
+    result["unverified"] = []
     for file in to_update:
         if file not in remote:
             continue
-        dest = download(file)
+        try:
+            dest = download(file, remote[file])
+        except checksum.Mismatch as e:                 # 不换本地的表、不记进 manifest：下次同步还会再下
+            result["unverified"].append(file)
+            print(f"数据表没有更新：{e}", file=sys.stderr, flush=True)
+            continue
         manifest[file] = {"sha256": sha256_file(dest), "git_sha": remote[file],
                           "fetched_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
                           "source_url": source_url(file)}

@@ -122,6 +122,9 @@ OCR 模型有两代：MAA 在 2026-11-02 换了 PaddleOCR 的模型（PP-OCRv3 �
 - 版本号只写在 `maapilot/__init__.py` 的 `__version__`（`pyproject.toml` 从这里读），格式 `X.Y.Z`；`maapilot --version`、`doctor`、启动检查会显示它和当前提交。
   第一个发布的版本是 0.1.0（用户 10-19 定：macOS、Windows 都实机跑通了）。修问题升第三位，有大的新能力（例如接新的 agent）升第二位，1.0.0 等稳定了再说。
 - maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：`maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 记实测过的范围（`tools install` 默认装上限这个版本），发版前把本机升到最新、跑通日常和作业后更新上限。
+- 下载的程序都要和公布的哈希对过才装（`maapilot/checksum.py`）：改 `MAA_CLI_TESTED` 的上限时把新版本各包的 sha256 加进 `toolchain.MAA_CLI_SHA256`
+  （`gh api repos/MaaAssistantArknights/maa-cli/releases/tags/v<版本> --jq '.assets[] | [.name, .digest] | @tsv'`，测试会查有没有加）；
+  换 adb 版本时改 `ADB_VERSION` 和 `ADB_SHA256`（三个包各下一次，和 Google 的 `repository2-3.xml` 里的 sha1、大小对过再写）。新加下载程序的地方也照这样做。
 - 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送标签，提交开 PR（main 不能直接推）。PR 要用普通合并（merge commit），不用 squash / rebase，标签指的提交才在 main 上。
   CI 在标签上先跑检查（ruff、mypy、权限文件）和各系统的测试、核对标签和 `__version__` 一致，再建一个 GitHub Release **草稿**（自动生成的更新列表）；
   把更新说明改成给玩家看的中文（新功能、修了什么、要用户做什么），再在 GitHub 上发布。

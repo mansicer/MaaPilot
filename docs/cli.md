@@ -111,7 +111,7 @@
 | `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
 | `agent_config` | `config.yaml` 里还写着 v0.1 的设置（`agent`、`schedule_options`、`daily.agent_timeout_min`、`daily.recovery_timeout_min`：定时叫起无头 agent、系统定时用的）：现在不用了，写了也忽略；`legacy` 列出是哪几个。`required: false` | 用户同意后从 `config.yaml` 删掉（不删也不影响） |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
-| `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB） |
+| `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB；下到的包和发布信息里的 sha256、大小对过才装，对不上不装、`fixed` 里写原因。Windows 上项目文件夹路径太深、又没开长路径支持时装不下（MAA 的包里有很长的文件名）：解压前就停下，`fixed` 里写超了多少个字符，请用户把项目挪到短一点的位置或打开长路径支持） |
 | `ocr_model` | `resource/model/ocr/` 下 `det.onnx`、`rec.onnx`、`keys.txt` | `doctor --fix`（从 maa-cli 资源的 `PaddleOCR` 复制） |
 | `game_data` | `data/` 下数据表齐全；超过 30 天没同步算没通过 | `doctor --fix` 或 `data sync` |
 | `game` | 游戏是否在前台（按 `server` 推出的包名看 `dumpsys window`）；`package` 是前台应用的包名；`installed` 是模拟器里装着的明日方舟客户端 `[{package, server}]`（`pm list packages`，游戏没开也能看；查不了为 `null`）。setup 据这两样推服务器；前台或装着的是别的服时提示改 `server`，一个都没装时提示去装 | `maa startup` |
@@ -522,7 +522,7 @@ OperBox 读不到技能等级、专精、模组：接了森空岛就用 `state s
 
 | 命令 | 输出 |
 |---|---|
-| `data sync [--check]` | 从 ArknightsGameData 同步数据表、刷新企鹅物流掉率与一图流价值；`--check` 只看要不要更新。`{updated, to_update, missing, recipes_rebuilt, live, ages: {matrix_age_h, values_age_d}}`；联网失败退出码 1（`sync_failed`）；下下来的表缺程序用的字段 → 不替换本地的表，退出码 1（`upstream_format`）。企鹅物流、一图流的格式问题写在 `live` 里、记进 `sources.json`，不算失败 |
+| `data sync [--check]` | 从 ArknightsGameData 同步数据表、刷新企鹅物流掉率与一图流价值；`--check` 只看要不要更新。`{updated, to_update, missing, unverified, recipes_rebuilt, live, ages: {matrix_age_h, values_age_d}}`；联网失败退出码 1（`sync_failed`）；下到的表和 GitHub 目录列表里的哈希对不上（上游刚更新时文件服务器可能还给旧的，先按哈希重取一次）→ 不替换本地的表，列在 `unverified`，下次同步再试，不算失败；下下来的表缺程序用的字段 → 不替换本地的表，退出码 1（`upstream_format`）。企鹅物流、一图流的格式问题写在 `live` 里、记进 `sources.json`，不算失败 |
 | `data operator <干员>`（别名 `op`） | `{name, id, rarity, profession, levels: [{elite, max_level, to_max: {exp, lmd}}], elite: [{elite, lmd, items, needs_level}], skill_levels: [{to, items}], mastery: [{skill, ranks: [{rank, items, hours}]}], modules: [{type, name, levels: [{level, lmd, items}]}] \| null}` |
 | `data item <物品>`（别名 `drops`） | `{id, name, rarity, type, craftable, recipe, stages: [{stage, ap, rate, sanity_per_item, open_days, open_today, event_end?}], drops_source}`：掉落最好的几关（常驻主线 / 资源本 / 芯片本，加上 MAA 现在能导航的活动关，按每件期望理智排；活动关带 `event_end`：活动什么时候结束） |
 | `data recipe <物品>` | `{tree, shop}`：合成树（加工站 / 制造站），每一步的材料与龙门币、叶子的主掉落关；能在商店兑换的另给 `shop` |
@@ -948,15 +948,19 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 `maapilot tools install maa-cli|adb [--version <maa-cli 版本>]`
 下载装好（拿模拟器锁：日常、MAA 在跑时不换，被占用退出码 4）。maa-cli 默认装 `maa_cli_tested` 的上限（`toolchain.MAA_CLI_TESTED`，实测过的最新版），
 `--version` 装别的版本；包从 GitHub 发布页按系统和 CPU 选（`maa_cli-v<版本>-<aarch64|x86_64>-<apple-darwin|pc-windows-msvc|unknown-linux-gnu>`）。
-装好后 MaaCore 还没装就顺手 `maa install`（几分钟）。adb 从 Google 下 `platform-tools-latest-<darwin|windows|linux>.zip`，整个 `platform-tools/` 留着。
+装好后 MaaCore 还没装就顺手 `maa install`（几分钟）。adb 从 Google 下固定的版本（`toolchain.ADB_VERSION`，`platform-tools_r<版本>-<darwin|win|linux>.zip`），整个 `platform-tools/` 留着。
 旧的整个换掉（先挪开、换好再删）。走系统的代理环境变量（`HTTPS_PROXY`）。
+下载的包先和公布的 sha256 对过才解压（`sha256` 是对过的那个）：maa-cli 实测版本和 adb 的哈希写在 `maapilot/toolchain.py` 里，不用联网查；
+`--version` 指定别的 maa-cli 版本时去 GitHub 发布信息里查（api.github.com，没登录每小时 60 次）。对不上、查不到都不装，原来装着的不动。
 
 ```json
 {"name": "maa-cli", "version": "0.7.7", "path": "/…/.tools/maa-cli/maa", "url": "https://github.com/…", "replaced": "0.7.5",
+ "sha256": "b12ddd6d…",
  "core": "6.18.0", "using": "/…/.tools/maa-cli/maa"}
 ```
 
-失败：`network`（下载不了，退出码 1）、`install_failed`（包里没有程序、旧的换不掉）、`maa_install_failed`（maa-cli 装好了但 `maa install` 没成）、`unsupported_platform`（5）。
+失败：`network`（下载不了，退出码 1）、`checksum_mismatch`（下到的包和公布的哈希 / 大小对不上，多半没下完或被代理改了：再试一次，换个网络还这样就告诉用户）、
+`no_checksum`（查不到这个 maa-cli 版本的哈希：版本号写错了，或 api.github.com 上不去 / 被限流）、`install_failed`（包里没有程序、旧的换不掉）、`maa_install_failed`（maa-cli 装好了但 `maa install` 没成）、`unsupported_platform`（5）。
 要联网、会换掉日常执行的程序：agent 先问过用户。`config.yaml` 写了别的路径时 `note` 提示怎么改用装好的（改不改问用户）。
 
 ## update —— MaaPilot 和 MAA 的更新（不碰模拟器）
