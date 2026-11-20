@@ -17,7 +17,7 @@ LLM接管的明日方舟全流程自动化Agent，定时日常到特殊需求，
 
 基于 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 项目进行大部分自动化，节省你的Token。
 
-已支持的Harness：[Claude Code](#claude-code)（命令行、桌面版）、[Codex](#codex)（桌面版）、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)。（持续更新中...）
+已支持的Harness：[Claude Code](#claude-code)（命令行、桌面版）、[Codex](#codex)（桌面版）、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)、[Antigravity](#antigravity)。（持续更新中...）
 
 </div>
 
@@ -31,7 +31,7 @@ https://github.com/user-attachments/assets/d309322a-e263-4ddf-a098-02634295295e
 
 - 一台 Mac 或 Windows 电脑
 - 一个安卓模拟器（见 [MAA 文档里的模拟器支持](https://maa.plus/docs/zh-cn/manual/device/)）
-- 一个已配好模型的 harness：[Claude Code](#claude-code)、[Codex](#codex)、[OpenClaw](#openclaw)、[pi-agent](#pi-agent) 或 [DSH](#dsh)
+- 一个已配好模型的 harness：[Claude Code](#claude-code)、[Codex](#codex)、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh) 或 [Antigravity](#antigravity)
 
 安装步骤：
 
@@ -70,6 +70,10 @@ DeepSeek Harness，用桌面版，选能看图的模型（默认的 `deepseek-fl
 
 > [!IMPORTANT]
 > Windows 上请在 DSH 里把 MaaPilot 的工作区设成"完全权限"，并且在第一次用之前就设好。DSH 的沙箱会给项目文件夹加上"低完整性"标签，之后项目里的 MAA 写不了自己的缓存，**这台电脑上所有 harness 跑 MaaPilot 都会失败**（包括 Claude Code、Codex 的定时日常）。MaaPilot 会自己检查：被加上了，助手会在会话开头告诉你，并给出去掉它的命令（`icacls "<项目文件夹>" /setintegritylevel "(OI)(CI)M"`，在 PowerShell 里运行），详见 [`docs/harnesses/dsh.md`](docs/harnesses/dsh.md)。
+
+#### [Antigravity](https://antigravity.google)
+
+将项目文件夹打开并设为当前活动工作区（Active Workspace）即可自动加载 `AGENTS.md` 和 `.agents/skills/`。支持通过会话内 `schedule` 守护定时跑日常（保持应用和会话开启；还是实验支持），具体做法见 [`docs/harnesses/antigravity.md`](docs/harnesses/antigravity.md)。
 
 接新的 harness 看 [`docs/harnesses/README.md`](docs/harnesses/README.md)。
 
@@ -118,7 +122,7 @@ DeepSeek Harness，用桌面版，选能看图的模型（默认的 `deepseek-fl
 
 - 游戏自动化：[MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights)（MaaCore，干员培养等任务）、[maa-cli](https://github.com/MaaAssistantArknights/maa-cli)（日常任务）
 - 识别与操作框架：[MaaFramework](https://github.com/MaaXYZ/MaaFramework)
-- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)、[pi](https://pi.dev)、[DSH](https://www.deepseek.com/en/harness/)
+- Agent：[Claude Code](https://claude.com/claude-code)、[Codex](https://developers.openai.com/codex)、[OpenClaw](https://docs.openclaw.ai)、[pi](https://pi.dev)、[DSH](https://www.deepseek.com/en/harness/)、[Antigravity](https://antigravity.google)
 
 ### 开源库
 
