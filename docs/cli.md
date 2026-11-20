@@ -35,7 +35,7 @@
 - **锁**：操作模拟器的命令（点击、滑动、输入、MAA 任务、要进页面的读取）自动拿模拟器锁（`private/lock.json`），拿不到退出码 4。
   只读的 `screen shot` / `screen ocr` 不拿锁：用不开输入服务的只读连接，别人（MAA、日常）正在操作时也能截图看看。持锁的进程（`daily run`）起的子进程
   （它调的 `maapilot maa …` 等）通过环境变量 `MAAPILOT_LOCK_TOKEN` 继承锁，子进程里的命令不会被挡（见 `maapilot/crew/lock.py`）。
-- **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行；别的命令失败（包括参数写错、退出码 2）或有结果摘要的（`calc need`、`goals` 改动）也记一行（见[文件](#private-文件)）。
+- **记录**：每个碰模拟器的命令结束时在 `private/log/<日期>.jsonl` 追加一行；别的命令失败（包括参数写错、退出码 2）或有结果摘要的（`calc need`、`goals` 改动、`copilot find / show`：查了哪关、看了几份、排前面的几份满不满足）也记一行（见[文件](#private-文件)）。
 - **物品与干员名**：参数里用游戏里的中文名；输出里物品同时给 `id` 与 `name`。
 - **长命令**：`daily run` 要 20–60 分钟，`maa fight`、`state box` 等可能几分钟。Claude Code 的 Bash 超时最长 10 分钟：
   预计超过几分钟的放后台跑，结束时会收到通知（`docs/harnesses/claude-code.md`）。Codex 的后台命令结束叫不醒模型：前台跑、等它结束。
@@ -349,17 +349,23 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 
 | 命令 | 做什么 |
 |---|---|
-| `copilot find <关卡> [--limit N]` | 关卡 → stageId（同 `data stage` 的认法；认不出就原样当关键词，重名退出码 2 `ambiguous_stage`），按热度查最多 N 份（默认 20），逐份标注；排序：干员都有的在前，再按差距数少、一个干员都没写的靠后、没核对到的少（读不到的项，加作业没写要求的干员）、热度高。
-关卡没认出来（`stage_id` 是 `null`，例如悖论模拟、没有游戏数据）时，先在作业站的关卡表（`/arknights/level`）里找这关，按对得上的关的 stageId 去查（对得上几关就每关各查 N 份），再核对每份作业的 `stage`：不是这关的去掉（作业站不认的词会按热度给别的关的作业），记在 `dropped`；`matched_stages` 是对得上的关（关卡号、关名、stageId 一模一样的，没有再找包含的），每份作业加 `stage_label`（如 `悖论模拟·重装·塞雷娅「死路」`）；对得上好几关、去掉了作业、没有游戏数据、关卡表连不上（这时不去掉）都写在 `warning`。悖论模拟关不在关卡数据里，走"原样当关键词"：写这关的名字（悖论模拟页右上角那行字，如"百炼"），写"悖论模拟"搜出来的是不相干的作业 |
+| `copilot find <关卡> [--limit N] [--pages N]` | 关卡 → stageId（同 `data stage` 的认法，重名退出码 2 `ambiguous_stage`；本机认不出——悖论模拟、没有游戏数据、本机数据太旧——就在作业站的关卡表 `/arknights/level` 里找：关卡号、关名、stageId 一模一样的，没有再找包含的，最多查 5 关；关卡表里也没有就不查，`warning` 说换个写法）。
+按每关的 stageId 去作业站按热度一页页查（一页 20 份，每关最多 `--pages` 页，默认 5；有一份 `meets` 为 true 就不再往后翻；没有 `box.json` 时只看第一页），逐份标注，排序后列前 `--limit` 份（默认 20）。排序：干员都有的在前，再按差距数少、一个干员都没写的靠后、没核对到的少（读不到的项，加作业没写要求的干员）、热度高。
+`raid` 为真是本机认出的是突袭（`<stageId>#f#`）：作业站的作业不分常规、突袭，按同一关查，`warning` 提醒挑能打突袭的、打的时候加 `--raid raid`。`looked` 是看了几份（核对关卡之后），`total` 是作业站说这关一共几份，`more` 为真是后面还有没看的；`count` 是列出来几份。
+**核对关卡**：作业站认得这关时只给这关的，作业的 `stage` 写成关卡号（`CW-EX-4`、`16-13`；第 10 章起关卡号和 stageId 差一，不自己换算）、levelId 的也算这关；一页里混着别的关的 stageId（作业站不认这关，按热度给了全站的作业）时只留对得上的，去掉的记在 `dropped`。
+`matched_stages` 是查了的关 `[{stage_id, level_id, label}]`（本机认出的 `level_id` 是 `null`、`label` 如 `1-7「暴君」`；关卡表里的 `label` 如 `悖论模拟·重装·塞雷娅「死路」`），每份作业的 `stage_label` 是它属于哪一关；本机认不出、关卡表也连不上时 `matched_stages` 是 `null`，照原样查一页、不核对关卡。
+`warning`（中文，没有是 `null`）：去掉了作业、全被去掉（作业站没给这关的作业）、对得上好几关、没有游戏数据、本机游戏数据里没有这关（可能太旧；悖论模拟不算）、作业里有本机游戏数据不认识的名字（新干员、数据太旧：这些人的技能解锁没核对）、关卡表连不上。
+悖论模拟写这关的名字（悖论模拟页右上角那行字，如"百炼"），写"悖论模拟"查不到 |
 | `copilot show <作业编号>` | 一份作业（编号或 `prts://编号`）：同上的标注，另给 `details`（作者说明）、`difficulty`、`minimum_required`（MAA 版本）、`actions`（动作数） |
 | `copilot strip <作业编号>` | 去掉作业里所有干员的练度要求（`requirements`），存成 `private/cache/copilot/<编号>_noreq.json`（`maa copilot --ignore-requirements` 还被 MAA 拒绝时，把这个文件交给 `maa copilot`）。`{id, path, removed}` |
 
 ```json
 // copilot find
-{"stage": "YW-8", "stage_id": "act…_08", "keyword": "act…_08", "count": 20, "matched_stages": null, "dropped": 0, "warning": null,
+{"stage": "YW-8", "stage_id": "act…_08", "raid": false, "count": 20, "looked": 46, "total": 120, "more": true,
+ "matched_stages": [{"stage_id": "act…_08", "level_id": null, "label": "YW-8「…」"}], "dropped": 0, "warning": null,
  "box_at": "…", "box_source": "skland",
  "plans": [{"id": 64408, "uri": "prts://64408", "title": "…", "stage": "…", "uploader": "…", "uploaded_at": "…",
-            "views": 1200, "hot": 35, "like": 40, "dislike": 1, "rating": 9,
+            "stage_label": "YW-8「…」", "views": 1200, "hot": 35, "like": 40, "dislike": 1, "rating": 9,
             "opers": [{"name": "能天使", "skill": 3, "required": {"elite": 2, "level": 60, "skill_level": 10},
                        "have": true, "current": {"elite": 2, "level": 90, "potential": 1, "skill_level": 7, "mastery": 2, "modules": [...]},
                        "gaps": ["要技能3 专3，现在专2"], "unknown": []}],
@@ -369,11 +375,12 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
 ```
 
 - `required` 是作业的 `requirements`（MAA 作业协议：`skill_level` 1–7 是技能等级、8–10 是专精 1–3；`module` 1 χ、2 γ、3 α、4 Δ；`potentiality` 从 1 数）。
-- `gaps`：精英化与等级、技能等级、专精、模组、潜能没到的项（中文）；没有这个干员是 `["没有这个干员"]`。森空岛把没解锁的模组也列出来：有 `locked` 照它，没有就按"没精2 → 没有、等级 ≥2 或装着 → 有、其余不知道"推。
+- `gaps`：精英化与等级、技能、技能等级、专精、模组、潜能没到的项（中文）；没有这个干员是 `["没有这个干员"]`。技能按游戏数据的解锁条件对精英化（"技能3要精2才解锁，现在精1""没有技能3（这名干员只有 2 个技能）"；精英化要求已经不够时不重复说），作业没写练度要求也照样核对；没有游戏数据时看森空岛列出来的技能。
+- 召唤物、装置（沙地兽、安全起重机……；游戏数据里不是干员的名字，和干员重名的算干员）标 `"summon": true`，`have` 是 `null`，不算缺人、不核对；只有召唤物的可选位 `have` 也是 `null`。森空岛把没解锁的模组也列出来：有 `locked` 照它，没有就按"没精2 → 没有、等级 ≥2 或装着 → 有、其余不知道"推。
 - `box_source`：`skland`（森空岛，技能、专精、模组都有）或 `maa`（`state box` 的 MAA 识别，只有精英化、等级、潜能）；没有 `box.json` 时 `null`。
 - `groups` 是可选位（任选一名）：`best` 是有的里面差距最少的（一样少时挑读不到的项少、作业写了要求的；所以是"最好核对的"，不一定是练度最高的），`gaps` 是它的差距数，`unknown` 是它读不到的项。没有 `box.json` 时 `have`、`current`、`gap_count`、`all_owned`、`unknown_count`、`meets` 都是 `null`，`unchecked` 是 `[]`。
 - **`gap_count` 是 0 不等于满足要求**，看 `meets`：`true` 是人都有、没有差距、也没有没核对到的；`false` 是缺人或有差距；`null` 是说不准，原因列在 `unchecked`（中文）：
-  用到的干员里读不到的项（"遥：技能等级、专精读不到，没对照"，`unknown_count` 是项数；多半是没接森空岛）、作业没写练度要求的干员（"作业没写练度要求，只核对了有没有这名干员：…"；要求全写 0 也算没写）、作业里一个干员都没写的（"作业里没写干员，没法核对"）。干员还没有作业要的那个技能时，算差距，不再说"专精读不到"。
+  用到的干员里读不到的项（"遥：技能等级、专精读不到，没对照"，`unknown_count` 是项数；多半是没接森空岛）、作业没写练度要求的干员（"作业没写练度要求，只核对了有没有这名干员：…"；要求全写 0 也算没写）、作业里一个干员都没写的（"作业里没写干员，没法核对"，只写了召唤物的括号里列出来）。干员还没有作业要的那个技能时，算差距，不再说"专精读不到"。
   读不到的项不能当成够：开打前先读出来（`state skland`；没接森空岛时技能等级用 `state op <干员>`，专精、模组看干员页），自己对着 `required` 比。
 - `rating`：评分人数不够时为 `null`。连不上作业站退出码 1（`network`）；没有这份作业退出码 2（`not_found`）；编号不是数字退出码 2（`bad_arguments`）；`strip` 读不出作业内容退出码 1（`bad_plan`）。
 
