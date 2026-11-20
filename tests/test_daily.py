@@ -827,6 +827,14 @@ def test_version_info_failure_is_not_fatal(capsys, env):
     assert any("没查到游戏版本" in a for a in out["data"]["alerts"])
 
 
+def test_bilibili_skips_the_version_check_quietly(capsys, env):
+    from maapilot.cliutil import BAD_REQUEST, CliError
+    env["behavior"]["version_error"] = CliError("unsupported_server", "游戏更新目前只支持官服", exit=BAD_REQUEST)
+    code, out = run(capsys, "daily", "run", "--trigger", "schedule")
+    assert code == 0, out
+    assert not any("游戏版本" in a for a in out["data"]["alerts"])
+
+
 @pytest.mark.parametrize("trigger", ["manual", "schedule"])
 def test_update_needed_hands_off_then_continues(capsys, env, trigger):
     env["behavior"]["versions"] = [OLD, NEW]

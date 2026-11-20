@@ -126,6 +126,9 @@ def _game_version(r: _Run, order: list[str]) -> None:
     try:
         info = daily.version_info()
     except Exception as e:                               # noqa: BLE001
+        if getattr(e, "code", None) == "unsupported_server":     # B 服：程序不会更新游戏，不查版本，也不每次都提醒
+            r.event("version_skipped", error=_err(e))
+            return
         r.data["alerts"].append(f"没查到游戏版本（{_err(e)}），照常跑")
         r.event("version_failed", error=_err(e))
         return

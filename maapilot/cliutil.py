@@ -30,10 +30,6 @@ class CliError(Exception):
         self.data = data          # 失败时也想带回的数据（例如对账的差额），放进信封的 data
 
 
-def not_implemented(command: str) -> CliError:
-    return CliError("not_implemented", f"`{command}` 还没实现", exit=BAD_REQUEST)
-
-
 def envelope(command: str, *, data=None, error: CliError | None = None) -> dict:
     return {
         "ok": error is None,
@@ -41,6 +37,15 @@ def envelope(command: str, *, data=None, error: CliError | None = None) -> dict:
         "data": data,
         "error": None if error is None else {"code": error.code, "message": error.message, "hint": error.hint},
     }
+
+
+class Stopped(SystemExit):
+    """命令被信号叫停（SIGTERM / SIGINT / SIGHUP / SIGBREAK，例如日常超时杀掉它）。退出码 128+信号；
+    cli.main 照样输出信封（`error.code` 是 `interrupted`）。不经过 cli.main 的地方当普通的 SystemExit。"""
+
+    def __init__(self, signum: int):
+        super().__init__(128 + int(signum))
+        self.signum = int(signum)
 
 
 class RawOutput(Exception):
@@ -111,21 +116,3 @@ def device_readonly():
     dev.configure(config.connection())   # 没配置 → CliError(ENVIRONMENT)
     yield
 
-
-def register_stub(sub, name: str, help: str, subcommands: list[str] | None = None) -> None:
-    """占位：注册一个还没实现的命令组，任何参数都回 not_implemented。实现时整个 register() 换掉。"""
-    import argparse
-
-    def handler(args):
-        raise not_implemented(args.command)
-
-    g = sub.add_parser(name, help=help)
-    if not subcommands:
-        g.add_argument("rest", nargs=argparse.REMAINDER)
-        g.set_defaults(func=handler, command=name, accepts_extra=True)
-        return
-    gs = g.add_subparsers(dest="sub", metavar="<子命令>")
-    for s in subcommands:
-        p = gs.add_parser(s)
-        p.add_argument("rest", nargs=argparse.REMAINDER)
-        p.set_defaults(func=handler, command=f"{name} {s}", accepts_extra=True)

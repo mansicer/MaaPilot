@@ -17,16 +17,30 @@ def _claude_memory(files: dict) -> None:
         (d / name).write_text(text, encoding="utf-8")
 
 
-def test_first_brief_imports_claude_memory_once():
+def test_brief_only_reports_and_memory_import_moves_once(capsys):
     _claude_memory({"MEMORY.md": "- [理智液](sanity.md) — 快到期的可以用\n",
                     "sanity.md": "---\nname: sanity\n---\n快到期的可以用（10-05）\n"})
     paths.PRIVATE.mkdir(parents=True, exist_ok=True)
-    m = doctor.memory_brief()
-    assert m["imported"] == ["MEMORY.md", "sanity.md"] and m["index"] == ["- [理智液](sanity.md) — 快到期的可以用"]
+    m = doctor.memory_brief()                                                  # 启动检查只看不写
+    assert m["importable"] == ["MEMORY.md", "sanity.md"] and m["index"] == []
+    assert not memory.memory_dir().exists()
+    line = [l for l in doctor.brief_lines(_brief_data(memory=m)) if "memory import" in l]
+    assert line and "2 条" in line[0]
+    assert cli.main(["memory", "import"]) == 0
+    out = json.loads(capsys.readouterr().out)["data"]
+    assert out["imported"] == ["MEMORY.md", "sanity.md"] and out["index"] == ["- [理智液](sanity.md) — 快到期的可以用"]
     assert (reset.memory_dir() / "sanity.md").exists()                         # 原来的不删
     (memory.memory_dir() / "MEMORY.md").write_text("- [理智液](sanity.md) — 都不用\n", encoding="utf-8")
     m = doctor.memory_brief()                                                  # 搬过一次就不再搬
-    assert m["imported"] is None and m["index"] == ["- [理智液](sanity.md) — 都不用"]
+    assert m["importable"] is None and m["index"] == ["- [理智液](sanity.md) — 都不用"]
+    assert cli.main(["memory", "import"]) == 0
+    assert json.loads(capsys.readouterr().out)["data"]["imported"] == []
+
+
+def _brief_data(**over) -> dict:
+    d = {"setup_done": True, "guard_stop": None, "goals_active": 0, "goals": [], "last_daily": None}
+    d.update(over)
+    return d
 
 
 def _prefs(days_old: float) -> None:

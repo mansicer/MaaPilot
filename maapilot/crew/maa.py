@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from maapilot import paths, toolchain
+from maapilot.cliutil import Stopped
 from maapilot.oscompat import fs, procs
 
 TASK_PREFIX = "maapilot-"
@@ -110,14 +111,15 @@ def data_problem() -> str | None:
     return _copy_failed.get(str(data_dir()))
 
 
-def data_env() -> dict:
-    """跑 maa-cli 时要加的 MAA_DATA_DIR。没装过 MaaCore 的新目录也用；搬不过来 → 空，接着用原来的目录，下次再试。"""
+def data_env(move: bool = True) -> dict:
+    """跑 maa-cli 时要加的 MAA_DATA_DIR。没装过 MaaCore 的新目录也用；搬不过来 → 空，接着用原来的目录，下次再试。
+    move=False（只读的检查：不带 --fix 的 doctor）：还没搬就不搬，按原来的目录看。"""
     if os.environ.get("MAA_DATA_DIR"):                   # 用户自己设的；空的 maa-cli 也当没设
         return {}
     new = data_dir()
     if _moved(new):
         return {"MAA_DATA_DIR": str(new)}
-    if str(new) in _copy_failed:
+    if not move or str(new) in _copy_failed:
         return {}
     try:
         old = _old_data()
@@ -133,8 +135,8 @@ def data_env() -> dict:
     return {"MAA_DATA_DIR": str(new)}
 
 
-def env() -> dict:
-    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir()), **data_env()}
+def env(move: bool = True) -> dict:
+    return {**os.environ, "MAA_CONFIG_DIR": str(config_dir()), **data_env(move)}
 
 
 def config_missing() -> list[str]:
@@ -302,7 +304,7 @@ def _stops_with_us(proc: subprocess.Popen):
 
     def on_signal(signum, _frame):
         stop()
-        raise SystemExit(128 + signum)
+        raise Stopped(signum)
 
     old = {}
     if threading.current_thread() is threading.main_thread():

@@ -2,7 +2,8 @@
 
 agent 自己读写这些文件（格式见 AGENTS.md「用户偏好」）；程序只做三件事：
 - 启动检查（doctor --brief）带上 MEMORY.md 的目录行，会话一开始 agent 就看到；
-- 一次性搬家：还没有 private/memory/MEMORY.md、也没搬过时，把 Claude Code 给这个项目记的自动记忆（以前的位置）复制过来；
+- 一次性搬家（`memory import`、`doctor --fix`）：还没有 private/memory/MEMORY.md、也没搬过时，把 Claude Code 给这个项目记的
+  自动记忆（以前的位置）复制过来。启动检查只看不写：有能搬的就列在 `importable` 里，agent 跑 `memory import`；
 - 记上次整理的时间：满一个月后日常结果带上 memory_tidy，agent 按 skill maapilot-memory 整理（`memory tidied` 记下）。
 """
 from __future__ import annotations
@@ -60,6 +61,21 @@ def tidied() -> str:
     return at
 
 
+def _claude_files(src: Path | None) -> tuple[Path, list[Path]]:
+    if src is None:
+        from maapilot.flows.reset import memory_dir as claude_memory_dir
+        src = claude_memory_dir()
+    return src, (sorted(p for p in src.glob("*.md") if p.is_file()) if src.is_dir() else [])
+
+
+def importable(src: Path | None = None) -> list[str]:
+    """`import_claude` 会复制哪些文件（只看、不写）：启动检查用它提醒 agent 去搬。不用搬 → []。"""
+    dst = memory_dir()
+    if (dst / INDEX).exists() or (dst / MARKER).exists():
+        return []
+    return [p.name for p in _claude_files(src)[1] if not (dst / p.name).exists()]
+
+
 def import_claude(src: Path | None = None) -> list[str]:
     """搬一次家：private/memory/MEMORY.md 还没有、也没搬过（没有 MARKER）→ 把 Claude Code 自动记忆里的 .md 复制过来。
 
@@ -68,10 +84,7 @@ def import_claude(src: Path | None = None) -> list[str]:
     dst = memory_dir()
     if (dst / INDEX).exists() or (dst / MARKER).exists():
         return []
-    if src is None:
-        from maapilot.flows.reset import memory_dir as claude_memory_dir
-        src = claude_memory_dir()
-    files = sorted(p for p in src.glob("*.md") if p.is_file()) if src.is_dir() else []
+    src, files = _claude_files(src)
     if not files:
         return []
     dst.mkdir(parents=True, exist_ok=True)
@@ -91,8 +104,14 @@ def cmd_tidied(args) -> dict:
     return {"tidied_at": tidied()}
 
 
+def cmd_import(args) -> dict:
+    return {"imported": import_claude(), "index": index_lines()}
+
+
 def register(sub) -> None:
     g = sub.add_parser("memory", help="用户偏好记录")
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
     p = gs.add_parser("tidied", help="记下这次整理偏好的时间（一个月后日常再提醒）")
     p.set_defaults(func=cmd_tidied, command="memory tidied")
+    p = gs.add_parser("import", help="把 Claude Code 自动记忆里以前记的偏好搬进 private/memory/（只搬一次）")
+    p.set_defaults(func=cmd_import, command="memory import")

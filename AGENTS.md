@@ -39,6 +39,7 @@
   `due` 不为空（MaaPilot 或 MAA 有新版本还没跟用户说），或者 `lost`、`maa-core.lost`、`maa-resource.lost` 为真（好几天没查到版本信息、资源没更新成）：也在第一句回复里说，按 skill `maapilot-update`。
   定时的提示不用单独查，`daily run` 自己会查，结果写进总结。
 - `memory.index` 是用户偏好记录的目录（见「用户偏好」）：做事前对一对有没有相关的。
+  `memory.importable` 不为空（Claude Code 的自动记忆里还有以前记的偏好没搬过来）：先跑一次 `maapilot memory import`，再看搬过来的目录。
 
 ## 定时日常（harness 的定时叫醒你）
 

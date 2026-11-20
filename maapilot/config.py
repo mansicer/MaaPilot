@@ -44,7 +44,9 @@ def load(path: Path | None = None) -> dict:
         raise CliError("invalid_config", f"config.yaml 写错了：{e}", exit=BAD_REQUEST) from None
     if not isinstance(raw, dict):
         raise CliError("invalid_config", "config.yaml 顶层应是映射", exit=BAD_REQUEST)
-    return _merge(DEFAULTS, raw)
+    cfg = _merge(DEFAULTS, raw)
+    check_server(cfg.get("server"))
+    return cfg
 
 
 def raw(path: Path | None = None) -> dict | None:
@@ -77,7 +79,13 @@ def connection():
 
 # --- 由 server 推出的值 -------------------------------------------------------------
 
-# 游戏包名（doctor 查前台用）
+# 支持的服务器：国服两个渠道（同一个游戏内容，账号和安装包不同）。别的服（PACKAGES 里其余的）只认得出来、不支持：
+# 公告日程、商店兑换、作业、游戏数据表都按国服做的，写进配置就拒绝，不让它半能用。
+SUPPORTED_SERVERS = ("Official", "Bilibili")
+SERVER_NAMES = {"Official": "官服", "Bilibili": "B 服", "YoStarEN": "国际服（英语）", "YoStarJP": "日服", "YoStarKR": "韩服",
+                "txwy": "繁中服"}
+
+# 游戏包名（doctor 查前台、认装着的是哪个服用；不支持的服也列着，好告诉用户装的是什么）
 PACKAGES = {
     "Official": "com.hypergryph.arknights",
     "Bilibili": "com.hypergryph.arknights.bilibili",
@@ -88,6 +96,18 @@ PACKAGES = {
 }
 # 企鹅物流的服务器代码
 PENGUIN = {"Official": "CN", "Bilibili": "CN", "txwy": "CN", "YoStarEN": "US", "YoStarJP": "JP", "YoStarKR": "KR"}
+
+
+def check_server(srv) -> None:
+    """config.yaml 的 server 不是支持的服务器 → CliError(BAD_REQUEST)。没写（None、空）用默认的官服。"""
+    if srv is None or srv == "" or srv in SUPPORTED_SERVERS:
+        return
+    ok = "、".join(f"{s}（{SERVER_NAMES[s]}）" for s in SUPPORTED_SERVERS)
+    if srv in PACKAGES:
+        raise CliError("unsupported_server", f"config.yaml 的 server 是 {srv}（{SERVER_NAMES[srv]}）：MaaPilot 目前只支持国服",
+                       hint=f"只能写 {ok}；别的服还用不了，告诉用户", exit=BAD_REQUEST)
+    raise CliError("unsupported_server", f"config.yaml 的 server 写的是 {srv!r}，认不出是哪个服",
+                   hint=f"只能写 {ok}（注意大小写）", exit=BAD_REQUEST)
 
 
 def load_or_defaults() -> dict:
