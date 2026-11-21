@@ -36,6 +36,7 @@ GROUPS = [
     "maapilot.tools.tools_cmd",
     "maapilot.tools.update_cmd",
     "maapilot.tools.memory",
+    "maapilot.tools.feedback",
     "maapilot.tools.dev_cmd",            # 开发用（dev rules），不给用户的 agent
     "maapilot.flows.goals",
     "maapilot.flows.daily",
