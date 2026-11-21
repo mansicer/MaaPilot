@@ -13,7 +13,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Install
         run: uv sync --locked --extra dev --python 3.12
@@ -45,7 +45,7 @@ jobs:
       - name: Keep CRLF conversion on (like a default Windows git), to exercise .gitattributes
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf true
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Install
         run: uv sync --locked --extra dev --python ${{ matrix.python }}
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: write        # 推 v* 标签时建 Release 草稿
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
