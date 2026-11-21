@@ -7,6 +7,8 @@
   只取骨架：命令的参数、结果摘要（里面有货币数量、干员名）、目标、偏好都不带；
 - 程序兜底脱敏（`maapilot.tools.scrub`）：路径、用户名、模拟器地址、森空岛 uid 和昵称、agent 另外指定的字样。
 
+结构字段（编号、类别、时间）和用户留的联系方式不过脱敏：换掉了服务器不认，联系方式换掉了就没用了。
+
 草稿在 `private/feedback/<编号>/`：`bundle/` 里是要上传的全部内容（上传的就是这个文件夹打的包，一个字节不多），
 `state.json` 是本机的记录（状态、指定隐去的字样），不上传。
 `send` 要带上给用户看过的那一版的 `digest`：草稿之后被改过就对不上，拒绝发送。日常在跑或没收尾时不发（用户多半不在）。
@@ -14,6 +16,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -44,7 +47,8 @@ MAA_LOG_LINES = 200
 PREVIEW_CHARS = 80                        # 清单里带的原话开头：服务器通知开发者时显示
 SHOW_CHARS = 20_000                       # `show --part` 一次给多少字
 CATEGORIES = ("bug", "experience", "idea", "other")
-ID_RE = re.compile(r"fb-\d{8}-\d{6}-[0-9a-f]{4}")
+ID_RE = re.compile(r"fb-(\d{8})-\d{6}-[0-9a-f]{4}")
+MAX_AGE_H = 48                            # 草稿放久了服务器不收（编号里的日期离当天太远）：超过这么久就要重新起草
 
 # 上传的文件名（都在 bundle/ 下）
 INFO, SESSION, RAW, MAA_LOG, SHOT_DIR = "feedback.json", "session.md", "session-raw.txt", "maa-log.txt", "shots"
@@ -61,17 +65,42 @@ def root() -> Path:
     return paths.PRIVATE / "feedback"
 
 
-def draft_dir(fid: str) -> Path:
+def _dir(fid: str) -> Path:
     if not ID_RE.fullmatch(fid or ""):
         raise CliError("bad_id", f"反馈编号不对：{fid}", hint="maapilot feedback list", exit=BAD_REQUEST)
     d = root() / fid
-    if not (d / "state.json").exists():
+    if not d.is_dir():
         raise CliError("no_draft", f"没有这份反馈草稿：{fid}", hint="maapilot feedback list", exit=BAD_REQUEST)
     return d
 
 
 def _state(d: Path) -> dict:
-    return common.read_json(d / "state.json") or {}
+    st = common.read_json(d / "state.json")
+    return st if isinstance(st, dict) else {}
+
+
+def _info(d: Path) -> dict:
+    info = common.read_json(d / "bundle" / INFO)
+    return info if isinstance(info, dict) else {}
+
+
+def _broken(d: Path) -> str | None:
+    """草稿坏了的原因（状态文件、feedback.json 读不了或对不上）；好的 → None。"""
+    st, info = _state(d), _info(d)
+    if st.get("id") != d.name or st.get("status") not in ("draft", "sent"):
+        return "本机的状态文件读不了"
+    if info.get("id") != d.name or not str(info.get("text") or "").strip():
+        return "要上传的 feedback.json 读不了或缺内容"
+    return None
+
+
+def draft_dir(fid: str) -> Path:
+    d = _dir(fid)
+    why = _broken(d)
+    if why:
+        raise CliError("bad_draft", f"这份草稿坏了（{why}）", exit=BAD_REQUEST,
+                       hint=f"maapilot feedback discard {fid}，再重新起草")
+    return d
 
 
 def _save_state(d: Path, st: dict) -> None:
@@ -112,7 +141,39 @@ def _error_code(err) -> str | None:
     """命令记录里的 error：错误代码原样；没料到的异常记的是 "异常类型: 原话"，只留类型。"""
     if not isinstance(err, str) or not err:
         return None
-    return err.split(":", 1)[0].strip()[:80]
+    code = err.split(":", 1)[0].strip()
+    return code[:80] if re.fullmatch(r"[A-Za-z_][\w.]*", code) else "?"
+
+
+_commands: dict[str, set[str]] | None = None
+
+
+def known_commands() -> dict[str, set[str]]:
+    """{命令组: 它的子命令}，从命令行的定义里取。"""
+    global _commands
+    if _commands is None:
+        from maapilot import cli
+        out: dict[str, set[str]] = {}
+        groups = cli.build_parser()._subparsers._group_actions[0].choices       # type: ignore[union-attr]
+        for name, parser in groups.items():
+            sub = getattr(parser, "_subparsers", None)
+            out[name] = set(sub._group_actions[0].choices) if sub is not None else set()
+        _commands = out
+    return _commands
+
+
+def command_name(raw) -> str:
+    """命令记录里的"命令"只留真的命令名。参数写错时记下的是命令行的前两个词，后一个可能是参数（干员名、目标标题），不带。"""
+    words = str(raw or "").split()
+    try:
+        known = known_commands()
+    except Exception:                                   # noqa: BLE001 - 取不到定义时一个词都不信
+        return "?"
+    if not words or words[0] not in known:
+        return "?"
+    if len(words) > 1 and words[1] in known[words[0]]:
+        return f"{words[0]} {words[1]}"
+    return words[0]
 
 
 def journal(limit: int = JOURNAL_ROWS) -> list[dict]:
@@ -134,29 +195,42 @@ def journal(limit: int = JOURNAL_ROWS) -> list[dict]:
                 continue
             if not isinstance(r, dict):
                 continue
-            row = {"at": r.get("at"), "command": r.get("command"), "ok": r.get("ok"), "exit": r.get("exit"),
-                   "duration_s": r.get("duration_s"), "error": _error_code(r.get("error"))}
+            row = {"at": _plain(r.get("at")), "command": command_name(r.get("command")),
+                   "ok": r.get("ok") if isinstance(r.get("ok"), bool) else None,
+                   "exit": r.get("exit") if isinstance(r.get("exit"), int) else None,
+                   "duration_s": r.get("duration_s") if isinstance(r.get("duration_s"), (int, float)) else None,
+                   "error": _error_code(r.get("error"))}
             if r.get("run_id"):
-                row["run_id"] = r["run_id"]
+                row["run_id"] = _plain(r["run_id"])
             rows.append(row)
     return rows[-limit:]
 
 
+def _plain(v, limit: int = 60):
+    """时间、编号、任务名这类短字样：不是这个形状的不带（里面不该有空格和中文）。"""
+    return v if isinstance(v, str) and len(v) <= limit and re.fullmatch(r"[\w.:+-]+", v, re.ASCII) else None
+
+
 def last_daily() -> dict | None:
-    """最近一次日常的骨架：每一项成败和错误代码。没跑过 → None。"""
+    """最近一次日常的骨架：每一项成败和错误代码。没跑过、报告读不懂 → None（不因为它起草不了）。"""
     try:
         reports = sorted(r for r in paths.REPORTS.glob("*.json") if re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", r.stem))
-    except OSError:
+        if not reports:
+            return None
+        d = common.read_json(reports[-1])
+        if not isinstance(d, dict):
+            return None
+        tasks = d.get("tasks") if isinstance(d.get("tasks"), list) else []
+        failed = d.get("failed") if isinstance(d.get("failed"), list) else []
+        handoff = d.get("handoff") if isinstance(d.get("handoff"), dict) else {}
+        return {"run_id": _plain(d.get("run_id")), "trigger": _plain(d.get("trigger")), "status": _plain(d.get("status")),
+                "ok": d.get("ok") if isinstance(d.get("ok"), bool) else None,
+                "started_at": _plain(d.get("started_at")), "finished_at": _plain(d.get("finished_at")),
+                "tasks": [{"task": _plain(t.get("task")), "ok": t.get("ok") if isinstance(t.get("ok"), bool) else None,
+                           "code": _plain(t.get("code"))} for t in tasks if isinstance(t, dict)],
+                "failed": [x for x in (_plain(f) for f in failed) if x], "handoff_task": _plain(handoff.get("task"))}
+    except Exception:                                   # noqa: BLE001 - 可有可无的诊断信息
         return None
-    if not reports:
-        return None
-    d = common.read_json(reports[-1]) or {}
-    tasks = [{"task": t.get("task"), "ok": t.get("ok"), "code": t.get("code")}
-             for t in d.get("tasks") or [] if isinstance(t, dict)]
-    handoff = d.get("handoff") if isinstance(d.get("handoff"), dict) else None
-    return {"run_id": d.get("run_id"), "trigger": d.get("trigger"), "status": d.get("status"), "ok": d.get("ok"),
-            "started_at": d.get("started_at"), "finished_at": d.get("finished_at"), "tasks": tasks,
-            "failed": d.get("failed"), "handoff_task": handoff.get("task") if handoff else None}
 
 
 def broken_sources() -> list[dict]:
@@ -185,17 +259,60 @@ def maa_log_tail(lines: int = MAA_LOG_LINES) -> str | None:
 # --- 草稿 ------------------------------------------------------------------------------------
 
 def _read_text(path: str, what: str, limit: int) -> str:
+    """agent 写的文本文件。必须是 UTF-8：别的编码（PowerShell 的 `>` 写出的 UTF-16）读出来脱敏认不出任何东西，直接拒绝。
+    `private/` 下只收 `private/feedback/` 里的：账号数据、偏好、目标、凭据不能当会话记录交上来。"""
     p = Path(path).expanduser()
     try:
-        text = p.read_text(encoding="utf-8", errors="replace")
+        real = p.resolve()
+        inside_private = real.is_relative_to(paths.PRIVATE.resolve())
+        allowed = real.is_relative_to(root().resolve())
+    except OSError:
+        inside_private = allowed = False
+    if inside_private and not allowed:
+        raise CliError("bad_file", f"{what}不能是 private/ 下别的文件（{path}）", exit=BAD_REQUEST,
+                       hint="把要交的文字写成 private/feedback/ 下的一个新文件")
+    try:
+        text = fs.read_text_utf8(p)
+    except fs.BadEncoding:
+        raise CliError("bad_file", f"{what}（{path}）不是 UTF-8 编码", exit=BAD_REQUEST,
+                       hint="存成 UTF-8 再试（Windows 上别用 PowerShell 的 > / Out-File / Set-Content 写）") from None
     except OSError as e:
         raise CliError("bad_file", f"读不了{what}（{path}）：{type(e).__name__}", exit=BAD_REQUEST) from None
+    if "\x00" in text:
+        raise CliError("bad_file", f"{what}（{path}）不是文本文件", exit=BAD_REQUEST)
     if len(text) > limit:
         raise CliError("too_long", f"{what}有 {len(text)} 个字，最多 {limit}", exit=BAD_REQUEST,
                        hint="只留和这个问题有关的那一段")
     if not text.strip():
         raise CliError("bad_file", f"{what}（{path}）是空的", exit=BAD_REQUEST)
     return text
+
+
+def _user_text(args, limit: int = MAX_TEXT) -> str | None:
+    """`--text` 或 `--text-file`（用户的原话）；都没给 → None。"""
+    if getattr(args, "text", None) is not None and getattr(args, "text_file", None):
+        raise CliError("bad_arguments", "--text 和 --text-file 只写一个", exit=BAD_REQUEST)
+    if getattr(args, "text_file", None):
+        return _read_text(args.text_file, "用户的原话", limit).strip()
+    if getattr(args, "text", None) is None:
+        return None
+    text = args.text.strip()
+    if not text:
+        raise CliError("bad_arguments", "用户的反馈原话不能是空的", exit=BAD_REQUEST)
+    if len(text) > limit:
+        raise CliError("too_long", f"用户的原话有 {len(text)} 个字，最多 {limit}", exit=BAD_REQUEST)
+    return text
+
+
+def _masks(values) -> list[str]:
+    out = []
+    for m in values or []:
+        m = m.strip()
+        if len(m) < 2:
+            raise CliError("bad_arguments", f"--mask 的字样至少两个字（{m!r} 太短，会把正文换得面目全非）", exit=BAD_REQUEST,
+                           hint="把带着它的那句话改写掉，或者写长一点的字样")
+        out.append(m)
+    return out
 
 
 def _shot(path: str) -> Path:
@@ -211,8 +328,10 @@ def _shot(path: str) -> Path:
 
 
 def bundle_files(d: Path) -> list[Path]:
+    """要上传的文件：只有程序自己放进 bundle/ 的那几种名字（别的文件——.DS_Store、编辑器的临时文件——不算，也不上传）。"""
     b = d / "bundle"
-    return sorted(p for p in b.rglob("*") if p.is_file())
+    names = [INFO, SESSION, RAW, MAA_LOG, *(f"{SHOT_DIR}/{i}.png" for i in range(1, MAX_SHOTS + 1))]
+    return [b / n for n in sorted(names) if (b / n).is_file() and not (b / n).is_symlink()]
 
 
 def digest(d: Path) -> str:
@@ -235,25 +354,38 @@ def pack(d: Path) -> bytes:
     return buf.getvalue()
 
 
-def _write_bundle(d: Path, info: dict, texts: dict[str, str | None], masks: list[str]) -> dict:
-    """把 info 和几段文字脱敏后写进 bundle/（texts 里值是 None 的文件删掉）。返回每一类换了几处。"""
+def _write_bundle(d: Path, info: dict, texts: dict[str, str | None], masks: list[str]) -> Scrubber:
+    """把 info 和几段文字脱敏后写进 bundle/（texts 里值是 None 的文件删掉）。
+    info 里只有文字内容过脱敏（原话、harness、模型、程序收集的）；编号、类别、时间和联系方式原样。"""
     b = d / "bundle"
     b.mkdir(parents=True, exist_ok=True)
     scrub = Scrubber(masks)
-    fs.atomic_write_text(b / INFO, json.dumps(scrub.apply_json(info), ensure_ascii=False, indent=1) + "\n")
+    clean = dict(info)
+    for key in ("text", "harness", "model", "auto"):
+        clean[key] = scrub.apply_json(info.get(key))
+    fs.atomic_write_text(b / INFO, json.dumps(clean, ensure_ascii=False, indent=1) + "\n")
     for name, text in texts.items():
         if text is None:
             (b / name).unlink(missing_ok=True)
         else:
             fs.atomic_write_text(b / name, scrub.apply(text))
-    return scrub.counts
+    return scrub
+
+
+def _age_h(d: Path) -> float | None:
+    from datetime import datetime
+    try:
+        made = datetime.fromisoformat(str(_state(d).get("created_at")))
+        return (common.now().astimezone() - made.astimezone()).total_seconds() / 3600
+    except (TypeError, ValueError):
+        return None
 
 
 def summary(d: Path) -> dict:
     """草稿的概况（`draft` / `show` / `redact` 都返回这个）：agent 照着它在对话里告诉用户要上传什么。"""
     st = _state(d)
     b = d / "bundle"
-    info = common.read_json(b / INFO) or {}
+    info = _info(d)
     parts = []
     for p in bundle_files(d):
         name = p.relative_to(b).as_posix()
@@ -262,31 +394,41 @@ def summary(d: Path) -> dict:
             part["chars"] = len(p.read_text(encoding="utf-8", errors="replace"))
         parts.append(part)
     size = len(pack(d))
-    auto = info.get("auto") or {}
+    auto = info.get("auto") if isinstance(info.get("auto"), dict) else {}
+    url = os.environ.get(URL_ENV) or URL
+    age = _age_h(d)
     out = {"id": st.get("id"), "status": st.get("status"), "digest": digest(d), "dir": common.rel(d),
            "upload_bytes": size, "too_big": size > MAX_BYTES, "max_bytes": MAX_BYTES, "parts": parts,
-           "includes": {"session": (b / SESSION).exists(), "raw_session": (b / RAW).exists(),
-                        "maa_log": (b / MAA_LOG).exists(),
-                        "shots": [p.name for p in sorted((b / SHOT_DIR).glob("*.png"))] if (b / SHOT_DIR).is_dir() else [],
+           "includes": {"session": (b / SESSION).is_file(), "raw_session": (b / RAW).is_file(),
+                        "maa_log": (b / MAA_LOG).is_file(),
+                        "shots": [p.name for p in bundle_files(d) if p.parent.name == SHOT_DIR],
                         "contact": bool(info.get("contact")),
                         "checks": len(auto.get("checks") or []), "journal": len(auto.get("journal") or []),
                         "last_daily": bool(auto.get("last_daily"))},
            "category": info.get("category"), "harness": info.get("harness"), "model": info.get("model"),
-           "scrubbed": st.get("scrubbed") or {}, "masks": len(st.get("masks") or []),
-           "url": os.environ.get(URL_ENV) or URL}
+           "scrubbed": st.get("scrubbed") or {}, "not_scrubbed": st.get("not_scrubbed") or [],
+           "masks": len(st.get("masks") or []),
+           "url": url, "url_is_default": url == URL,
+           "expired": age is not None and age > MAX_AGE_H and st.get("status") != "sent"}
     if st.get("status") == "sent":
         out["sent_at"], out["server_id"] = st.get("sent_at"), st.get("server_id")
     return out
 
 
+def _new_id() -> str:
+    for _ in range(20):
+        fid = f"fb-{common.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+        if not (root() / fid).exists():
+            return fid
+    raise CliError("busy", "起草得太密了，稍后再试", exit=FAILED)
+
+
 def cmd_draft(args) -> dict:
     if args.category not in CATEGORIES:
         raise CliError("bad_arguments", f"--category 只能是 {' / '.join(CATEGORIES)}", exit=BAD_REQUEST)
-    text = (args.text or "").strip()
-    if not text:
-        raise CliError("bad_arguments", "--text（用户的反馈原话）不能是空的", exit=BAD_REQUEST)
-    if len(text) > MAX_TEXT:
-        raise CliError("too_long", f"--text 有 {len(text)} 个字，最多 {MAX_TEXT}", exit=BAD_REQUEST)
+    text = _user_text(args)
+    if text is None:
+        raise CliError("bad_arguments", "要写 --text-file（或 --text）：用户的反馈原话", exit=BAD_REQUEST)
     if not args.harness.strip() or not args.model.strip():
         raise CliError("bad_arguments", "--harness 和 --model 都要写（不确定就写\"不确定\"，不要猜）", exit=BAD_REQUEST)
     session = _read_text(args.session_file, "会话经过", MAX_TEXT)
@@ -294,25 +436,30 @@ def cmd_draft(args) -> dict:
     shots = [_shot(s) for s in args.shot or []]
     if len(shots) > MAX_SHOTS:
         raise CliError("bad_arguments", f"截图最多 {MAX_SHOTS} 张", exit=BAD_REQUEST)
+    masks = _masks(args.mask)
 
-    fid = f"fb-{common.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+    fid = _new_id()
     d = root() / fid
-    (d / "bundle").mkdir(parents=True)
-    info = {"schema": SCHEMA, "id": fid, "created_at": common.iso(), "category": args.category, "text": text,
-            "contact": (args.contact or "").strip() or None,
-            "harness": {"name": args.harness.strip(), "version": (args.harness_version or "").strip() or None,
-                        "env": harness_env()},
-            "model": {"name": args.model.strip(), "effort": (args.effort or "").strip() or None},
-            "auto": {"environment": environment(), "checks": None if args.no_checks else checks(),
-                     "journal": journal(), "last_daily": last_daily(), "sources": broken_sources()}}
-    texts = {SESSION: session, RAW: raw, MAA_LOG: maa_log_tail() if args.maa_log else None}
-    masks = [m for m in args.mask or [] if m.strip()]
-    counts = _write_bundle(d, info, texts, masks)
-    if shots:
-        (d / "bundle" / SHOT_DIR).mkdir()
-        for i, s in enumerate(shots, 1):
-            shutil.copyfile(s, d / "bundle" / SHOT_DIR / f"{i}.png")
-    _save_state(d, {"id": fid, "status": "draft", "created_at": info["created_at"], "masks": masks, "scrubbed": counts})
+    try:
+        (d / "bundle").mkdir(parents=True)
+        info = {"schema": SCHEMA, "id": fid, "created_at": common.iso(), "category": args.category, "text": text,
+                "contact": (args.contact or "").strip() or None,
+                "harness": {"name": args.harness.strip(), "version": (args.harness_version or "").strip() or None,
+                            "env": harness_env()},
+                "model": {"name": args.model.strip(), "effort": (args.effort or "").strip() or None},
+                "auto": {"environment": environment(), "checks": None if args.no_checks else checks(),
+                         "journal": journal(), "last_daily": last_daily(), "sources": broken_sources()}}
+        texts = {SESSION: session, RAW: raw, MAA_LOG: maa_log_tail() if args.maa_log else None}
+        scrub = _write_bundle(d, info, texts, masks)
+        if shots:
+            (d / "bundle" / SHOT_DIR).mkdir()
+            for i, s in enumerate(shots, 1):
+                shutil.copyfile(s, d / "bundle" / SHOT_DIR / f"{i}.png")
+        _save_state(d, {"id": fid, "status": "draft", "created_at": info["created_at"], "masks": masks,
+                        "scrubbed": scrub.counts, "not_scrubbed": scrub.skipped})
+    except BaseException:                               # 起草到一半出错：不留半截的草稿
+        shutil.rmtree(d, ignore_errors=True)
+        raise
     out = summary(d)
     out["hint"] = ("在对话里给用户看要上传什么（用户的话和会话经过贴全文，别的各说一句），用户说可以再 "
                    f"maapilot feedback send {fid} --digest {out['digest']}")
@@ -327,7 +474,7 @@ def cmd_show(args) -> dict:
         if name is None:
             raise CliError("bad_arguments", f"--part 只能是 {' / '.join(PART_NAMES)}", exit=BAD_REQUEST)
         p = d / "bundle" / name
-        if not p.exists():
+        if not p.is_file():
             raise CliError("no_part", f"这份草稿里没有 {args.part}", exit=BAD_REQUEST)
         text = p.read_text(encoding="utf-8", errors="replace")
         start = max(0, args.offset or 0)
@@ -343,32 +490,33 @@ def cmd_redact(args) -> dict:
     if st.get("status") == "sent":
         raise CliError("already_sent", "这份反馈已经发出去了，改不了", exit=BAD_REQUEST)
     b = d / "bundle"
-    info = common.read_json(b / INFO) or {}
+    info = _info(d)
     for r in args.remove or []:
         if r not in REMOVABLE:
             raise CliError("bad_arguments", f"--remove 只能是 {' / '.join(REMOVABLE)}", exit=BAD_REQUEST)
     removed = set(args.remove or [])
-    if args.text is not None:
-        if not args.text.strip() or len(args.text) > MAX_TEXT:
-            raise CliError("bad_arguments", f"--text 不能是空的，最多 {MAX_TEXT} 个字", exit=BAD_REQUEST)
-        info["text"] = args.text.strip()
+    if "raw-session" in removed and args.raw_session_file:
+        raise CliError("bad_arguments", "--remove raw-session 和 --raw-session-file 只写一个", exit=BAD_REQUEST)
+    text = _user_text(args)
+    if text is not None:
+        info["text"] = text
     if "contact" in removed:
         info["contact"] = None
 
     def current(name: str) -> str | None:
-        return (b / name).read_text(encoding="utf-8", errors="replace") if (b / name).exists() else None
+        return (b / name).read_text(encoding="utf-8", errors="replace") if (b / name).is_file() else None
     texts = {SESSION: _read_text(args.session_file, "会话经过", MAX_TEXT) if args.session_file else current(SESSION),
              RAW: None if "raw-session" in removed else
              (_read_text(args.raw_session_file, "原始会话记录", MAX_RAW) if args.raw_session_file else current(RAW)),
              MAA_LOG: None if "maa-log" in removed else current(MAA_LOG)}
-    masks = list(dict.fromkeys([*(st.get("masks") or []), *[m for m in args.mask or [] if m.strip()]]))
-    counts = _write_bundle(d, info, texts, masks)
+    masks = list(dict.fromkeys([*(st.get("masks") or []), *_masks(args.mask)]))
+    scrub = _write_bundle(d, info, texts, masks)
     if "shots" in removed:
         shutil.rmtree(b / SHOT_DIR, ignore_errors=True)
     total = dict(st.get("scrubbed") or {})
-    for k, v in counts.items():
+    for k, v in scrub.counts.items():
         total[k] = total.get(k, 0) + v
-    st.update(masks=masks, scrubbed=total)
+    st.update(masks=masks, scrubbed=total, not_scrubbed=scrub.skipped)
     _save_state(d, st)
     return summary(d)
 
@@ -376,18 +524,19 @@ def cmd_redact(args) -> dict:
 def cmd_list(args) -> dict:
     out = []
     try:
-        dirs = sorted(p for p in root().iterdir() if ID_RE.fullmatch(p.name) and (p / "state.json").exists())
+        dirs = sorted(p for p in root().iterdir() if p.is_dir() and ID_RE.fullmatch(p.name))
     except OSError:
         dirs = []
     for d in dirs:
         st = _state(d)
-        out.append({k: st.get(k) for k in ("id", "status", "created_at", "sent_at", "server_id")})
+        row = {k: st.get(k) for k in ("status", "created_at", "sent_at", "server_id")}
+        out.append({"id": d.name, **row, **({"status": "broken"} if _broken(d) else {})})
     return {"drafts": out}
 
 
 def cmd_discard(args) -> dict:
-    d = draft_dir(args.id)
-    if _state(d).get("status") == "sent":
+    d = _dir(args.id)                                   # 坏了的草稿也能丢
+    if _state(d).get("status") == "sent" and not _broken(d):
         raise CliError("already_sent", "已经发出去的留着备查（里面有反馈编号）", exit=BAD_REQUEST)
     shutil.rmtree(d)
     return {"discarded": args.id}
@@ -416,6 +565,9 @@ def multipart(manifest: dict, bundle: bytes) -> tuple[bytes, str]:
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+REDRAFT = "这份草稿发不出去了：maapilot feedback discard 丢掉它，用同样的内容重新起草，给用户看过再发"
+
+
 def cmd_send(args) -> dict:
     from maapilot import version
     from maapilot.tools import confirm
@@ -433,11 +585,15 @@ def cmd_send(args) -> dict:
         raise CliError("draft_changed", "草稿和给用户看过的那一版不一样了，没有发", exit=BAD_REQUEST,
                        hint=f"maapilot feedback show {args.id}，把现在的内容重新给用户看，同意后带新的 --digest 再发",
                        data={"digest": now})
+    age = _age_h(d)
+    if age is not None and age > MAX_AGE_H:             # 服务器按编号里的日期拒收，重试多少次都一样
+        raise CliError("draft_expired", f"这份草稿是 {int(age)} 小时前起草的，放太久服务器不收了", exit=BAD_REQUEST,
+                       hint=REDRAFT)
     bundle = pack(d)
     if len(bundle) > MAX_BYTES:
         raise CliError("too_big", f"要上传的包有 {len(bundle)} 字节，最多 {MAX_BYTES}", exit=BAD_REQUEST,
                        hint="去掉截图或原始会话记录（maapilot feedback redact --remove …），重新给用户看过再发")
-    info = common.read_json(d / "bundle" / INFO) or {}
+    info = _info(d)
     manifest = {"schema": SCHEMA, "id": st["id"], "created_at": st.get("created_at"), "category": info.get("category"),
                 "maapilot": version.info().get("version"), "digest": now, "bytes": len(bundle),
                 "preview": " ".join(str(info.get("text") or "").split())[:PREVIEW_CHARS],    # 给开发者的通知用（脱敏后的原话开头）
@@ -448,7 +604,7 @@ def cmd_send(args) -> dict:
     headers = {"Content-Type": ctype, "User-Agent": f"maapilot/{manifest['maapilot']}", "X-MaaPilot-Feedback": str(SCHEMA)}
     try:
         status, resp = http_post(url, body, headers)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         raise CliError("network", f"连不上反馈服务器：{type(e).__name__}: {e}", exit=FAILED,
                        hint="草稿还在，检查网络后原样再发一次") from None
     try:
@@ -456,15 +612,26 @@ def cmd_send(args) -> dict:
     except ValueError:
         reply = {}
     reply = reply if isinstance(reply, dict) else {}
+    reason = reply.get("error") if isinstance(reply.get("error"), str) else None
+    data = {"status": status, "server_error": reason}
+    if status == 429 and reason == "daily_limit":
+        raise CliError("server_full", "反馈服务器今天收满了", exit=FAILED, data=data,
+                       hint="草稿还在，明天再发（两天内有效）；急的话告诉用户去 GitHub 提 issue")
     if status == 429:
-        raise CliError("rate_limited", "反馈发得太勤，服务器让等一会儿", exit=FAILED, hint="草稿还在，过一阵再发")
+        raise CliError("rate_limited", "反馈发得太勤，服务器让等一会儿", exit=FAILED, hint="草稿还在，过几分钟再发", data=data)
     if status == 413:
-        raise CliError("too_big", "服务器嫌这份反馈太大", exit=BAD_REQUEST,
+        raise CliError("too_big", "服务器嫌这份反馈太大", exit=BAD_REQUEST, data=data,
                        hint="去掉截图或原始会话记录，重新给用户看过再发")
+    if 400 <= status < 500 and reason:                  # 服务器看过、明确不收：原样重发没用
+        raise CliError("rejected", f"反馈服务器不收这份草稿（{reason}）", exit=BAD_REQUEST, hint=REDRAFT, data=data)
     if not 200 <= status < 300:
-        raise CliError("upload_failed", f"反馈服务器没收下（HTTP {status}）", exit=FAILED,
-                       hint="草稿还在，稍后再发；一直不行就告诉用户去 GitHub 提 issue", data={"status": status})
-    st.update(status="sent", sent_at=common.iso(), server_id=str(reply.get("id") or st["id"]))
+        raise CliError("upload_failed", f"反馈服务器没收下（HTTP {status}）", exit=FAILED, data=data,
+                       hint="草稿还在，稍后再发；一直不行就告诉用户去 GitHub 提 issue")
+    if reply.get("ok") is not True or reply.get("id") != st["id"]:
+        # 2xx 但不是服务器的回复：多半是要登录的 Wi-Fi、代理返回的网页。不能当成发出去了
+        raise CliError("upload_failed", "收到的不是反馈服务器的回复（网络可能被登录页或代理拦了），不能确定发出去没有", exit=FAILED,
+                       data=data, hint="草稿还在，换个网络或稍后原样再发一次（服务器已经收到的话会认出是同一份）")
+    st.update(status="sent", sent_at=common.iso(), server_id=st["id"])
     _save_state(d, st)
     return {"sent": True, "id": st["id"], "server_id": st["server_id"], "sent_at": st["sent_at"], "bytes": len(bundle)}
 
@@ -474,18 +641,19 @@ def register(sub) -> None:
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
 
     p = gs.add_parser("draft", help="收集、脱敏，存成本机的草稿（不上传）")
-    p.add_argument("--text", required=True, help="用户的反馈原话")
-    p.add_argument("--session-file", required=True, help="agent 写的会话经过（文本文件，自己先脱敏）")
+    p.add_argument("--text-file", help="用户的反馈原话（UTF-8 文本文件；原话里有引号、$ 这些符号也不怕）")
+    p.add_argument("--text", help="用户的反馈原话（短而且没有特殊符号时可以直接写）")
+    p.add_argument("--session-file", required=True, help="agent 写的会话经过（UTF-8 文本文件，自己先脱敏）")
     p.add_argument("--harness", required=True, help="agent 所在的 harness（如 Claude Code 桌面版）")
     p.add_argument("--model", required=True, help="agent 的模型（不确定就写\"不确定\"）")
     p.add_argument("--harness-version")
     p.add_argument("--effort", help="思考强度等设置（知道才写）")
     p.add_argument("--category", default="other", help=" / ".join(CATEGORIES))
-    p.add_argument("--contact", help="用户愿意留的联系方式（用户说了才带）")
+    p.add_argument("--contact", help="用户愿意留的联系方式（用户说了才带；原样上传，不脱敏）")
     p.add_argument("--raw-session-file", help="带工具调用细节的原始会话记录（用户同意才带；agent 自己整理、先脱敏）")
     p.add_argument("--shot", action="append", help="截图（private/ 下的 PNG；用户同意才带；可以写几次）")
     p.add_argument("--maa-log", action="store_true", help="带上最近一份 MAA 日志的末尾（用户同意才带）")
-    p.add_argument("--mask", action="append", help="另外要隐去的字样（原样匹配；可以写几次）")
+    p.add_argument("--mask", action="append", help="另外要隐去的字样（至少两个字；可以写几次）")
     p.add_argument("--no-checks", action="store_true", help="不跑环境检查")
     p.set_defaults(func=cmd_draft, command="feedback draft")
 
@@ -499,6 +667,7 @@ def register(sub) -> None:
     p.add_argument("id")
     p.add_argument("--mask", action="append")
     p.add_argument("--remove", action="append", help=" / ".join(REMOVABLE))
+    p.add_argument("--text-file")
     p.add_argument("--text")
     p.add_argument("--session-file")
     p.add_argument("--raw-session-file")
@@ -515,4 +684,3 @@ def register(sub) -> None:
     p = gs.add_parser("discard", help="丢掉一份没发的草稿")
     p.add_argument("id")
     p.set_defaults(func=cmd_discard, command="feedback discard")
-

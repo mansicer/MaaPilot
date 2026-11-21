@@ -22,7 +22,7 @@ def session(tmp_path, monkeypatch):
     monkeypatch.setattr(scrub, "known_values", lambda: [(str(tmp_path), "<家目录>", "路径"), ("博士甲", "<昵称>", "账号"),
                                                         ("alice", "<用户>", scrub.USERNAME)])
     f = tmp_path / "session.md"
-    f.write_text(f"用户说日常停了。我看了 {tmp_path}/private/log，昵称 博士甲，邮箱 a@b.com，alice 在 alice.example 上。\n",
+    f.write_text(f"用户说日常停了。我看了 {tmp_path}/private/log，昵称 博士甲，邮箱 a@b.com，alice 在 alice.top 上。\n",
                  encoding="utf-8")
     return f
 
@@ -44,10 +44,10 @@ def test_scrubber_replaces_known_values_and_shapes():
     s = scrub.Scrubber(masks=["张三"], known=[("/home/bob/proj", "<项目>", "路径"), ("/home/bob", "<家目录>", "路径"),
                                                ("bob", "<用户>", scrub.USERNAME), ("12345678", "<UID>", "账号")])
     out = s.apply("在 /home/bob/proj/private 和 /home/bob/.cache；uid 12345678；bob 说张三的邮箱是 x.y@mail.com；"
-                  "连 192.168.1.20:5555 和 emulator-5554；C:\\Users\\carol\\x；bobby 和 bob.example 不动")
+                  "连 192.168.1.20:5555 和 emulator-5554；C:\\Users\\carol\\x；bobby 和 bob.com 不动")
     assert "<项目>/private" in out and "<家目录>/.cache" in out and "<UID>" in out and "<已隐去>" in out
     assert "x.y@mail.com" not in out and "192.168.1.20" not in out and "emulator-5554" not in out and "carol" not in out
-    assert "bobby" in out and "bob.example" in out and " bob 说" not in out and "<用户> 说" in out
+    assert "bobby" in out and "bob.com" in out and " bob 说" not in out and "<用户> 说" in out
     assert s.counts["路径"] >= 3 and s.counts["账号"] == 1 and s.counts["指定的字样"] == 1
 
 
@@ -71,7 +71,7 @@ def test_draft_writes_only_locally_and_scrubs(capsys, session, tmp_path, monkeyp
     assert d["status"] == "draft" and d["includes"]["session"] and not d["includes"]["raw_session"]
     text = (bundle(d["id"]) / "session.md").read_text(encoding="utf-8")
     assert str(tmp_path) not in text and "博士甲" not in text and "a@b.com" not in text
-    assert "<家目录>/private/log" in text and "alice.example" in text and "<用户> 在" in text
+    assert "<家目录>/private/log" in text and "alice.top" in text and "<用户> 在" in text
     info = json.loads((bundle(d["id"]) / "feedback.json").read_text(encoding="utf-8"))
     assert info["text"] == "日常跑到一半停了" and info["harness"]["name"] == "Claude Code 桌面版"
     assert info["model"] == {"name": "claude-x", "effort": None}
@@ -175,12 +175,18 @@ def test_list_and_discard(capsys, session):
 # --- 发送 ------------------------------------------------------------------------------------
 
 class Server:
-    def __init__(self, status=200, reply=b'{"id": "srv-1"}'):
+    """假的服务器：默认像真的一样回 {"ok": true, "id": <清单里的编号>}；给了 reply 就回它。"""
+
+    def __init__(self, status=200, reply=None):
         self.status, self.reply, self.calls = status, reply, []
 
     def __call__(self, url, body, headers, timeout=60):
         self.calls.append((url, body, headers))
-        return self.status, self.reply
+        if self.reply is not None:
+            return self.status, self.reply
+        boundary = headers["Content-Type"].split("boundary=")[1].encode()
+        manifest = json.loads(body.split(b"--" + boundary)[1].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
+        return self.status, json.dumps({"ok": True, "id": manifest["id"]}).encode()
 
 
 def test_send_uploads_exactly_the_bundle(capsys, session, monkeypatch):
@@ -188,7 +194,7 @@ def test_send_uploads_exactly_the_bundle(capsys, session, monkeypatch):
     monkeypatch.setattr(feedback, "http_post", srv)
     d = draft(capsys, session)
     rc, env = run(capsys, "feedback", "send", d["id"], "--digest", d["digest"])
-    assert rc == 0 and env["data"]["server_id"] == "srv-1"
+    assert rc == 0 and env["data"]["server_id"] == d["id"]
     url, body, headers = srv.calls[0]
     assert url == feedback.URL and headers["X-MaaPilot-Feedback"] == "1"
     assert headers["Content-Type"].startswith("multipart/form-data; boundary=")
@@ -225,9 +231,19 @@ def test_send_refused_during_a_daily_run(capsys, session, monkeypatch):
     assert rc == 3 and env["error"]["code"] == "needs_user"
 
 
-@pytest.mark.parametrize("status,code,rc", [(429, "rate_limited", 1), (413, "too_big", 2), (500, "upload_failed", 1)])
-def test_send_failures_keep_the_draft(capsys, session, monkeypatch, status, code, rc):
-    monkeypatch.setattr(feedback, "http_post", Server(status=status, reply=b"nope"))
+@pytest.mark.parametrize("status,reply,code,rc", [
+    (429, b'{"ok": false, "error": "rate_limited"}', "rate_limited", 1),
+    (429, b'{"ok": false, "error": "daily_limit"}', "server_full", 1),
+    (413, b"nope", "too_big", 2),
+    (500, b"nope", "upload_failed", 1),
+    (400, b'{"ok": false, "error": "bad_id"}', "rejected", 2),             # 服务器明确不收：不能叫 agent 原样重发
+    (409, b'{"ok": false, "error": "id_taken"}', "rejected", 2),
+    (200, b"<html>please log in</html>", "upload_failed", 1),              # 要登录的 Wi-Fi 返回的网页不算发出去了
+    (200, b'{"ok": true, "id": "someone-else"}', "upload_failed", 1),
+    (200, b'{"id": "x"}', "upload_failed", 1),
+])
+def test_send_failures_keep_the_draft(capsys, session, monkeypatch, status, reply, code, rc):
+    monkeypatch.setattr(feedback, "http_post", Server(status=status, reply=reply))
     d = draft(capsys, session)
     got, env = run(capsys, "feedback", "send", d["id"], "--digest", d["digest"])
     assert got == rc and env["error"]["code"] == code
@@ -250,3 +266,181 @@ def test_pack_is_stable(capsys, session):
     d = draft(capsys, session)
     dd = paths.PRIVATE / "feedback" / d["id"]
     assert feedback.pack(dd) == feedback.pack(dd) and feedback.digest(dd) == d["digest"]
+
+
+# --- 审核里找出来的问题 ----------------------------------------------------------------------
+
+def test_non_utf8_files_are_refused_not_passed_through(capsys, session, tmp_path):
+    bad = tmp_path / "s16.md"
+    bad.write_text("路径 /home/x 邮箱 a@b.com\n", encoding="utf-16")              # PowerShell 的 > 写出来的就是这样
+    rc, env = run(capsys, "feedback", "draft", "--text", "x", "--session-file", str(bad), "--harness", "h", "--model", "m")
+    assert rc == 2 and env["error"]["code"] == "bad_file" and "UTF-8" in env["error"]["message"]
+    assert not (paths.PRIVATE / "feedback").exists() or not list((paths.PRIVATE / "feedback").iterdir())
+    bom = tmp_path / "bom.md"
+    bom.write_bytes(b"\xef\xbb\xbf" + "带 BOM 的\n".encode())
+    d = draft(capsys, bom)
+    assert (bundle(d["id"]) / "session.md").read_text(encoding="utf-8") == "带 BOM 的\n"
+
+
+def test_session_file_cannot_be_another_private_file(capsys, session):
+    paths.PRIVATE.mkdir(parents=True, exist_ok=True)
+    (paths.PRIVATE / "skland.json").write_text('{"token": "x"}', encoding="utf-8")
+    rc, env = run(capsys, "feedback", "draft", "--text", "x", "--session-file", str(paths.PRIVATE / "skland.json"),
+                  "--harness", "h", "--model", "m")
+    assert rc == 2 and env["error"]["code"] == "bad_file"
+    ok = paths.PRIVATE / "feedback" / "session-1.md"                         # private/feedback/ 下的可以
+    ok.parent.mkdir(parents=True, exist_ok=True)
+    ok.write_text("经过\n", encoding="utf-8")
+    assert draft(capsys, ok)["includes"]["session"]
+
+
+def test_short_names_are_scrubbed_and_one_char_is_reported():
+    s = scrub.Scrubber(masks=["阿米"], known=[("博士", "<昵称>", "账号"), ("li", "<用户>", scrub.USERNAME),
+                                              ("X", "<昵称>", "账号"), ("玩家#1234", "<昵称>", "账号"), ("玩家", "<昵称>", "账号")])
+    out = s.apply("博士和阿米在 li 的电脑上；list 和 alice 不动；玩家#1234 也叫 玩家；X 光")
+    assert "博士" not in out and "阿米" not in out and " li " not in out and "list" in out and "alice" in out
+    assert "玩家" not in out and "X 光" in out and s.skipped == ["账号"]
+    assert scrub.Scrubber(known=[("阿米", "<昵称>", "账号")]).apply('{"n": "\\u963f\\u7c73"}') == '{"n": "<昵称>"}'
+
+
+def test_one_char_mask_is_refused(capsys, session):
+    rc, env = run(capsys, "feedback", "draft", "--text", "x", "--session-file", str(session), "--harness", "h",
+                  "--model", "m", "--mask", "张")
+    assert rc == 2 and env["error"]["code"] == "bad_arguments"
+
+
+def test_email_is_recognised_before_the_username_and_paths_ignore_case():
+    s = scrub.Scrubber(known=[("alice", "<用户>", scrub.USERNAME), ("C:\\Users\\Alice\\proj", "<项目>", scrub.PATH)])
+    out = s.apply("alice@alice-family.org；c:\\users\\alice\\proj\\x；ALICE 的 alice.log；alice.top")
+    assert "alice-family" not in out and out.startswith("<邮箱>；<项目>\\x；<用户> 的 <用户>.log；alice.top")
+
+
+def test_git_bash_and_wsl_paths_and_other_shapes():
+    out = scrub.Scrubber(known=[]).apply("/c/Users/carol/a /mnt/d/Users/dave/b /home/erin/c 13812345678 "
+                                         "aa:bb:cc:dd:ee:ff MAA v5.12.3.1 999.1.1.1 10.0.0.5")
+    for gone in ("carol", "dave", "erin", "13812345678", "aa:bb:cc:dd:ee:ff", "10.0.0.5"):
+        assert gone not in out, gone
+    assert "v5.12.3.1" in out and "999.1.1.1" in out
+
+
+def test_scrubber_is_fast_on_long_runs():
+    import time
+    t = time.monotonic()
+    scrub.Scrubber(known=[]).apply("a" * 300_000 + " " + "0123456789abcdef" * 20_000)
+    assert time.monotonic() - t < 2
+
+
+def test_journal_command_never_carries_arguments(capsys, session):
+    paths.LOGS.mkdir(parents=True)
+    rows = [{"at": "2026-11-20T04:40:00+08:00", "command": "goals 阿米的秘密", "ok": False, "exit": 2},
+            {"at": "t2", "command": "gaols 13812345678", "ok": False, "exit": 2, "error": "乱写的 错误"},
+            {"at": "t3", "command": "maa fight", "ok": True, "exit": 0},
+            {"at": "t4", "command": "doctor", "ok": True, "exit": 0}]
+    (paths.LOGS / "2026-11-20.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                                                 encoding="utf-8")
+    d = draft(capsys, session)
+    raw = (bundle(d["id"]) / "feedback.json").read_text(encoding="utf-8")
+    assert [r["command"] for r in json.loads(raw)["auto"]["journal"]] == ["goals", "?", "maa fight", "doctor"]
+    assert "阿米的秘密" not in raw and "13812345678" not in raw and "乱写" not in raw
+
+
+def test_structural_fields_and_contact_are_not_scrubbed(capsys, session):
+    d = draft(capsys, session, "--mask", "bug", "--mask", "fb-", "--contact", "me@example.com")
+    info = json.loads((bundle(d["id"]) / "feedback.json").read_text(encoding="utf-8"))
+    assert info["category"] == "bug" and info["id"] == d["id"] and info["contact"] == "me@example.com"
+    assert info["schema"] == 1 and info["created_at"].startswith("20")
+
+
+def test_text_from_a_file_keeps_shell_characters(capsys, session, tmp_path):
+    t = tmp_path / "text.md"
+    t.write_text('他说"不行"，$(rm -rf) 和 `x`\n第二行\n', encoding="utf-8")
+    rc, env = run(capsys, "feedback", "draft", "--text-file", str(t), "--session-file", str(session),
+                  "--harness", "h", "--model", "m")
+    assert rc == 0
+    info = json.loads((bundle(env["data"]["id"]) / "feedback.json").read_text(encoding="utf-8"))
+    assert info["text"] == '他说"不行"，$(rm -rf) 和 `x`\n第二行'
+    rc, env = run(capsys, "feedback", "draft", "--session-file", str(session), "--harness", "h", "--model", "m")
+    assert rc == 2 and env["error"]["code"] == "bad_arguments"            # 原话必须有
+
+
+def test_malformed_report_does_not_block_a_draft(capsys, session):
+    paths.REPORTS.mkdir(parents=True)
+    (paths.REPORTS / "2026-11-20-0440.json").write_text('["not", "a", "dict"]', encoding="utf-8")
+    assert draft(capsys, session)["includes"]["last_daily"] is False
+    (paths.REPORTS / "2026-11-20-0441.json").write_text('{"tasks": "oops", "failed": 3, "run_id": "含 空格"}', encoding="utf-8")
+    d = draft(capsys, session)
+    info = json.loads((bundle(d["id"]) / "feedback.json").read_text(encoding="utf-8"))
+    assert info["auto"]["last_daily"]["tasks"] == [] and info["auto"]["last_daily"]["run_id"] is None
+
+
+def test_failed_draft_leaves_nothing_behind(capsys, session, monkeypatch):
+    def boom():
+        raise RuntimeError("x")
+    monkeypatch.setattr(feedback, "journal", boom)
+    rc, env = run(capsys, "feedback", "draft", "--text", "x", "--session-file", str(session), "--harness", "h", "--model", "m")
+    assert rc == 1 and not list((paths.PRIVATE / "feedback").iterdir())
+
+
+def test_stray_files_are_not_uploaded_and_do_not_change_the_digest(capsys, session, monkeypatch):
+    srv = Server()
+    monkeypatch.setattr(feedback, "http_post", srv)
+    d = draft(capsys, session)
+    (bundle(d["id"]) / ".DS_Store").write_bytes(b"junk")
+    (bundle(d["id"]) / "notes.txt").write_text("别的文件", encoding="utf-8")
+    rc, env = run(capsys, "feedback", "send", d["id"], "--digest", d["digest"])
+    assert rc == 0
+    boundary = srv.calls[0][2]["Content-Type"].split("boundary=")[1].encode()
+    blob = srv.calls[0][1].split(b"--" + boundary)[2].split(b"\r\n\r\n", 1)[1][:-2]
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        assert sorted(z.namelist()) == ["feedback.json", "session.md"]
+
+
+def test_broken_drafts_cannot_be_sent_but_can_be_discarded(capsys, session, monkeypatch):
+    monkeypatch.setattr(feedback, "http_post", lambda *a, **k: pytest.fail("不该发"))
+    d = draft(capsys, session)
+    (bundle(d["id"]) / "feedback.json").write_text("{not json", encoding="utf-8")
+    for cmd in (["send", d["id"], "--digest", d["digest"]], ["redact", d["id"], "--mask", "某某"], ["show", d["id"]]):
+        rc, env = run(capsys, "feedback", *cmd)
+        assert rc == 2 and env["error"]["code"] == "bad_draft", cmd
+    d2 = draft(capsys, session)
+    (paths.PRIVATE / "feedback" / d2["id"] / "state.json").write_text("garbage", encoding="utf-8")
+    rc, env = run(capsys, "feedback", "send", d2["id"], "--digest", d2["digest"])
+    assert rc == 2 and env["error"]["code"] == "bad_draft"
+    rc, env = run(capsys, "feedback", "list")
+    assert {x["id"]: x["status"] for x in env["data"]["drafts"]} == {d["id"]: "broken", d2["id"]: "broken"}
+    for fid in (d["id"], d2["id"]):
+        assert run(capsys, "feedback", "discard", fid)[0] == 0
+
+
+def test_old_drafts_are_refused_before_the_server_would(capsys, session, monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setattr(feedback, "http_post", lambda *a, **k: pytest.fail("不该发"))
+    d = draft(capsys, session)
+    real = feedback.common.now
+    monkeypatch.setattr(feedback.common, "now", lambda: real() + timedelta(hours=49))
+    rc, env = run(capsys, "feedback", "show", d["id"])
+    assert env["data"]["expired"] is True
+    rc, env = run(capsys, "feedback", "send", d["id"], "--digest", d["digest"])
+    assert rc == 2 and env["error"]["code"] == "draft_expired"
+
+
+def test_connection_dropped_mid_reply_is_a_network_error(capsys, session, monkeypatch):
+    import http.client
+
+    def dropped(*a, **k):
+        raise http.client.IncompleteRead(b"")
+    monkeypatch.setattr(feedback, "http_post", dropped)
+    d = draft(capsys, session)
+    rc, env = run(capsys, "feedback", "send", d["id"], "--digest", d["digest"])
+    assert rc == 1 and env["error"]["code"] == "network"
+
+
+def test_redact_conflicting_options_and_summary_flags(capsys, session, tmp_path, monkeypatch):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("x\n", encoding="utf-8")
+    d = draft(capsys, session, "--raw-session-file", str(raw))
+    assert d["url_is_default"] is True and d["expired"] is False and d["not_scrubbed"] == []
+    rc, env = run(capsys, "feedback", "redact", d["id"], "--remove", "raw-session", "--raw-session-file", str(raw))
+    assert rc == 2 and env["error"]["code"] == "bad_arguments"
+    monkeypatch.setenv(feedback.URL_ENV, "https://elsewhere.example/feedback")
+    assert run(capsys, "feedback", "show", d["id"])[1]["data"]["url_is_default"] is False

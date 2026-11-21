@@ -1034,12 +1034,12 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 | 命令 | 做什么 |
 |---|---|
-| `feedback draft --text <用户原话> --session-file <文件> --harness <名字> --model <型号> [--category bug\|experience\|idea\|other] [--harness-version V] [--effort E] [--contact C] [--raw-session-file <文件>] [--shot <png>]… [--maa-log] [--mask <字样>]… [--no-checks]` | 收集、脱敏，存成草稿 `private/feedback/<编号>/`。`--session-file` 是 agent 写的会话经过，`--raw-session-file` 是 agent 自己整理的带工具调用细节的原始记录（程序不读 harness 的会话文件）；`--shot` 只收 `private/` 下的 PNG，最多 4 张；`--maa-log` 带最近一份 maa-cli 日志的最后 200 行。`--raw-session-file`、`--shot`、`--maa-log`、`--contact` 用户同意才带 |
+| `feedback draft --text-file <文件> --session-file <文件> --harness <名字> --model <型号> [--category bug\|experience\|idea\|other] [--harness-version V] [--effort E] [--contact C] [--raw-session-file <文件>] [--shot <png>]… [--maa-log] [--mask <字样>]… [--no-checks]` | 收集、脱敏，存成草稿 `private/feedback/<编号>/`。`--text-file` 是用户的反馈原话（写成文件：原话里有引号、`$` 这些符号也不会被 shell 解释；短而没有特殊符号的可以用 `--text`）。文本文件都要是 UTF-8（别的编码拒绝：脱敏认不出里面的东西），`private/` 下只收 `private/feedback/` 里的。`--mask` 的字样至少两个字。`--contact` 原样上传、不脱敏。起草到一半出错不留半截的草稿。`--session-file` 是 agent 写的会话经过，`--raw-session-file` 是 agent 自己整理的带工具调用细节的原始记录（程序不读 harness 的会话文件）；`--shot` 只收 `private/` 下的 PNG，最多 4 张；`--maa-log` 带最近一份 maa-cli 日志的最后 200 行。`--raw-session-file`、`--shot`、`--maa-log`、`--contact` 用户同意才带 |
 | `feedback show <编号> [--part info\|session\|raw-session\|maa-log] [--offset N]` | 草稿的概况；`--part` 另给那一部分脱敏后的文字（`part: {name, chars, offset, text, more}`，一次 20000 字，`more` 为真就加 `--offset` 接着取） |
-| `feedback redact <编号> [--mask <字样>]… [--remove raw-session\|maa-log\|shots\|contact]… [--text <新原话>] [--session-file <文件>] [--raw-session-file <文件>]` | 改草稿：再隐去字样（原样匹配，对所有文字生效，记在本机的 `state.json` 里）、去掉某一部分、换掉文字。改完 `digest` 变了 |
+| `feedback redact <编号> [--mask <字样>]… [--remove raw-session\|maa-log\|shots\|contact]… [--text-file <文件>] [--text <新原话>] [--session-file <文件>] [--raw-session-file <文件>]` | 改草稿：再隐去字样（原样匹配，对所有文字生效，记在本机的 `state.json` 里）、去掉某一部分、换掉文字。改完 `digest` 变了 |
 | `feedback send <编号> --digest <digest>` | 上传。`--digest` 是给用户看过的那一版的 |
-| `feedback list` | `{drafts: [{id, status, created_at, sent_at, server_id}]}` |
-| `feedback discard <编号>` | 删掉一份没发的草稿（发过的留着） |
+| `feedback list` | `{drafts: [{id, status, created_at, sent_at, server_id}]}`；`status` 是 `draft` / `sent` / `broken`（文件坏了，只能 `discard`） |
+| `feedback discard <编号>` | 删掉一份没发的草稿（发过的留着；坏了的也能删） |
 
 `draft` / `show` / `redact` 的 `data`：
 
@@ -1050,38 +1050,52 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
  "includes": {"session": true, "raw_session": false, "maa_log": false, "shots": [], "contact": false,
               "checks": 12, "journal": 40, "last_daily": true},
  "category": "bug", "harness": {"name": "…", "version": null, "env": {…}}, "model": {"name": "…", "effort": null},
- "scrubbed": {"路径": 2, "邮箱": 1}, "masks": 0, "url": "https://maapilot.sicer.top/feedback"}
+ "scrubbed": {"路径": 2, "邮箱": 1}, "not_scrubbed": [], "masks": 0,
+ "url": "https://maapilot.sicer.top/feedback", "url_is_default": true, "expired": false}
 ```
 
-要上传的内容就是 `bundle/` 里的文件，一个字节不多：
+`not_scrubbed`：这台电脑上已知、但只有一个字所以没法换的值是哪几类（如 `["账号"]`：一个字的昵称）；不为空时 agent 自己把那个字从文字里改掉。
+`url_is_default` 为假：上传地址被环境变量改过，要告诉用户发到哪里。`expired` 为真：草稿起草超过 48 小时，服务器不收了，要重新起草。
+
+要上传的内容就是 `bundle/` 里程序自己放进去的那几种文件（别的文件不算、不上传）：
 
 - `feedback.json`：`{schema, id, created_at, category, text, contact, harness: {name, version, env}, model: {name, effort}, auto}`。
   `harness.env` 是环境变量里说明在哪个 harness 里的那些（`CLAUDE*`、`CODEX*`…）：`names` 只有名字，`values` 只有值不是个人信息的几个（入口、版本、思考强度）。
   `auto` 是程序收集的：`environment`（MaaPilot 版本和提交、系统、架构、Python、`setup_done`、`server`）、
   `checks`（`doctor --offline` 各项的 `name / ok / required / detail`，加上 maa-cli 和 MaaCore 版本）、
-  `journal`（最近 40 条命令记录的骨架：`at / command / ok / exit / duration_s / error`，`error` 只留错误代码或异常类型；**参数和结果摘要不带**）、
+  `journal`（最近 40 条命令记录的骨架：`at / command / ok / exit / duration_s / error`；`command` 只留命令行定义里有的命令名（参数写错时记下的词可能是参数，认不出就是 `?`），`error` 只留错误代码或异常类型；**参数和结果摘要不带**）、
   `last_daily`（最近一次日常每一项的 `task / ok / code` 和状态）、`sources`（格式出了问题的外部数据源）。
 - `session.md`、`session-raw.txt`、`maa-log.txt`、`shots/<n>.png`：带了才有。
 
 不在里面的：命令的参数和结果（货币数量、干员名）、目标、用户偏好、配置、森空岛的任何东西。
 
-**脱敏**（`maapilot/tools/scrub.py`，对 `bundle/` 里所有文字）：按这台电脑上的真实值原样替换——项目文件夹 → `<项目>`、家目录 → `<家目录>`、
-系统用户名 → `<用户>`（整词）、`emulator.address` → `<模拟器地址>`、森空岛的 uid / 昵称 → `<UID>` / `<昵称>`、`--mask` 指定的 → `<已隐去>`；
-再按形状替换邮箱、IPv4 地址、`/Users/<名字>` 和 `C:\Users\<名字>`、长得像 token 的一段。`scrubbed` 是每一类换了几处。图片不处理。
+**脱敏**（`maapilot/tools/scrub.py`，对 `bundle/` 里的文字；`feedback.json` 里只过文字内容——原话、harness、模型、程序收集的——编号、类别、时间和联系方式原样）：
+- 按这台电脑上的真实值换：项目文件夹 → `<项目>`、家目录 → `<家目录>`（连同正反斜杠、JSON 转义、Git Bash 的 `/c/…`、WSL 的 `/mnt/c/…` 几种写法，不分大小写）、
+  系统用户名 → `<用户>`（整词、不分大小写；后面跟着 `.top` `.com` 这类后缀的当域名不动）、`emulator.address` → `<模拟器地址>`、
+  森空岛的 uid / 昵称 → `<UID>` / `<昵称>`（昵称带 `#数字` 的，前半截也换）、`--mask` 指定的 → `<已隐去>`。
+  两个字起就换（非 ASCII 的另加 `\uXXXX` 转义的写法）；不到 4 个字符的纯 ASCII 字样按整词；一个字的换不了，记进 `not_scrubbed`。
+- 按形状换：邮箱（先于上面那些，免得用户名先被换掉只剩域名）、手机号、IPv4 和 MAC 地址（前面是字母的四段数字当版本号不动）、
+  `/Users/<名字>`、`/home/<名字>`、`C:\Users\<名字>`、长得像 token 的一段。
+- `scrubbed` 是每一类换了几处。图片不处理。
+
 这是兜底：agent 写会话记录时先脱敏，最后用户看过才发。
 
 **发送**：把 `bundle/` 打成 zip，`multipart/form-data` POST 到 `https://maapilot.sicer.top/feedback`（环境变量 `MAAPILOT_FEEDBACK_URL` 可以指到别处，开发用），
 两个字段：`manifest`（JSON：`schema, id, created_at, category, maapilot, digest, bytes, preview, sha256, files`；`preview` 是脱敏后的用户原话开头 80 个字，服务器通知开发者时显示）和 `bundle`（zip）；
-请求头 `X-MaaPilot-Feedback: 1`。服务器回 `{"id": "…"}`。成功后 `data`：`{sent, id, server_id, sent_at, bytes}`，草稿标成 `sent`。
+请求头 `X-MaaPilot-Feedback: 1`。服务器回 `{"ok": true, "id": "<同一个编号>"}` 才算发出去了（别的 2xx 回复不算）；同一份内容重发，服务器认得出、照样回成功。成功后 `data`：`{sent, id, server_id, sent_at, bytes}`，草稿标成 `sent`。
 
 | error.code | 退出码 | 什么情况 |
 |---|---|---|
 | `draft_changed` | 2 | `--digest` 和草稿现在的内容对不上（给用户看过之后改过）。没有发；`data.digest` 是现在的，重新给用户看 |
+| `draft_expired` | 2 | 草稿起草超过 48 小时：服务器按编号里的日期不收了。丢掉，用同样的内容重新起草，给用户看过再发 |
+| `rejected` | 2 | 服务器看过、明确不收（4xx，`data.server_error` 是它的原因，如 `bad_id`、`id_taken`）：原样重发没用，丢掉重新起草 |
 | `too_big` | 2 | 包超过 5 MB（或服务器回 413）。去掉截图或原始会话记录 |
-| `too_long` / `bad_file` | 2 | 文字太长（原话、会话经过 20 万字，原始记录 300 万字）、文件读不了或是空的、截图不在 `private/` 下 |
+| `too_long` / `bad_file` | 2 | 文字太长（原话、会话经过 20 万字，原始记录 300 万字）；文件读不了、是空的、不是 UTF-8 文本、是 `private/` 下别的文件；截图不在 `private/` 下 |
+| `bad_arguments` | 2 | 参数不对：类别不认识、原话没给或 `--text` 和 `--text-file` 都给了、`--harness` / `--model` 是空的、截图超过 4 张、`--mask` 不到两个字、`--part` / `--remove` 不认识、`--remove raw-session` 和 `--raw-session-file` 一起给 |
+| `bad_draft` | 2 | 草稿的文件坏了（状态文件或 `feedback.json` 读不了）：`discard` 后重新起草 |
 | `no_draft` / `bad_id` / `no_part` / `already_sent` | 2 | 没有这份草稿、编号不对、草稿里没有这一部分、已经发过 |
 | `needs_user` | 3 | 日常在跑或没收尾：不发，草稿留着 |
-| `network` / `upload_failed` / `rate_limited` | 1 | 连不上、服务器没收下（`data.status`）、发得太勤。草稿还在，稍后原样再发 |
+| `network` / `upload_failed` / `rate_limited` / `server_full` | 1 | 连不上或连接中断；服务器出错，或者收到的不是服务器的回复（要登录的 Wi-Fi、代理返回的网页：不算发出去了）；同一个 IP 发得太勤（过几分钟）；服务器当天收满了（明天）。草稿还在，稍后原样再发 |
 
 ## memory —— 用户偏好（不碰模拟器）
 
