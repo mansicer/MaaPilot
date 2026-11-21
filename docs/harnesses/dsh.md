@@ -1,14 +1,14 @@
 # DSH（DeepSeek Harness）
 
 在 [DSH](https://www.deepseek.com/en/harness/)（DeepSeek 的 agent harness，有桌面版和 `dsh web` 网页版）里用 MaaPilot 的做法。通用的规矩在 `AGENTS.md` 和 skills 里，这里只写 DSH 自己的。
-DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼容的改动；下面按这个版本的仓库和文档写，标"待实测"的还没在真机上验证过。
+DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼容的改动；下面按这个版本的仓库和文档写，有的做法还没在真机上验证过：照着做不通时告诉用户，按 `docs/harnesses/README.md` 的通用做法来。
 
 | 项 | 做法 |
 |---|---|
 | 说明文件 | `AGENTS.md`（DSH 直接读，从项目根目录读到工作目录）。`CLAUDE.md` 也会读，但 DSH 不认 `@AGENTS.md` 这种引入，会把它当成一行普通文字，不影响 |
 | skills | `.agents/skills/`（DSH 直接读，不用信任项目） |
 | 启动检查 | 没有启动钩子：`AGENTS.md` 让你开头自己跑一次 `maapilot doctor --brief` |
-| 权限 | 没有按命令的规则。**MaaPilot 的工作区要用"完全权限"**（输入框下面的权限选择）：默认的"工作区内修改"沙箱里，MAA 启动不了 adb、写不了自己的缓存目录（在项目外），每跑一次 MAA 都要用户批准一次越界，定时日常没人点就卡住（11-09 实测）。`guard allow` 不会弹确认，`private/skland.json` 也拦不住，靠你守 `AGENTS.md`；程序自己的对账照样在 |
+| 权限 | 没有按命令的规则。**MaaPilot 的工作区要用"完全权限"**（输入框下面的权限选择）：默认的"工作区内修改"沙箱里，MAA 启动不了 adb、写不了自己的缓存目录（在项目外），每跑一次 MAA 都要用户批准一次越界，定时日常没人点就卡住。`guard allow` 不会弹确认，`private/skland.json` 也拦不住，靠你守 `AGENTS.md`；程序自己的对账照样在 |
 | PATH | 没有钩子放 `.venv/bin`：`maapilot` 提示找不到时整个会话写 `.venv/bin/maapilot <命令>`。Windows 上 DSH 用 PowerShell 跑命令，写 `.venv\Scripts\maapilot.exe <命令>` |
 | 定时 | `schedule_create` / `schedule_list` / `schedule_edit`，每个时间点一个每天重复的定时，发回这个会话（见下）；DSH 要开着 |
 | 长命令 | 放后台（`run_in_background`），结束时 DSH 会叫醒你；前台最长 10 分钟，超时了会自动转成后台接着跑，不会被杀掉 |
@@ -21,12 +21,12 @@ DSH 还是开发者预览版（11-04 是 v0.2.2-rc.1），以后可能有不兼�
 - 打开的工作目录要是 MaaPilot 项目文件夹本身（项目根目录按最近的 `.git` 找）。
 - 请用户在这个工作区把权限切到"完全权限"，**最好在这个工作区跑第一条命令之前就切**（沙箱模式下跑命令会给项目文件夹加低完整性标签，见下「Windows：项目文件夹被加上低完整性标签」）。说清：不切的话每次跑 MAA 都要点同意，定时日常会卡住；切了以后 DSH 能读写电脑上的任何文件，所以只在 MaaPilot 这个工作区开，别的工作区保持默认。
 - Windows 上按下面那一节查一次项目文件夹有没有低完整性标签，有就请用户去掉。
-- 装运行环境、装 maa-cli 时，有的命令要在项目文件夹外写东西（例如下载缓存），DSH 会问要不要越界：告诉用户这是装运行环境、点同意。（待实测：具体哪几步会问）
+- 装运行环境、装 maa-cli 时，有的命令要在项目文件夹外写东西（例如下载缓存），DSH 会问要不要越界：告诉用户这是装运行环境、点同意。
 - 跟用户说清：到点时 DSH 要开着。桌面版关掉窗口只是缩到托盘，定时照样跑；从托盘退出 DSH，定时就停了。
 
 ## Windows：项目文件夹被加上低完整性标签（重要）
 
-DSH 的 Windows 沙箱要往工作区写东西时，会给工作区文件夹一次加三样：沙箱身份（`S-1-4-…`）的修改权限、`Everyone` 不许删子项、**低完整性（Low）标签**（DSH 代码里的 `grantWrite`；11-09 实测）。
+DSH 的 Windows 沙箱要往工作区写东西时，会给工作区文件夹一次加三样：沙箱身份（`S-1-4-…`）的修改权限、`Everyone` 不许删子项、**低完整性（Low）标签**（DSH 代码里的 `grantWrite`）。
 之后切成"完全权限"，标签也还留在文件夹上。Windows 会让从带"低"标签的文件夹里启动的程序都以低完整性运行，所以项目里的 `.venv` Python、`maa.exe` 都写不了项目外普通权限的地方：
 - MAA 启动时写 `%LOCALAPPDATA%\loong\maa\cache\StageActivityV2.json` 失败（`os error 5`，拒绝访问），`maa` 命令全部退出码 1；
 - **不只 DSH**：别的 harness（Claude Code、Codex……）在这台电脑上跑 MaaPilot 也一样失败，包括它们的定时日常。
@@ -64,15 +64,3 @@ DSH 的每天重复定时不过期、不推迟，所以**每个时间点建一�
 ## 其他
 
 - 用户偏好写进 `private/memory/`（`AGENTS.md`「用户偏好」），DSH 的记忆功能不用。
-
-## 实测
-
-- 11-09（DSH 0.2.2-rc.1，Windows PowerShell 5.1，没装 pwsh 7）：在项目文件夹里跑一次 headless，会话记录里 `AGENTS.md` 全文注入（`CLAUDE.md` 也注入了），10 个 maapilot skills 都加载了，默认模型 `deepseek-flash`。
-  `dsh web` 卡在"预览版说明"弹窗（点继续报保存不了确认状态，重启也一样）；命令行版不共用桌面版的 DeepSeek 账号登录。
-- 待实测（桌面版）：
-  - 桌面版的真实对话里 `/maapilot-setup` 能不能直接用；
-  - PowerShell 里 `.venv\Scripts\maapilot.exe` 能直接跑、中文输出不乱码；
-  - 装运行环境、`adb` 连模拟器时哪些命令要越界、会不会被沙箱挡住；
-  - 读截图；`daily run` 放后台、结束时叫醒；
-  - 每天重复的定时按时发回这个会话；DSH 退出再打开后的补发；
-  - 真跑一次完整的定时日常。

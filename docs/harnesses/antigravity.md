@@ -41,17 +41,3 @@ Antigravity 的 `schedule` 工具提供两类参数：`DurationSeconds`（一次
 
 - 用户偏好写进 `private/memory/`（`AGENTS.md`「用户偏好」），不要只留在对话上下文或 Antigravity 个人记忆里，确保换用 Claude Code / Codex 时仍能共用。
 - 在 Antigravity 对话中查看 `private/shots/` 截图后，需同时读取命令输出的 JSON 与图片内容核对结果。
-
-## 实测
-
-- 2026-11-16（Windows 11 + 安卓模拟器实机验证，当前仍为实验支持）：
-  - 命令执行与看图：通过 `.venv\Scripts\maapilot.exe` 跑通 `doctor`（`ok_all: true`）、`screen shot` + `read_file` 看图识界面、`maa startup`、`state depot`、`state box`、`copilot find` / `show` / `strip`、`news list` / `told`。
-  - 后台长命令与手动完整流程：`run_command`（`WaitMsBeforeAsync: 10000`）运行完整手动 `daily run`（含 `startup`、`recruit`、`infrast`、`mall`、`farm` 连战、`award`）及 `maa copilot`（自动编队并三星通关活动关）后，均自动唤醒会话完成 `guard check` 与 `daily done` 收尾。
-- 2026-11-20（Windows 11 + 安卓模拟器实机验证）：
-  - 工作区自动发现与启动检查：将仓库根目录设为 Active Workspace 开启新会话后，自动加载根目录 `AGENTS.md` 与 `.agents/skills/` 下全部 10 个 `maapilot-*` 技能；跑通 `doctor --brief`、完整 `doctor`（全 16 项检查 `ok_all: true`）与 `update check`。
-  - 守护定时自动唤醒与完整定时日常：通过 `schedule`（`CronExpression`、`IsDaemon: true`、`ExactTiming: true`）注册定时任务并经 `manage_task`（`list`）核对后结束本轮进入空闲状态；到点准时自动唤醒会话，后台执行完整 `daily run --trigger schedule`（含 `startup`、`recruit`、`infrast`、`mall`、`annihilation`、`box`、`farm`、`award`）并在完成后自动唤醒，随后经 `input home` + `read_file` 看首页截图、`guard check` 对账与 `daily done` 收尾，最后用 `manage_task`（`kill` / `list`）删除测试定时并确认清零。
-  - 重启限制确认：确认 Antigravity 服务端重启后会停止已有的后台定时任务，不会自动恢复或补发。
-- 待实测：
-  - 全新未初始化环境下的 `/maapilot-setup` 首句初始化流程；
-  - 多日连续运行的稳定性，以及电脑睡眠唤醒后守护定时的表现；
-  - macOS 平台的实机验证。

@@ -11,7 +11,7 @@ from maapilot.cliutil import CliError
 
 
 def cmd_rules(args):
-    """生成（或 --check 只核对）.claude/settings.json 的权限、.codex/rules/maapilot.rules、docs/cli.md 里抄的设置。"""
+    """生成（或 --check 只核对）.claude/settings.json 的权限、.codex/rules/maapilot.rules、docs/cli-dev.md 里抄的设置。"""
     from maapilot import policy
     root = Path(args.root) if args.root else paths.ROOT
     files = [{"path": p.as_posix(), "changed": now != want} for p, now, want in policy.generated(root)]

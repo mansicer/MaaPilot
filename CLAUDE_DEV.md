@@ -22,9 +22,11 @@
 - **一个账号只在一台电脑上定时跑。** 两台会抢着登录（互相挤下线），一台花的合成玉还会让另一台的对账以为被偷偷花了而停机。setup 时问清。
 
 ## 项目
-- 命令契约：`docs/cli.md`（每个命令的参数、输出、错误码、`private/` 文件、配置项）。
+- 命令契约：`docs/cli.md`（每个命令的参数、输出、错误码、`private/` 文件、配置项），用户的 agent 也读。
+  开发用的内容另放两个文件，用户的 agent 不读：`docs/cli-dev.md`（权限规则怎么生成、开发用的命令、反馈的上传格式）、`docs/harness-dev.md`（接新 harness 要改哪些文件、各 harness 的验证记录）。
+  给 agent 读的文档（`AGENTS.md`、skills、`docs/cli.md`、`docs/harnesses/`）只写做法：不写"哪天测过""待实测"这类开发记录，测出来 agent 要知道的结论写成做法或事实。
 - 系统功能交给 harness（设计哲学第 1 条，用户 10-20 定）：定时、叫醒会话、通知用户都用 agent 所在 harness 自己的（定时任务），
-  程序不装系统定时任务、不无头叫起 agent、不往会话里推消息、不发系统通知 / webhook。各 harness 的做法和实测各写一个文件（`docs/harnesses/<名字>.md`），`AGENTS.md` 和 skills 只写通用的；接新 harness 要改哪些文件见 `docs/harnesses/README.md`「接一个新的 harness」。
+  程序不装系统定时任务、不无头叫起 agent、不往会话里推消息、不发系统通知 / webhook。各 harness 的做法各写一个文件（`docs/harnesses/<名字>.md`），`AGENTS.md` 和 skills 只写通用的；接新 harness 要改哪些文件、各 harness 的验证记录见 `docs/harness-dev.md`。
 - 目录：
 
 ```
@@ -39,7 +41,8 @@ MaaPilot/
   templates/config.yaml   配置模板
   .tools/                 项目自己下载的 maa-cli、adb（不入库，`maapilot tools install`）
   private/                用户数据（不入库）：config.yaml、goals.md、快照、日志、汇报、用户偏好
-  docs/                   命令说明（cli.md）；各 harness 的说明（harnesses/：README.md 通用，<名字>.md 各一份）
+  docs/                   命令说明（cli.md）；各 harness 的说明（harnesses/：README.md 通用，<名字>.md 各一份）；
+                          开发文档（cli-dev.md、harness-dev.md，用户的 agent 不读）
   templates/<harness>/    要用户改 harness 自己配置时的片段（有才建）
 ```
 
@@ -50,7 +53,7 @@ MaaPilot/
 - 检查：`ruff check`、`mypy`（装 `.[dev]` 后有；规则和 mypy 管的文件在 `pyproject.toml`，mypy 先只管对账、锁、权限规则、系统兼容层）。CI 都跑。
 - 依赖：改了 `pyproject.toml` 的依赖要 `uv lock` 更新 `uv.lock`（CI 用 `uv sync --locked`，对不上会失败）。
   用户那边的安装和自动更新还是 `pip install -e .`，不读锁文件。
-- **权限规则只改 `maapilot/policy.py`**，再跑 `maapilot dev rules` 生成 `.claude/settings.json` 的 `permissions`、`.codex/rules/maapilot.rules` 和 docs/cli.md 里抄的设置；
+- **权限规则只改 `maapilot/policy.py`**，再跑 `maapilot dev rules` 生成 `.claude/settings.json` 的 `permissions`、`.codex/rules/maapilot.rules` 和 docs/cli-dev.md 里抄的设置；
   这几处不要手改（`maapilot dev rules --check`、`tests/test_policy.py` 会发现）。
   现在只留两条（10-20 用户定，开发后期再收）：`guard allow` 询问、`private/skland.json` 拒绝读写；`maapilot` 整个放行，加新命令不用改规则、不用重新生成。
   以后加例外写进 `policy.COMMANDS`（例外写的命令得真有，`test_exceptions_name_real_commands`）。

@@ -3,7 +3,7 @@
 生成的文件（入库，不要手改；改规则改这里，再跑 `maapilot dev rules`，`--check` 核对）：
 - `.claude/settings.json` 的 `permissions`（Claude Code；文件里别的部分如 hooks 原样保留）；
 - `.codex/rules/maapilot.rules`（Codex，Starlark 的 `prefix_rule`，整份生成）；
-- `docs/cli.md`「Claude Code 权限设置」里抄的 settings.json 全文。
+- `docs/cli-dev.md`「Claude Code 权限设置」里抄的 settings.json 全文。
 
 两边的差别（都按今天的实际做法）：
 - maapilot 的几种写法（`MAAPILOT`）：Codex 每条规则每种写法都列（规则按命令的第一个词认程序，没 PATH 时 agent 写 `.venv` 里的）；
@@ -197,15 +197,15 @@ def render_codex() -> str:
 
 SETTINGS = Path(".claude") / "settings.json"
 CODEX_RULES = Path(".codex") / "rules" / "maapilot.rules"
-CLI_DOC = Path("docs") / "cli.md"
+CLI_DOC = Path("docs") / "cli-dev.md"
 _DOC_BLOCK = re.compile(r"(## Claude Code 权限设置\n.*?```json\n)(.*?)(```)", re.S)
 
 
 def render_doc(doc: str, settings_text: str) -> str:
-    """docs/cli.md「Claude Code 权限设置」下面的 ```json 块换成 settings.json 全文。"""
+    """docs/cli-dev.md「Claude Code 权限设置」下面的 ```json 块换成 settings.json 全文。"""
     m = _DOC_BLOCK.search(doc)
     if not m:
-        raise ValueError("docs/cli.md 里找不到「Claude Code 权限设置」下的 ```json 块")
+        raise ValueError("docs/cli-dev.md 里找不到「Claude Code 权限设置」下的 ```json 块")
     return doc[:m.start(2)] + settings_text + doc[m.end(2):]
 
 
