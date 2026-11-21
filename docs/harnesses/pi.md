@@ -18,8 +18,10 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
 
 - **信任这个项目**：项目里有 `.agents/skills`，pi 第一次在这里启动时会问要不要信任，要选信任（以后不再问；之前选了不信任的，在 pi 里输入 `/trust` 改）。
   看 skills 有没有加载：pi 的系统提示里有没有 `maapilot-setup` 这些 skill。没有就请用户信任后重启 pi。
-- **装定时扩展**（要定时日常才需要）：先看有没有 `schedule_prompt` 工具。没有就跟用户说清：定时要装一个第三方扩展 pi-schedule-prompt，会在 pi 里跑它的代码；
-  用户同意后请用户在终端跑 `pi install npm:pi-schedule-prompt`（装到用户自己的 pi 设置里），然后重启 pi、用 `pi -c` 回到这个会话，再定定时日常。
+- **装定时扩展**（要定时日常才需要）：先看有没有 `schedule_prompt` 工具。没有就和装运行环境一样，跟用户说一次、问同不同意：
+  定时要装一个第三方扩展 pi-schedule-prompt，会在 pi 里跑它的代码，装到用户自己的 pi 设置里。
+  用户同意后你自己跑 `pi install npm:pi-schedule-prompt`（你这里跑不了、或者装不上，再请用户在终端里跑这一条）。
+  装好后扩展要重启 pi 才生效，这一步你做不了：请用户重启 pi、用 `pi -c` 回到这个会话，回来后确认有 `schedule_prompt` 工具，再定定时日常。
   用户不想装：定时日常做不了，只能在对话里说"跑一次日常"，setup 照样做完。
 - 跟用户说清：到点时 pi 要开着、开在这个项目文件夹里；关了以后要用 `pi -c`（或 `/resume`）回到**同一个会话**，定时才接着有效，开一个新会话就得重新定（见下）。
 - Windows：要装 Git for Windows（pi 用它的 Git Bash 跑命令）。
@@ -46,16 +48,3 @@ pi 本身没有定时，定时日常靠扩展 [pi-schedule-prompt](https://githu
 
 - 用户偏好写进 `private/memory/`（`AGENTS.md`「用户偏好」），pi 没有自己的记忆功能，不用另外处理。
 - 会话太长时 pi 会自动压缩前面的对话：定时醒来记不清做法了，就按 `AGENTS.md` 再读一遍本文件。
-
-## 实测
-
-- 10-27（pi 1.2.0 + pi-schedule-prompt 0.4.1，在空目录里测扩展，没有跑 MaaPilot）：
-  - 一次性定时准时响；到点时 agent 正在前台跑命令，提示排队，命令跑完、回完话再送进来，没有丢。
-  - 接力：定时醒来的那一轮里建下一个一次性定时，下一个照样准时响。
-  - 关掉 pi 后 `pi -c` 回到原会话，没到点的定时照样响；开新会话不响（定时还留在 `.pi/schedule-prompts.json` 里，绑着旧会话）。
-- 同一轮比较过的另两个扩展：@pi-agents/loop（agent 刚忙完时到点，提示发送失败，一次性定时就丢了）不用；@mjakl/pi-cron 也能用，但没发到 npm、用的人少。
-- 10-28（pi 1.4.0 + pi-schedule-prompt，模型 DeepSeek flash，在 MaaPilot 项目里）：
-  - setup 完整走通（信任、skills、读截图、问定时、装扩展、建一次性定时并核对）；前台跑完一次约 36 分钟的 `daily run`。
-  - 16:40 的定时日常准时响：先建好下一次（次日 04:40）再 `daily run --trigger schedule`，跑完对账、`daily done`、在会话里汇报，中途没问问题。
-  - 偏差（已补进上面和 skill `maapilot-daily`）：给 `daily run` 填了 `timeout: 7200`；刷理智交回后自己 `maa fight` 补刷，没用 `daily run --only farm`，汇报里刷理智一直算失败。
-  - 次日 04:40 那一次（16:40 醒来时建的）也准时响了，接力在项目里连着跑通（用户 11-04 确认）。
