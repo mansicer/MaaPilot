@@ -204,7 +204,7 @@ def _maa_cli(d: dict) -> dict:
 
 
 def _behind(cur, latest) -> bool:
-    return bool(cur and latest) and toolchain.version_tuple(cur) < toolchain.version_tuple(latest)
+    return bool(cur and latest) and toolchain.version_key(cur) < toolchain.version_key(latest)   # 装着测试版、正式版出了也算
 
 
 def _lost(at, d: dict) -> bool:

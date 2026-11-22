@@ -121,8 +121,9 @@ def _names(cmd: str, *args: str) -> list[str]:
     return (p.stdout or "").splitlines()
 
 
-def _check_mergeable(tag: str, branch: str, old_main: str) -> None:
-    """走不通的才拦：有 tag 里没有的提交（用户自己的工作）、改过的文件新版本也改了。"""
+def _check_mergeable(tag: str, branch: str, old_main: str) -> list[str]:
+    """走不通的才拦：有 tag 里没有的提交（用户自己的工作）、改过的文件新版本也改了。
+    → 改过、但已经和新版本一模一样的文件（比如手动打过同一个补丁）：不拦，更新时由 apply_maapilot 处理。"""
     if _git("merge-base", "--is-ancestor", "HEAD", tag).returncode != 0:
         if branch == BRANCH:
             raise CliError("diverged", f"{BRANCH} 上有 {tag} 里没有的提交", exit=NEEDS_USER, data={"commit": _out("rev-parse", "--short", "HEAD")},
@@ -134,14 +135,43 @@ def _check_mergeable(tag: str, branch: str, old_main: str) -> None:
                        hint="告诉用户这些提交是什么（git log），由用户决定怎么合并")
     edited = set(_names("diff", "HEAD"))
     both = sorted(edited & set(_names("diff", "HEAD", tag)))
+    same = [f for f in both if _git("diff", "--quiet", tag, "--", f).returncode == 0]
+    both = [f for f in both if f not in same]
     if both:
         raise CliError("dirty", "这些文件改过，新版本也改了：" + "、".join(both[:5]), exit=NEEDS_USER,
-                       hint="看改了什么、告诉用户；要留着就先另存，用户同意后 git restore 这些文件再更新")
+                       hint="看改了什么、告诉用户；要留着就先另存，用户同意后 git restore --staged --worktree 这些文件再更新"
+                            "（只写 git restore 的话，git add 过的文件还原不了）")
     added = set(_names("diff", "--diff-filter=A", "HEAD", tag))
     blocking = sorted(added & set(_names("ls-files", "--others", "--exclude-standard")))
     if blocking:
         raise CliError("dirty", "这些没入库的文件和新版本的文件同名：" + "、".join(blocking[:5]), exit=NEEDS_USER,
                        hint="告诉用户；用户同意后把这些文件挪走再更新")
+    return same
+
+
+def _stage_same(same: list[str]) -> dict[str, bytes | None]:
+    """改过、但和新版本一模一样的文件：先 git add，git 才肯更新（不然它只看到"改过"就拒绝）。
+    → 这些文件现在的内容（None：删掉了），更新没成、退回去以后用 _put_back 写回。"""
+    keep: dict[str, bytes | None] = {}
+    for f in same:
+        p = paths.ROOT / f
+        keep[f] = p.read_bytes() if p.is_file() else None
+    if same:
+        _git("add", "-A", "--", *same)
+    return keep
+
+
+def _put_back(keep: dict[str, bytes | None]) -> None:
+    for f, data in keep.items():
+        p = paths.ROOT / f
+        try:
+            if data is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(data)
+        except OSError:
+            pass
 
 
 def _go_back(prev: str, branch: str, old_main: str) -> bool:
@@ -169,11 +199,14 @@ def apply_maapilot() -> dict:
     branch = _out("symbolic-ref", "--short", "HEAD")     # 分离 HEAD 时是空的
     _fetch(tag)
     old_main = prev if branch == BRANCH else _out("rev-parse", "--verify", "-q", f"refs/heads/{BRANCH}")
-    _check_mergeable(tag, branch, old_main)
+    same = _check_mergeable(tag, branch, old_main)
     changed = _names("diff", prev, tag)
     sync = any(f in ENV_FILES for f in changed)
+    keep = _stage_same(same)
     m = _git("merge", "--ff-only", "--quiet", tag) if branch == BRANCH else _git("checkout", "-q", "-B", BRANCH, tag)
     if m.returncode != 0:
+        if same:
+            _git("reset", "-q", "--", *same)
         raise CliError("merge_refused", f"git 没让更新：{(m.stderr or '').strip()[-300:]}", exit=FAILED,
                        hint="什么都没动；看错误原文告诉用户（比如 main 在别的 worktree 里、正在合并）")
     try:
@@ -182,6 +215,8 @@ def apply_maapilot() -> dict:
         _verify(p["latest"])
     except (OSError, subprocess.SubprocessError) as e:
         back = _go_back(prev, branch, old_main)
+        if back:
+            _put_back(keep)
         if sync:
             try:
                 _sync_env()
