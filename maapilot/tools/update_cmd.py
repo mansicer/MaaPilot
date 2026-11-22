@@ -240,7 +240,7 @@ def apply_maa_cli() -> dict:
     e = st["maa-cli"]
     if not e["update"]:
         return {"what": "maa-cli", "updated": False, "version": e["current"], "latest": e["latest"], "note": e.get("note")}
-    r = tools_cmd.install("maa-cli")
+    r = tools_cmd.install("maa-cli", e["latest"])
     updates.reread_local()
     return {"what": "maa-cli", "updated": True, "from": e["current"], "to": r["version"], "core": r.get("core")}
 

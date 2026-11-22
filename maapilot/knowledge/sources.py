@@ -33,6 +33,7 @@ SOURCES = {
     "gamedata": "游戏数据表",
     "maapilot_release": "MaaPilot 的发布信息",
     "maa_release": "MAA 的发布信息",
+    "maa_cli_release": "maa-cli 的发布信息",
 }
 
 

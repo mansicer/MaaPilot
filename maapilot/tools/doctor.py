@@ -269,7 +269,7 @@ def _ver(v: str) -> tuple[int, ...]:
 
 
 def maa_cli_range(cli: str) -> str | None:
-    """不在实测范围：低于下限 → "old"，高于上限 → "new"；在范围里或认不出 → None。"""
+    """低于最低能用的版本 → "old"；比最近实测过的新 → "new"（不算问题，不设上限）；之间或认不出 → None。"""
     from maapilot.toolchain import MAA_CLI_TESTED
     v, lo, hi = _ver(cli), _ver(MAA_CLI_TESTED[0]), _ver(MAA_CLI_TESTED[1])
     if not v:
@@ -293,13 +293,13 @@ def check_maa_cli(ctx: Ctx) -> dict:
         return _item("maa_cli", False, f"maa-cli {cli}、MaaCore {core}，但资源不全", "maapilot update apply maa-core",
                      version=cli, core=core)
     from maapilot.toolchain import MAA_CLI_TESTED
-    lo, hi = MAA_CLI_TESTED
+    lo = MAA_CLI_TESTED[0]
     rng = maa_cli_range(cli)
     if rng == "old":
-        return _item("maa_cli", False, f"maa-cli {cli} 太旧（实测过的是 {lo}–{hi}）", hints.install_hint("maa_upgrade"),
+        return _item("maa_cli", False, f"maa-cli {cli} 太旧（至少要 {lo}）", hints.install_hint("maa_upgrade"),
                      version=cli, core=core, tested=list(MAA_CLI_TESTED))
     from maapilot.crew import maa as crew_maa
-    warnings = [f"maa-cli {cli} 比实测过的 {hi} 新：出了怪问题先告诉开发者"] if rng == "new" else []
+    warnings = []
     if crew_maa.data_problem():
         warnings.append(f"MAA 的数据还在原来的目录，没搬进项目：{crew_maa.data_problem()}")
     extra = {"warnings": warnings} if warnings else {}

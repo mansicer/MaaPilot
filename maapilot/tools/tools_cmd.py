@@ -1,7 +1,7 @@
 """`maapilot tools`：项目 `.tools/` 里的 maa-cli 和 adb（见 maapilot.toolchain）。
 
 - status：装了什么、什么版本、实际会用哪个程序（config.yaml 写了别的路径时照它）。只读。
-- install maa-cli|adb：从官方发布下载装好（maa-cli 默认装实测过的版本）；装 maa-cli 后 MaaCore 还没装就顺手 `maa install`。
+- install maa-cli|adb：从官方发布下载装好（maa-cli 默认装它的最新正式版，查不到装实测过的版本）；装 maa-cli 后 MaaCore 还没装就顺手 `maa install`。
   要联网、会换掉定时日常执行的程序：agent 先问过用户。拿模拟器锁（日常、MAA 在跑时不换）。
 """
 from __future__ import annotations
@@ -58,6 +58,9 @@ def _maa_core(maa: str) -> str | None:
 def install(what: str, version: str | None = None) -> dict:
     from maapilot import toolchain
     name = NAMES[what]
+    if name == "maa" and not version:                  # 不设上限：装 maa-cli 的最新正式版，查不到装实测过的
+        from maapilot.knowledge import updates
+        version = updates.maa_cli_latest_now()
     with holding(f"tools install {what}", job="tools install"):
         r = toolchain.install(name, version)
         if name == "maa":
@@ -92,7 +95,7 @@ def register(sub) -> None:
     gs = g.add_subparsers(dest="sub", metavar="<子命令>")
     p = gs.add_parser("status", help="装了什么、什么版本、实际用哪个程序")
     p.set_defaults(func=cmd_status, command="tools status")
-    p = gs.add_parser("install", help="从官方发布下载装好（maa-cli 默认装实测过的版本；装好后没有 MaaCore 就 maa install）")
+    p = gs.add_parser("install", help="从官方发布下载装好（maa-cli 默认装最新正式版；装好后没有 MaaCore 就 maa install）")
     p.add_argument("what", choices=("maa-cli", "adb"))
-    p.add_argument("--version", help="maa-cli 的版本（默认实测过的最新版）")
+    p.add_argument("--version", help="maa-cli 的版本（默认最新正式版，查不到时是实测过的版本）")
     p.set_defaults(func=cmd_install, command="tools install")

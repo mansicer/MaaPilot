@@ -1,5 +1,5 @@
 """MaaPilot 自己下载、放在项目 `.tools/` 里的第三方程序：maa-cli 本体（`.tools/maa-cli/`）和 adb（`.tools/platform-tools/`）。
-不用 Homebrew / winget：三个系统一样从官方发布下载；maa-cli 默认装实测过的版本（MAA_CLI_TESTED 的上限）。
+不用 Homebrew / winget：三个系统一样从官方发布下载；maa-cli 跟它的最新正式版（tools_cmd.install 去查），查不到时装实测过的那个（MAA_CLI_TESTED[1]）。
 
 找程序（config.tool / config.adb_path）：config.yaml 里写的是路径（带目录）→ 就用它；写的是程序名（`maa`、`adb`，模板的默认）→
 `.tools/` 里装了就用装好的，没装再按名字在 PATH 上找。所以用 Homebrew 等装好、config 写了绝对路径的照样能用。
@@ -22,14 +22,14 @@ from maapilot import checksum, paths
 from maapilot.cliutil import ENVIRONMENT, FAILED, CliError
 from maapilot.oscompat import MACOS, WINDOWS
 
-# 实测过的 maa-cli 版本（发版前把本机升到最新、跑通日常和作业后更新上限）：doctor 低于下限不通过、高于上限提醒；
-# tools install 默认装上限这个版本
+# (最低能用的 maa-cli 版本, 最近一次实测过的版本)。doctor 低于前一个不通过。后一个不是上限（用户 11-22 定：不设上限，
+# 跟 maa-cli 的最新正式版，新功能才用得上）：只在查不到最新版时拿来装（它的哈希写在下面，不用联网）。
 MAA_CLI_TESTED = ("0.7.5", "0.7.7")
 MAA_CLI_URL = ("https://github.com/MaaAssistantArknights/maa-cli/releases/download/"
                "v{v}/maa_cli-v{v}-{triple}.{ext}")
 MAA_CLI_REPO = "MaaAssistantArknights/maa-cli"
 # 发布包的 sha256（GitHub 发布信息里每个文件的 digest）：{版本: {三元组: sha256}}。装表里的版本不用联网查哈希；
-# 改 MAA_CLI_TESTED 的上限时把新版本的加进来（tests/test_toolchain.py 会查）。别的版本装的时候去发布信息里查。
+# 改 MAA_CLI_TESTED[1] 时把新版本的加进来（tests/test_toolchain.py 会查）。别的版本装的时候去发布信息里查。
 MAA_CLI_SHA256 = {
     "0.7.7": {
         "aarch64-apple-darwin": "b12ddd6deda6f811b9dd6c73b2341cbfaf6e31c481b4bfc550ce330580b007af",

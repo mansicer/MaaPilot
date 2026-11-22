@@ -31,6 +31,7 @@ MAAPILOT_REPO = "mansicer/MaaPilot"
 MAAPILOT_GIT = f"https://github.com/{MAAPILOT_REPO}.git"
 MAAPILOT_API = f"https://api.github.com/repos/{MAAPILOT_REPO}/releases/latest"
 MAA_API = "https://api.github.com/repos/MaaAssistantArknights/MaaAssistantArknights/releases/latest"
+MAA_CLI_API = f"https://api.github.com/repos/{toolchain.MAA_CLI_REPO}/releases/latest"
 TIMEOUT_S = 8                   # 一次网络等待：第一个地址不通时还来得及试下一个
 TOTAL_S = 15                    # 联网部分最多等这么久：网不好时不能拖住开场和日常
 CHECK_LOST_DAYS = 3             # 这么多天没查成功就告诉用户（查更新的路断了）
@@ -122,7 +123,7 @@ def refresh() -> dict:
     last = load()
     local = {**(last.get("local") or {}), **{k: v for k, v in local_versions().items() if v}}  # maa 这次跑不了：别当成没装，新版本提醒会断
     new: dict = {"local": local, "tried_at": last.get("tried_at") or _now().isoformat(timespec="seconds")}
-    got = _fetch((MAAPILOT_API, MAA_API))
+    got = _fetch((MAAPILOT_API, MAA_API, MAA_CLI_API))
     try:
         new.update(maapilot=_release("maapilot_release", got[MAAPILOT_API]), at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 限流、连不上、格式变了：留上次的，连着几天这样就告诉用户
@@ -131,6 +132,10 @@ def refresh() -> dict:
         new.update(maa_core=_release("maa_release", got[MAA_API]), maa_core_at=_now().isoformat(timespec="seconds"))
     except Exception as e:                               # noqa: BLE001 - 查不到 MaaCore 不耽误 MaaPilot 的
         errors["maa-core"] = f"{type(e).__name__}: {e}"
+    try:
+        new.update(maa_cli=_release("maa_cli_release", got[MAA_CLI_API]), maa_cli_at=_now().isoformat(timespec="seconds"))
+    except Exception as e:                               # noqa: BLE001 - 查不到 maa-cli 的：留上次查到的
+        errors["maa-cli"] = f"{type(e).__name__}: {e}"
     d = {**load(), **new, "errors": errors}              # 拉的这几秒里别的进程记下的 told 不丢
     common.write_json(_file(), d)
     return d
@@ -191,12 +196,31 @@ def _resource(d: dict) -> dict:
             "lost": bool(r.get("error")) and (age is None or age.days >= CHECK_LOST_DAYS)}
 
 
+def maa_cli_latest(d: dict | None = None) -> str:
+    """maa-cli 的最新正式版（上次查到的）。没查到过，或者查到的比实测过的还旧 → 实测过的那个版本。"""
+    d = load() if d is None else d
+    tested = toolchain.MAA_CLI_TESTED[1]
+    seen = (d.get("maa_cli") or {}).get("version")
+    return seen if seen and toolchain.version_key(seen) > toolchain.version_key(tested) else tested
+
+
+def maa_cli_latest_now() -> str:
+    """现在联网查一次 maa-cli 的最新正式版（装的时候用）；查不到 → 上次查到的 / 实测过的。"""
+    try:
+        tag = str(http_json(MAA_CLI_API).get("tag_name") or "")
+    except Exception:                                    # noqa: BLE001 - 限流、连不上：装手头知道的最新版
+        return maa_cli_latest()
+    v = tag.removeprefix("v")
+    tested = toolchain.MAA_CLI_TESTED[1]
+    return v if toolchain.version_tuple(v) and toolchain.version_key(v) > toolchain.version_key(tested) else maa_cli_latest()
+
+
 def _maa_cli(d: dict) -> dict:
     from maapilot import config
-    hi = toolchain.MAA_CLI_TESTED[1]
+    hi = maa_cli_latest(d)
     m = toolchain.managed("maa")
     cur = toolchain.installed_version("maa") if m else (d.get("local") or {}).get("maa_cli")
-    behind = bool(cur) and toolchain.version_tuple(cur) < toolchain.version_tuple(hi)
+    behind = _behind(cur, hi)
     out = {"current": cur, "latest": hi, "update": bool(m and behind and str(m) == config.tool("maa"))}
     if behind and not out["update"]:
         out["note"] = f"用的是别处装的 maa-cli（{config.tool('maa')}），这里换不了：自己升级，或把 tools.maa 改成 maa 后装项目里的"

@@ -124,8 +124,10 @@ OCR 模型有两代：MAA 在 2026-11-02 换了 PaddleOCR 的模型（PP-OCRv3 �
 ## 发版
 - 版本号只写在 `maapilot/__init__.py` 的 `__version__`（`pyproject.toml` 从这里读），格式 `X.Y.Z`；`maapilot --version`、`doctor`、启动检查会显示它和当前提交。
   第一个发布的版本是 0.1.0（用户 10-19 定：macOS、Windows 都实机跑通了）。修问题升第三位，有大的新能力（例如接新的 agent）升第二位，1.0.0 等稳定了再说。
-- maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：`maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 记实测过的范围（`tools install` 默认装上限这个版本），发版前把本机升到最新、跑通日常和作业后更新上限。
-- 下载的程序都要和公布的哈希对过才装（`maapilot/checksum.py`）：改 `MAA_CLI_TESTED` 的上限时把新版本各包的 sha256 加进 `toolchain.MAA_CLI_SHA256`
+- maa-cli 由 `maapilot tools install` 装进项目的 `.tools/`（不用 Homebrew）：不设版本上限（用户 11-22 定：跟 maa-cli 的最新正式版，新功能才用得上），`tools install`、`update check` 都去 GitHub 查最新版。
+  `maapilot/toolchain.py` 的 `MAA_CLI_TESTED` 是（最低能用的版本，最近一次实测过的版本）：后一个只在查不到最新版时拿来装；发版前把本机升到最新、跑通日常和作业后把它改成那个版本。
+  maa-cli 新版本改了参数或输出、MaaPilot 跟不上时，用户会先遇到：靠反馈和 `upstream_format` 发现，尽快发版修。
+- 下载的程序都要和公布的哈希对过才装（`maapilot/checksum.py`）：改 `MAA_CLI_TESTED` 的后一个版本时把新版本各包的 sha256 加进 `toolchain.MAA_CLI_SHA256`
   （`gh api repos/MaaAssistantArknights/maa-cli/releases/tags/v<版本> --jq '.assets[] | [.name, .digest] | @tsv'`，测试会查有没有加）；
   换 adb 版本时改 `ADB_VERSION` 和 `ADB_SHA256`（三个包各下一次，和 Google 的 `repository2-3.xml` 里的 sha1、大小对过再写）。新加下载程序的地方也照这样做。
 - 发版（用户要求时）：改 `__version__` → 提交 → `git tag v<版本>` → 推送标签，提交开 PR（main 不能直接推）。PR 要用普通合并（merge commit），不用 squash / rebase，标签指的提交才在 main 上。

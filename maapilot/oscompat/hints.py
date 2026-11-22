@@ -6,7 +6,7 @@ from maapilot.oscompat import MACOS, WINDOWS
 MAA_RELEASES = "https://github.com/MaaAssistantArknights/maa-cli/releases"
 
 _HINTS = {
-    "maa": {"*": "maapilot tools install maa-cli（从 GitHub 下载实测过的版本装进项目的 .tools/，没有 MaaCore 顺手 maa install）"},
+    "maa": {"*": "maapilot tools install maa-cli（从 GitHub 下载最新正式版装进项目的 .tools/，没有 MaaCore 顺手 maa install）"},
     "maa_upgrade": {"*": "maapilot tools install maa-cli（config.yaml 的 tools.maa 写了别的路径时改成 maa）"},
     "adb": {"darwin": "maapilot tools install adb（Google 官方 platform-tools，装进项目的 .tools/）",
             "win32": "优先用模拟器自带的 adb.exe（把完整路径写进 emulator.adb）；没有就 maapilot tools install adb",

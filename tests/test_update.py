@@ -15,7 +15,7 @@ from maapilot import __version__, cli, paths, toolchain
 from maapilot.cliutil import BUSY, NEEDS_USER, CliError
 from maapilot.knowledge import sources, updates
 from maapilot.oscompat import fs
-from maapilot.tools import doctor, update_cmd
+from maapilot.tools import common, doctor, update_cmd
 
 FIX = Path(__file__).parent / "fixtures" / "upstream"
 NEWER = "99.0.0"
@@ -26,8 +26,10 @@ def release(version=NEWER, **kw) -> dict:
     return {**d, "tag_name": f"v{version}", **kw}
 
 
-def online(monkeypatch, maapilot=NEWER, core="6.21.4"):
+def online(monkeypatch, maapilot=NEWER, core="6.21.4", cli=None):
     def fake(url):
+        if url == updates.MAA_CLI_API:
+            return release(cli or toolchain.MAA_CLI_TESTED[1])
         return release(maapilot if url == updates.MAAPILOT_API else core)
     monkeypatch.setattr(updates, "http_json", fake)
 
@@ -126,7 +128,7 @@ def test_told_quiets_until_new_version_or_remind(monkeypatch):
     assert updates.status(updates.refresh())["due"] == ["maapilot"]
 
 
-def test_maa_cli_only_up_to_tested_and_only_ours(monkeypatch):
+def test_maa_cli_falls_back_to_tested_and_only_ours(monkeypatch):
     hi = toolchain.MAA_CLI_TESTED[1]
     ours = Path("/x/.tools/maa-cli/maa")
     monkeypatch.setattr(toolchain, "managed", lambda n: ours)
@@ -956,3 +958,106 @@ def test_identical_edit_unstaged_again_when_git_refuses(repo, monkeypatch):
         update_cmd.apply_maapilot()
     assert e.value.code == "merge_refused"
     assert text(repo) == "2\n" and git(repo, "diff", "--cached", "--name-only") == ""
+
+
+# --- maa-cli 不设上限：跟它的最新正式版 --------------------------------------------------------------------------------
+
+def _ours(monkeypatch, installed):
+    ours = Path("/x/.tools/maa-cli/maa")
+    monkeypatch.setattr(toolchain, "managed", lambda n: ours)
+    monkeypatch.setattr(toolchain, "installed_version", lambda n: installed)
+    monkeypatch.setattr("maapilot.config.tool", lambda n, cfg=None: str(ours))
+
+
+def test_maa_cli_follows_the_latest_release(monkeypatch):
+    hi = toolchain.MAA_CLI_TESTED[1]
+    _ours(monkeypatch, hi)
+    online(monkeypatch, maapilot=__version__, cli="0.99.0")
+    monkeypatch.setattr(updates, "local_versions", lambda: {})
+    st = updates.status(updates.refresh())
+    assert st["maa-cli"] == {"current": hi, "latest": "0.99.0", "update": True} and st["due"] == ["maa-cli"]
+    assert updates.load()["maa_cli"]["version"] == "0.99.0"
+
+
+def test_maa_cli_release_older_than_tested_is_ignored(monkeypatch):
+    hi = toolchain.MAA_CLI_TESTED[1]
+    _ours(monkeypatch, hi)
+    assert updates.status({"maa_cli": {"version": "0.1.0"}})["maa-cli"] == {"current": hi, "latest": hi, "update": False}
+    assert updates.status({"maa_cli": {"version": hi + "-beta.1"}})["maa-cli"]["latest"] == hi
+
+
+def test_maa_cli_lookup_failure_keeps_the_last_answer(monkeypatch):
+    _ours(monkeypatch, toolchain.MAA_CLI_TESTED[1])
+    online(monkeypatch, maapilot=__version__, cli="0.99.0")
+    monkeypatch.setattr(updates, "local_versions", lambda: {})
+    updates.refresh()
+
+    def down(url):
+        if url == updates.MAA_CLI_API:
+            raise OSError("rate limited")
+        return release(__version__ if url == updates.MAAPILOT_API else "6.21.4")
+    monkeypatch.setattr(updates, "http_json", down)
+    d = updates.refresh()
+    assert "maa-cli" in d["errors"] and updates.status(d)["maa-cli"]["latest"] == "0.99.0"
+    assert "maapilot" not in d["errors"] and "maa-core" not in d["errors"]
+
+
+def test_latest_now_asks_github_and_falls_back(monkeypatch):
+    hi = toolchain.MAA_CLI_TESTED[1]
+    monkeypatch.setattr(updates, "http_json", lambda url: release("0.99.0"))
+    assert updates.maa_cli_latest_now() == "0.99.0"
+    monkeypatch.setattr(updates, "http_json", lambda url: release("0.1.0"))          # 比实测过的旧：不往回装
+    assert updates.maa_cli_latest_now() == hi
+    monkeypatch.setattr(updates, "http_json", lambda url: {"tag_name": "nightly"})
+    assert updates.maa_cli_latest_now() == hi
+
+    def down(url):
+        raise OSError("no network")
+    monkeypatch.setattr(updates, "http_json", down)
+    assert updates.maa_cli_latest_now() == hi                                        # 没网：实测过的（哈希不用联网）
+    common.write_json(updates._file(), {"maa_cli": {"version": "0.98.0"}})
+    assert updates.maa_cli_latest_now() == "0.98.0"                                  # 没网但上次查到过
+
+
+def _fake_install(monkeypatch):
+    from contextlib import nullcontext
+
+    from maapilot.tools import tools_cmd
+    asked = []
+
+    def install(name, version=None):
+        asked.append((name, version))
+        return {"name": "maa-cli", "version": version, "path": "/x/maa"}
+    monkeypatch.setattr(toolchain, "install", install)
+    monkeypatch.setattr(tools_cmd, "holding", lambda *a, **kw: nullcontext())
+    monkeypatch.setattr(tools_cmd, "_maa_core", lambda maa: "6.23.0")
+    return tools_cmd, asked
+
+
+def test_tools_install_defaults_to_the_latest_release(monkeypatch):
+    tools_cmd, asked = _fake_install(monkeypatch)
+    monkeypatch.setattr(updates, "http_json", lambda url: release("0.99.0"))
+    assert tools_cmd.install("maa-cli")["version"] == "0.99.0"
+    tools_cmd.install("maa-cli", "0.7.6")                                            # 指定了版本就装指定的
+    tools_cmd.install("adb")
+    assert asked == [("maa", "0.99.0"), ("maa", "0.7.6"), ("adb", None)]
+
+
+def test_apply_maa_cli_installs_what_the_check_reported(monkeypatch):
+    tools_cmd, asked = _fake_install(monkeypatch)
+    _ours(monkeypatch, toolchain.MAA_CLI_TESTED[1])
+    common.write_json(updates._file(), {"maa_cli": {"version": "0.99.0"}})
+    monkeypatch.setattr(updates, "reread_local", lambda: None)
+
+    def boom(url):
+        raise AssertionError("不该再联网：装检查时说的那个版本")
+    monkeypatch.setattr(updates, "http_json", boom)
+    r = update_cmd.apply_maa_cli()
+    assert r["updated"] and r["to"] == "0.99.0" and asked == [("maa", "0.99.0")]
+
+
+def test_doctor_does_not_warn_about_a_newer_maa_cli():
+    from maapilot.tools import doctor
+    assert doctor.maa_cli_range("0.99.0") == "new" and doctor.maa_cli_range("0.1.0") == "old"
+    import inspect
+    assert "比实测过的" not in inspect.getsource(doctor.check_maa_cli)
