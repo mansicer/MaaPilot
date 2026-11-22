@@ -117,7 +117,7 @@
 | `emulator` | `adb connect` + 设备 online；地址没填或连不上时列出在线的候选（`adb devices` 与常见端口的 `adb connect` 探测） | 开模拟器、打开 ADB 调试、填地址 |
 | `screen` | `adb exec-out screencap` 能截图；分辨率是 16:9 且不小于 1280×720 | 模拟器设置里改分辨率 |
 | `input` | 模拟器里有 `input` 命令（能发点击）；不真的点 | 换 / 重装模拟器 |
-| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是实测过的 maa-cli 版本范围（`toolchain.MAA_CLI_TESTED`，发版前实测后更新）：低于下限不通过，高于上限照样通过、`warnings` 里提醒 | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
+| `maa_cli` | `maa version`：maa-cli 与 MaaCore 版本；`maa dir resource` 下有资源；`path` 是 maa 的绝对路径。`tested` 是（最低能用的版本，最近一次实测过的版本）（`toolchain.MAA_CLI_TESTED`）：低于前一个不通过；比后一个新照样通过、不提醒（不设上限，跟 maa-cli 的最新正式版） | `maapilot tools install maa-cli`（太旧时也是它；`tools.maa` 写了别的路径时改成 `maa`） |
 | `agent_config` | `config.yaml` 里还写着 v0.1 的设置（`agent`、`schedule_options`、`daily.agent_timeout_min`、`daily.recovery_timeout_min`：定时叫起无头 agent、系统定时用的）：现在不用了，写了也忽略；`legacy` 列出是哪几个。`required: false` | 用户同意后从 `config.yaml` 删掉（不删也不影响） |
 | `maa_config` | `private/maa-config/` 里有 `cli.toml`、`profiles/default.toml` | `doctor --fix` |
 | `maa_core` | `op progress` 加载的 MaaCore 不低于 v6.19.0：优先用和 maa-cli 共用的那份，不够新才用单独装的（`private/cache/maa-core/<版本>/`）。`required: false`：没有只影响 `op progress` | `doctor --fix`（下载 MAA 最新发布的 macOS / Linux 本体，约 370MB；下到的包和发布信息里的 sha256、大小对过才装，对不上不装、`fixed` 里写原因。Windows 上项目文件夹路径太深、又没开长路径支持时装不下（MAA 的包里有很长的文件名）：解压前就停下，`fixed` 里写超了多少个字符，请用户把项目挪到短一点的位置或打开长路径支持） |
@@ -955,7 +955,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 ```
 
 `maapilot tools install maa-cli|adb [--version <maa-cli 版本>]`
-下载装好（拿模拟器锁：日常、MAA 在跑时不换，被占用退出码 4）。maa-cli 默认装 `maa_cli_tested` 的上限（`toolchain.MAA_CLI_TESTED`，实测过的最新版），
+下载装好（拿模拟器锁：日常、MAA 在跑时不换，被占用退出码 4）。maa-cli 默认装它在 GitHub 上最新的正式版（装的时候联网查；查不到就装上次查到的，再没有就装 `maa_cli_tested` 的后一个：最近实测过的版本），
 `--version` 装别的版本；包从 GitHub 发布页按系统和 CPU 选（`maa_cli-v<版本>-<aarch64|x86_64>-<apple-darwin|pc-windows-msvc|unknown-linux-gnu>`）。
 装好后 MaaCore 还没装就顺手 `maa install`（几分钟）。adb 从 Google 下固定的版本（`toolchain.ADB_VERSION`，`platform-tools_r<版本>-<darwin|win|linux>.zip`），整个 `platform-tools/` 留着。
 旧的整个换掉（先挪开、换好再删）。走系统的代理环境变量（`HTTPS_PROXY`）。
@@ -979,7 +979,7 @@ maa-cli 本体和 adb 由 MaaPilot 自己从官方发布下载，装在项目的
 | 名字 | 现在的版本 | 最新版本 | 怎么更新 |
 |---|---|---|---|
 | `maapilot` | `maapilot.__version__` | GitHub 上最新的正式 Release（草稿、预发布不算） | 本地 `main` 快进到发布标签 |
-| `maa-cli` | `.tools/` 里装的 | 这个版本的 MaaPilot 实测过的上限（`MAA_CLI_TESTED`），不跟 maa-cli 的最新版 | 同 `tools install maa-cli` |
+| `maa-cli` | `.tools/` 里装的 | maa-cli 最新的正式 Release（不设上限）；没查到过、或查到的比最近实测过的（`MAA_CLI_TESTED[1]`）还旧时是后者。查不到时留上次的，原因在 `errors["maa-cli"]` | 同 `tools install maa-cli <最新版本>` |
 | `maa-core` | `maa version` | MAA 最新的正式 Release | `maa update`（`op progress` 共用这一份，放在 `.tools/maa-data/`） |
 
 目标是用户不和更新断联：没有关掉检查的开关；`daily run` 开头（维护中也查）和 `update check` 每次都联网查，MaaPilot、MaaCore 同时查，联网部分最多等 15 秒（一次网络等待 8 秒），之前读本机版本的 `maa version` 另算（最多 30 秒，第一次还可能要搬数据）；`maa version` 跑不了时本机版本留上次的；查不到不算错，留上次的结果，

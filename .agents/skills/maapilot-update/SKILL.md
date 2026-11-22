@@ -43,7 +43,7 @@ MAA 资源不用问：日常开头会自己更新，MAA 跑任务前也会更新
 
 - 更新 maa-cli：`maapilot update apply maa-cli`。`note` 说用的是别处装的：告诉用户，问要自己升级，还是改用项目里的（改 `tools.maa` 前先问）。
 - 更新 MAA 本体：`maapilot update apply maa-core`（几分钟）。程序先备份，失败自动恢复。
-- maa-cli 的最新版只跟到这个版本的 MaaPilot 实测过的上限，比它更新的不用管。
+- maa-cli 跟它自己的最新正式版（不设上限）。更新后日常或作业出了以前没有的错，告诉用户可能是新版 maa-cli 的问题，问要不要反馈给开发者（skill `maapilot-feedback`）。
 
 更新完（成没成都一样）跑 `maapilot doctor --offline` 看 MAA 能不能用。
 

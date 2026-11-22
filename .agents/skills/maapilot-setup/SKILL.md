@@ -68,7 +68,7 @@ description: 第一次使用 MaaPilot 的设置向导 —— 确认模拟器、�
 | `adb` | 没有 adb：先征得用户同意，`maapilot tools install adb`（从 Google 官方下载 platform-tools 装进项目的 `.tools/`，`emulator.adb` 保持写 `adb` 就会用它）。Windows：优先用模拟器自带的 adb（MuMu 12 在安装目录的 `shell\adb.exe`，雷电在安装目录的 `adb.exe`，问用户装在哪），绝对路径写进 `emulator.adb`（单引号，见模板）；没有再 `maapilot tools install adb`。maa-cli 会跟着用这个 adb，别让 PATH 上另一个版本的 adb 同时连 |
 | `emulator` | 见上一步；模拟器没开、ADB 没打开、地址填错 |
 | `screen` | 分辨率不对：请用户在模拟器设置里改成 1280×720（16:9），改完多半要重启模拟器 |
-| `maa_cli` | 征得同意后 `maapilot tools install maa-cli`：从 GitHub 下载实测过的 maa-cli 版本装进项目的 `.tools/`，MaaCore 和资源还没有就顺手 `maa install`（几分钟，要联网）；`tools.maa` 保持写 `maa` 就会用它。用户已经自己装好了 maa-cli（Homebrew 等）也行：写了绝对路径就照它，`doctor` 只看版本在不在实测范围。太旧（`doctor` 不通过）也是 `maapilot tools install maa-cli`，`tools.maa` 写了别的路径时问用户要不要改成 `maa`。Windows：MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
+| `maa_cli` | 征得同意后 `maapilot tools install maa-cli`：从 GitHub 下载最新正式版的 maa-cli 装进项目的 `.tools/`，MaaCore 和资源还没有就顺手 `maa install`（几分钟，要联网）；`tools.maa` 保持写 `maa` 就会用它。用户已经自己装好了 maa-cli（Homebrew 等）也行：写了绝对路径就照它，`doctor` 只看版本在不在实测范围。太旧（`doctor` 不通过）也是 `maapilot tools install maa-cli`，`tools.maa` 写了别的路径时问用户要不要改成 `maa`。Windows：MaaCore 跑不起来（缺 DLL、退出码怪）多半是没装 VC++ 运行库：征得同意后 `winget install Microsoft.VCRedist.2015+.x64`（或 https://aka.ms/vs/17/release/vc_redist.x64.exe） |
 | `maa_config` `ocr_model` `game_data` | `maapilot doctor --fix`（装任务模板、复制 OCR 模型、同步游戏数据，不用问用户） |
 | `game` | 游戏没在前台：下一步的试启动会处理 |
 | `legacy_schedule` | 还留着旧版的系统定时任务：见第 4 步「旧版的定时任务」，用户同意后 `maapilot daily unschedule` |
