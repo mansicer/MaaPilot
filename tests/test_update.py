@@ -879,3 +879,80 @@ def test_auto_update_turned_on_in_existing_config(before, after):
     p.write_text(before, encoding="utf-8")
     maa.ensure_auto_update()
     assert p.read_text(encoding="utf-8") == after
+
+
+# --- 0.3.1 留下的三个小问题 ---------------------------------------------------------------------------------------------
+
+def test_beta_core_is_behind_its_final_release(monkeypatch):
+    online(monkeypatch, maapilot=__version__, core="6.23.0")
+    monkeypatch.setattr(updates, "local_versions", lambda: {"maa_core": "6.23.0-beta.1"})
+    assert updates.status(updates.refresh())["maa-core"]["update"]
+
+
+@pytest.mark.parametrize("cur", ["6.23.0", "v6.23.0", "6.23.0-3-gabc123", "6.23.1-beta.1", "6.24.0-rc.1"])
+def test_core_not_behind_the_same_or_older_release(monkeypatch, cur):
+    online(monkeypatch, maapilot=__version__, core="6.23.0")
+    monkeypatch.setattr(updates, "local_versions", lambda: {"maa_core": cur})
+    assert not updates.status(updates.refresh())["maa-core"]["update"]
+
+
+def test_version_key_orders_prereleases_first():
+    from maapilot import toolchain
+    k = toolchain.version_key
+    assert k("6.23.0-alpha.1") < k("6.23.0") and k("v6.23.0-RC.2") < k("v6.23.0") and k("6.22.9") < k("6.23.0-beta.1")
+    assert k("0.8.0-nightly.1+sha.x") == k("0.8.0")
+
+
+def test_dirty_hint_also_works_for_staged_files(repo):
+    (repo / "a.txt").write_text("用户改的\n", encoding="utf-8")
+    git(repo, "add", "a.txt")
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "dirty" and "git restore --staged --worktree" in e.value.hint
+    git(repo, "restore", "--staged", "--worktree", "a.txt")          # 提示里的命令真的能还原
+    assert text(repo) == "1\n" and update_cmd.apply_maapilot()["updated"]
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_edit_identical_to_the_new_version_does_not_block(repo, staged):
+    (repo / "a.txt").write_text("2\n", encoding="utf-8")             # 手动打了和新版本一样的补丁
+    if staged:
+        git(repo, "add", "a.txt")
+    d = update_cmd.apply_maapilot()
+    assert d["updated"] and text(repo) == "2\n" and git(repo, "status", "--porcelain") == ""
+    assert git(repo, "describe", "--tags") == f"v{NEWER}"
+
+
+def test_identical_edit_from_another_branch(repo):
+    git(repo, "checkout", "-q", "-b", "side")
+    (repo / "a.txt").write_text("2\n", encoding="utf-8")
+    d = update_cmd.apply_maapilot()
+    assert d["updated"] and d["switched_from"] == "side" and text(repo) == "2\n" and git(repo, "status", "--porcelain") == ""
+
+
+def test_identical_edit_kept_when_rolling_back(repo, monkeypatch):
+    (repo / "a.txt").write_text("2\n", encoding="utf-8")
+    before = git(repo, "rev-parse", "HEAD")
+
+    def broken(want):
+        raise OSError("新版本跑不起来")
+    monkeypatch.setattr(update_cmd, "_verify", broken)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "update_failed"
+    assert git(repo, "rev-parse", "HEAD") == before and text(repo) == "2\n"   # 退回了，用户的改动还在
+
+
+def test_identical_edit_unstaged_again_when_git_refuses(repo, monkeypatch):
+    (repo / "a.txt").write_text("2\n", encoding="utf-8")
+    real = update_cmd._git
+
+    def refuse(*args, **kw):
+        if args[:2] == ("merge", "--ff-only"):
+            return subprocess.CompletedProcess(args, 1, "", "fatal: 不行")
+        return real(*args, **kw)
+    monkeypatch.setattr(update_cmd, "_git", refuse)
+    with pytest.raises(CliError) as e:
+        update_cmd.apply_maapilot()
+    assert e.value.code == "merge_refused"
+    assert text(repo) == "2\n" and git(repo, "diff", "--cached", "--name-only") == ""

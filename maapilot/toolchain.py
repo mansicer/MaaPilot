@@ -62,6 +62,13 @@ def version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.group(1).split(".")) if m else ()
 
 
+def version_key(v: str) -> tuple:
+    """比新旧用：同一个版本号，测试版（-alpha / -beta / -rc）排在正式版前面。"6.23.0-beta.1" < "6.23.0"。
+    别的后缀（-nightly、git describe 的 -3-gabc）不算测试版：分不清比正式版新还是旧，按版本号相同处理。"""
+    pre = re.match(r"v?\d+(?:\.\d+)*-(?:alpha|beta|rc)", str(v).strip(), re.I)
+    return (version_tuple(v), 0 if pre else 1)
+
+
 def tools_dir() -> Path:
     return paths.ROOT / ".tools"
 
