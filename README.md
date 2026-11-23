@@ -89,9 +89,9 @@ MaaPilot 不绑定具体 Harness，但使用到的模型和 Harness 应该满足
 
 <a id="zcode"></a>
 
-#### ZCode [[Doc]](docs/harnesses/zcode.md)
+#### ZCode [[Website]](https://zcode.z.ai/cn) [[Doc]](docs/harnesses/zcode.md)
 
-在 ZCode 里打开项目文件夹即可使用。定时日常用它的定时自动化（每天重复、随工作区保存，应用重启后照常触发），应用要开着。目前为实验支持。
+在 ZCode 里打开项目文件夹即可使用。定时日常用它的定时自动化（每天重复、随工作区保存，应用重启后照常触发），应用要开着。权限确认跟你在 ZCode 里的设置走，全自动模式下花钱（合成玉、源石）不弹确认，靠程序事后对账。目前为实验支持。
 
 ### 扩展和反馈
 
