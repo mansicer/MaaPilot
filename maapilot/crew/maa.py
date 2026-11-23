@@ -275,8 +275,13 @@ class MaaRun:
     @property
     def ok(self) -> bool:
         tasks = self.parsed.get("tasks") or []
-        return (self.error is None and not self.timed_out and self.returncode == 0
-                and all(t["status"] == "Completed" for t in tasks))
+        if self.error is not None or self.timed_out:
+            return False
+        if all(t["status"] == "Completed" for t in tasks):
+            # MAA 6.23.0 在 macOS 上任务全部完成、AllTasksCompleted 之后偶发退出崩溃（mutex lock failed，退出码非 0）：
+            # 任务确实做完了，不当成失败。任务列表为空、退出码又非 0 的（maa-cli 中途死掉）仍然算失败。
+            return self.returncode == 0 or bool(tasks)
+        return False
 
     @property
     def offline(self) -> bool:

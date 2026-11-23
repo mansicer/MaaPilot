@@ -191,6 +191,18 @@ def test_maa_summary_missing_is_flagged():
     assert maa_cmd.output_problem("recruit", _run("all done\n", FIX / "maa_fight.log", rc=1)) is None   # 失败时另有报错
 
 
+def test_maa_ok_tolerates_teardown_crash():
+    # MAA 在 macOS（Apple Silicon）上任务全部完成、AllTasksCompleted 之后偶发退出崩溃
+    # （libc++abi: mutex lock failed，退出码非 0）：任务确实做完了，不算失败。
+    stdout = "Summary\n-----------------------------------\n[fight] 05:08:53 - 05:13:57 (5m 4s) Completed\n"
+    assert _run(stdout, FIX / "maa_fight.log", rc=1).ok
+    assert _run(stdout, FIX / "maa_fight.log").ok                           # 正常退出照旧成功
+    assert not _run("Summary\n-----------------------------------\n", FIX / "maa_fight.log", rc=1).ok
+    # 任务列表为空、退出码又非 0 的（maa-cli 中途死掉）照旧算失败
+    assert not _run("Summary\n-----------------------------------\n[fight] 05:08:53 - 05:13:57 (5m 4s) Error\n",
+                    FIX / "maa_fight.log").ok
+
+
 # --- 官方公告 ---------------------------------------------------------------------------------------------------------
 
 def _fake_get(list_data, item_data):
