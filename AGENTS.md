@@ -17,6 +17,7 @@
 | pi | `docs/harnesses/pi.md` |
 | DSH（DeepSeek Harness） | `docs/harnesses/dsh.md` |
 | Antigravity | `docs/harnesses/antigravity.md` |
+| ZCode | `docs/harnesses/zcode.md` |
 
 不在表里的 harness：按 `docs/harnesses/README.md` 的通用做法来，跟用户说一声这个 harness 还没有专门的说明。
 
