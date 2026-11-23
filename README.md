@@ -132,6 +132,7 @@ B 服的游戏客户端有更新时要自己在模拟器里更新（官服的可
 - 命令与输出：[`docs/cli.md`](docs/cli.md)
 - Agent 的说明文档：[`AGENTS.md`](AGENTS.md)（各 agent 通用；[`CLAUDE.md`](CLAUDE.md) 引用）、[`.agents/skills/`](.agents/skills/) 和 [`docs/harnesses/`](docs/harnesses/)
 - 测试：统一放在`tests`目录下
+- 提交 PR：按 [PR 模板](.github/pull_request_template.md)填写，其中"PR 改动说明"请本人简单写明改动和必要性，不要让 Agent 代写
 
 ## 致谢
 
