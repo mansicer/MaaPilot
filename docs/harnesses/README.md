@@ -12,6 +12,7 @@ MaaPilot 只做和游戏相关的部分（`AGENTS.md`、skills、`maapilot` 工�
 | pi | [`pi.md`](pi.md) |
 | DSH（DeepSeek Harness） | [`dsh.md`](dsh.md) |
 | Antigravity | [`antigravity.md`](antigravity.md) |
+| ZCode | [`zcode.md`](zcode.md) |
 
 ## 要 harness 提供什么
 

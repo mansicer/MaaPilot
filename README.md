@@ -17,7 +17,7 @@ LLM 接管的明日方舟全流程自动化 Agent，定时日常到特殊需求�
 
 基于 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 项目进行大部分自动化，节省你的 Token。
 
-已支持的 Harness：[Claude Code](#claude-code)（命令行、桌面版）、[Codex](#codex)（桌面版）、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)、[Antigravity](#antigravity)。（持续更新中...）
+已支持的 Harness：[Claude Code](#claude-code)（命令行、桌面版）、[Codex](#codex)（桌面版）、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)、[Antigravity](#antigravity)、[ZCode](#zcode)（实验支持）。（持续更新中...）
 
 </div>
 
@@ -31,7 +31,7 @@ https://github.com/user-attachments/assets/d309322a-e263-4ddf-a098-02634295295e
 
 - 一台 Mac 或 Windows 电脑
 - 一个安卓模拟器（见 [MAA 文档里的模拟器支持](https://maa.plus/docs/zh-cn/manual/device/)）
-- 配置好账户和模型的 Agent Harness：[Claude Code](#claude-code)、[Codex](#codex)、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh) 或 [Antigravity](#antigravity)
+- 配置好账户和模型的 Agent Harness：[Claude Code](#claude-code)、[Codex](#codex)、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)、[Antigravity](#antigravity) 或 [ZCode](#zcode)
 
 安装步骤：
 
@@ -86,6 +86,12 @@ MaaPilot 不绑定具体 Harness，但使用到的模型和 Harness 应该满足
 #### Antigravity [[Website]](https://antigravity.google) [[Doc]](docs/harnesses/antigravity.md)
 
 将项目文件夹打开并设为当前活动工作区（Active Workspace）即可使用 Antigravity，支持通过会话定时跑日常，需要保持应用和会话开启。
+
+<a id="zcode"></a>
+
+#### ZCode [[Website]](https://zcode.z.ai/cn) [[Doc]](docs/harnesses/zcode.md)
+
+在 ZCode 里打开项目文件夹即可使用。定时日常用它的定时自动化（每天重复、随工作区保存，应用重启后照常触发），应用要开着。权限确认跟你在 ZCode 里的设置走，全自动模式下花钱（合成玉、源石）不弹确认，靠程序事后对账。目前为实验支持。
 
 ### 扩展和反馈
 
