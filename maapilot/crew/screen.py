@@ -8,10 +8,14 @@ Kept free of MaaFramework imports so `maapilot doctor` and tests can use it.
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 
 REF_W, REF_H = 1280, 720
 FULL_ROI: tuple[int, int, int, int] = (0, 0, REF_W, REF_H)
 ASPECT_TOLERANCE = 0.01  # relative; covers rounding such as 1366x768
+
+SHOT_SUFFIX = ".jpg"    # 存给 agent 看的截图（截屏、失败取证）默认存成 JPEG：同样一张 1280×720 的图，比 PNG 小一个数量级
+SHOT_QUALITY = 90       # 截图 JPEG 的质量；agent 要在这上面认字、量坐标，别压得太狠
 
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
@@ -37,6 +41,22 @@ def png_size(data: bytes) -> tuple[int, int]:
     if w <= 0 or h <= 0:
         raise ValueError(f"bad PNG size {w}x{h}")
     return w, h
+
+
+def save_shot(img, path: Path | str, quality: int = SHOT_QUALITY) -> tuple[int, int]:
+    """BGR 数组存成截图文件，返回（宽, 高）：不是正好 1280×720 的先缩一次；格式按扩展名（`.jpg` / `.jpeg` → JPEG，
+    别的按扩展名，如 `.png`）。用 PIL 不用 cv2（认中文路径）。"""
+    from PIL import Image
+    im = Image.fromarray(img[:, :, ::-1])
+    if im.size != (REF_W, REF_H):
+        im = im.resize((REF_W, REF_H))
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.suffix.lower() in (".jpg", ".jpeg"):
+        im.save(p, "JPEG", quality=quality)
+    else:
+        im.save(p, "PNG")
+    return im.size
 
 
 def check_point(x: int, y: int) -> None:

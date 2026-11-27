@@ -119,6 +119,8 @@ def test_optional_parts_only_when_asked(capsys, session, tmp_path):
               "--contact", "qq 1")
     inc = d["includes"]
     assert inc["maa_log"] and inc["shots"] == ["1.png"] and inc["raw_session"] and inc["contact"]
+    (paths.SHOTS / "y.jpg").write_bytes(b"\xff\xd8 fake")            # 截图现在是 JPEG：草稿里保留扩展名，不转回 PNG
+    assert draft(capsys, session, "--shot", str(paths.SHOTS / "y.jpg"))["includes"]["shots"] == ["1.jpg"]
     log = (bundle(d["id"]) / "maa-log.txt").read_text(encoding="utf-8")
     assert log.splitlines()[0] == "# 20261120-044000-infrast.log" and log.count("\n") == feedback.MAA_LOG_LINES + 1
     assert "最后一行" in log

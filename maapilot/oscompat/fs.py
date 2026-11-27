@@ -156,13 +156,15 @@ def imread(p: Path | str):
     return np.ascontiguousarray(rgb[:, :, ::-1])
 
 
-def imwrite(p: Path | str, img, ext: str | None = None) -> bool:
-    """BGR 数组写成图片。格式按扩展名（或 ext，如 ".png"）。"""
+def imwrite(p: Path | str, img, ext: str | None = None, quality: int | None = None) -> bool:
+    """BGR 数组写成图片。格式按扩展名（或 ext，如 ".png"）。quality 只对 JPEG 有效（不给用 PIL 的默认值）。"""
     from PIL import Image
     p = Path(p)
     fmt = (ext or p.suffix or ".png").lstrip(".").upper()
+    fmt = "JPEG" if fmt in ("JPG", "JPEG") else fmt
+    extra = {"quality": quality} if (fmt == "JPEG" and quality is not None) else {}
     try:
-        Image.fromarray(img[:, :, ::-1] if img.ndim == 3 else img).save(str(p), format="JPEG" if fmt == "JPG" else fmt)
+        Image.fromarray(img[:, :, ::-1] if img.ndim == 3 else img).save(str(p), format=fmt, **extra)
     except (OSError, ValueError, KeyError):
         return False
     return True

@@ -371,7 +371,7 @@ def game(cfg, monkeypatch):
 
 def test_screen_shot_and_ocr(game, capsys):
     code, env = run(capsys, "screen", "shot", "--name", "home")
-    assert code == 0 and env["data"]["width"] == 1280 and env["data"]["path"].endswith("-home.png")
+    assert code == 0 and env["data"]["width"] == 1280 and env["data"]["path"].endswith("-home.jpg")
     assert os.path.exists(env["data"]["path"])
     code, env = run(capsys, "screen", "ocr", "--find", "终端")
     assert code == 0 and [h["text"] for h in env["data"]["hits"]] == ["终端"]

@@ -582,7 +582,7 @@ def _open_and_read(g, code: str, hit, titles: dict[str, str] | None = None) -> S
         if r.error is None or r.error == "raid_mode":
             break
     if r.error is not None:
-        g.save(f"clears_{code}")                          # maafw_debug/clears_<编号>.png：认不准的详情页，下次对照
+        g.save(f"clears_{code}")                          # maafw_debug/clears_<编号>.jpg：认不准的详情页，下次对照
     return r
 
 
@@ -673,7 +673,7 @@ def scan_episode(g, ep: int, codes: dict[str, str], skip: frozenset[str] = froze
             elif r.error is None or r.error == "raid_mode":
                 readings[code] = r
                 if r.error is None and suspect is not None and suspect(r):
-                    try:                                  # maafw_debug/clears_<编号>_lower.png：给核对的 agent 看
+                    try:                                  # maafw_debug/clears_<编号>_lower.jpg：给核对的 agent 看
                         r.shot = str(g.save(f"clears_{code}_lower"))
                     except Exception:                     # noqa: BLE001
                         pass

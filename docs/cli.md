@@ -183,10 +183,10 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 设备上不起 maatouch / minitouch，也不发任何点击，所以不会和正在跑的任务抢输入；截图方式和平时一样（`RawWithGzip | Encode`，缩到 1280×720）。
 
 `maapilot screen shot [--name <名>]`
-截一张图存到 `private/shots/<YYYYmmdd-HHMMSS>[-<名>].png`（1280×720）。agent 用读图工具看它：`path` 是绝对路径。
+截一张图存到 `private/shots/<YYYYmmdd-HHMMSS>[-<名>].jpg`（1280×720，JPEG）。agent 用读图工具看它：`path` 是绝对路径。
 
 ```json
-{"path": "/…/private/shots/20260930-214001-home.png", "width": 1280, "height": 720, "at": "…"}
+{"path": "/…/private/shots/20260930-214001-home.jpg", "width": 1280, "height": 720, "at": "…"}
 ```
 
 `maapilot screen ocr [--roi X Y W H] [--find <正则>] [--name <名>] [--image <图片>]`
@@ -195,7 +195,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 `path` 就是这张图。图片不在、读不了或不是 16:9 退出码 2（`bad_image`）；OCR 资源加载不了退出码 5（`ocr_unavailable`）。
 
 ```json
-{"path": "/…/private/shots/….png", "roi": [0, 0, 1280, 720],
+{"path": "/…/private/shots/….jpg", "roi": [0, 0, 1280, 720],
  "hits": [{"text": "终端", "box": [1080, 150, 60, 30], "center": [1110, 165], "score": 0.99}]}
 ```
 
@@ -237,7 +237,7 @@ v0.1 的 `schedule`、`unseen_problems`、`session` 去掉了（不再自己定�
 和月签到（`sign_in`）：程序只关不领，`seen` 不为空时带 `hint`，agent 按 `maapilot-daily`「活动签到」回去领。没回到首页 → 退出码 1（`not_home`，`data` 同样给全，看 `shot`）。
 
 ```json
-{"home": true, "shot": "/…/private/shots/20261021-051200-home.png", "overlays": ["announcement", "login_event"],
+{"home": true, "shot": "/…/private/shots/20261021-051200-home.jpg", "overlays": ["announcement", "login_event"],
  "seen": ["login_event"], "hint": "路上关掉了活动签到页（程序只关不领）：…"}
 ```
 
@@ -301,14 +301,14 @@ maa-cli 用本项目自己的配置目录 `private/maa-config/`（经 `MAA_CONFI
 maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa run` 的标准输出里没有 Summary 任务行；`fight` 的日志里既没有 `Current sanity` 也没有 `Mission started`），
 命令照常返回，`data.upstream_format` 是一句说明，同时记进 `sources.json`（maa-cli 的输出格式可能变了，次数、理智、掉落记不到）。
 
-**失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.png`），
+**失败时取证**：maa 跑完而没成功时（`maa_failed`、`offline`），在做别的任何事之前先截一张图（同 `screen shot`，存 `private/shots/<时间>-fail-<任务>.jpg`），
 再从 MAA 的日志目录（`maa dir log`；测试或特殊安装可以用环境变量 `MAAPILOT_MAA_LOG_DIR` 指定）里找这次任务开始以后 MAA 自己存的截图
 （`interface/`、`other/` 等子目录下的 `YYYY.MM.DD-HH.MM.SS.mmm_raw.png`，本地时间，最多 6 张），**复制进 `private/shots/`**
-（`<YYYYmmdd-HHMMSS>-maa-<任务>-<毫秒>.png`：MAA 的日志目录在项目外，agent 不一定读得了），放进 `data.evidence`：
+（`<YYYYmmdd-HHMMSS>-maa-<任务>-<毫秒>.jpg`：MAA 的日志目录在项目外，agent 不一定读得了），放进 `data.evidence`：
 
 ```json
-{"shot_now": "/…/private/shots/20261002-160918-fail-infrast.png",
- "maa_shots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.png", "source": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png",
+{"shot_now": "/…/private/shots/20261002-160918-fail-infrast.jpg",
+ "maa_shots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.jpg", "source": "/…/debug/interface/2026.10.02-16.09.17.997_raw.png",
                 "kind": "interface", "at": "2026-10-02T16:09:17+08:00"}],
  "window": {"start": "…", "end": "…"}, "why": "maapilot maa why --task infrast", "missing": ["…"]}
 ```
@@ -338,7 +338,7 @@ maa 报成功（退出码 0）而输出里认不出程序要读的行时（`maa 
  "waits": [{"task": "LoadingText", "matched": "正在提交", "first": "16:06:53", "last": "16:07:24", "count": 39, "seconds": 31}],
  "screencap_failures": [], "connection": [{"what": "Connected", "details": {…}, "first": "16:01:04", "last": "16:01:04", "count": 1}, …],
  "error_lines": [{"message": "skill has no recognition result", "first": "16:01:36", "last": "16:06:13", "count": 13}, …],
- "screenshots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.png", "source": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}]}
+ "screenshots": [{"path": "/…/private/shots/20261002-160917-maa-infrast-997.jpg", "source": "…/interface/2026.10.02-16.09.17.997_raw.png", "kind": "interface", "at": "…"}]}
 ```
 
 - `steps`：MAA 一步步做的事（`SubTaskStart`：任务、动作、认出的字或模板），连续相同的合成一条（`repeat`、`last`），留最后 40 条（`steps_total` 是总数）；
@@ -657,7 +657,7 @@ MAA 一般在活动开始后一两天的资源热更新里加上这期），能�
 ## op / craft —— 快捷操作（碰模拟器）
 
 旧版的自动化脚本，能成就省事，失败了 agent 按 `maapilot-training` / `maapilot-base` 在界面上自己做。失败退出码 1，
-`error.code` 是 `shortcut_failed`（另见下表），`data` 带 `stage`（做到哪一步）、`shot`（失败时的截图，`private/debug/<名>_<时间>.png`，
+`error.code` 是 `shortcut_failed`（另见下表），`data` 带 `stage`（做到哪一步）、`shot`（失败时的截图，`private/debug/<名>_<时间>.jpg`，
 带时间，同一个干员 / 物品再失败不会盖掉上一张；旁边同名的 `.json` 是最近几次识别读到的字和整张图的识别结果，查读错了什么用；只留最近 300 张）、
 `done`（已经做了的部分），脚本给得出的还有 `reached`（升级做到的练度）、`made` / `restored`（制造站）。
 花了多少不在这里算：要知道就前后各 `state depot` 一次。连不上模拟器退出码 5（`device_failed`）。
@@ -691,7 +691,7 @@ MaaCore 自己读练度：已经到了的项报 `AlreadySatisfied`，什么都�
 ```json
 // op upgrade
 {"operator": "遥", "target": {"elite": 2, "level": 1, "skill": null},
- "before": {"elite": 1, "level": 70}, "after": {"elite": 2, "level": 1, "skill": null}, "shot": "private/debug/…png"}
+ "before": {"elite": 1, "level": 70}, "after": {"elite": 2, "level": 1, "skill": null}, "shot": "private/debug/…jpg"}
 // （中途报错、重读发现已经到目标时多一个 "recovered": "<当时的错误>"）
 // op mastery
 {"operator": "遥", "skill": 2, "status": "started", "rank": 1, "hours": 8, "short": null, "crafted": [...], "shot": null}
@@ -1035,7 +1035,7 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
 
 | 命令 | 做什么 |
 |---|---|
-| `feedback draft --text-file <文件> --session-file <文件> --harness <名字> --model <型号> [--category bug\|experience\|idea\|other] [--harness-version V] [--effort E] [--contact C] [--raw-session-file <文件>] [--shot <png>]… [--maa-log] [--mask <字样>]… [--no-checks]` | 收集、脱敏，存成草稿 `private/feedback/<编号>/`。`--text-file` 是用户的反馈原话（写成文件：原话里有引号、`$` 这些符号也不会被 shell 解释；短而没有特殊符号的可以用 `--text`）。文本文件都要是 UTF-8（别的编码拒绝：脱敏认不出里面的东西），`private/` 下只收 `private/feedback/` 里的。`--mask` 的字样至少两个字。`--contact` 原样上传、不脱敏。起草到一半出错不留半截的草稿。`--session-file` 是 agent 写的会话经过，`--raw-session-file` 是 agent 自己整理的带工具调用细节的原始记录（程序不读 harness 的会话文件）；`--shot` 只收 `private/` 下的 PNG，最多 4 张；`--maa-log` 带最近一份 maa-cli 日志的最后 200 行。`--raw-session-file`、`--shot`、`--maa-log`、`--contact` 用户同意才带 |
+| `feedback draft --text-file <文件> --session-file <文件> --harness <名字> --model <型号> [--category bug\|experience\|idea\|other] [--harness-version V] [--effort E] [--contact C] [--raw-session-file <文件>] [--shot <图片>]… [--maa-log] [--mask <字样>]… [--no-checks]` | 收集、脱敏，存成草稿 `private/feedback/<编号>/`。`--text-file` 是用户的反馈原话（写成文件：原话里有引号、`$` 这些符号也不会被 shell 解释；短而没有特殊符号的可以用 `--text`）。文本文件都要是 UTF-8（别的编码拒绝：脱敏认不出里面的东西），`private/` 下只收 `private/feedback/` 里的。`--mask` 的字样至少两个字。`--contact` 原样上传、不脱敏。起草到一半出错不留半截的草稿。`--session-file` 是 agent 写的会话经过，`--raw-session-file` 是 agent 自己整理的带工具调用细节的原始记录（程序不读 harness 的会话文件）；`--shot` 只收 `private/` 下的图片（PNG / JPEG），最多 4 张；`--maa-log` 带最近一份 maa-cli 日志的最后 200 行。`--raw-session-file`、`--shot`、`--maa-log`、`--contact` 用户同意才带 |
 | `feedback show <编号> [--part info\|session\|raw-session\|maa-log] [--offset N]` | 草稿的概况；`--part` 另给那一部分脱敏后的文字（`part: {name, chars, offset, text, more}`，一次 20000 字，`more` 为真就加 `--offset` 接着取） |
 | `feedback redact <编号> [--mask <字样>]… [--remove raw-session\|maa-log\|shots\|contact]… [--text-file <文件>] [--text <新原话>] [--session-file <文件>] [--raw-session-file <文件>]` | 改草稿：再隐去字样（原样匹配，对所有文字生效，记在本机的 `state.json` 里）、去掉某一部分、换掉文字。改完 `digest` 变了 |
 | `feedback send <编号> --digest <digest>` | 上传。`--digest` 是给用户看过的那一版的 |
@@ -1066,7 +1066,7 @@ Windows 上依赖有变时要换正被用着的 `maapilot.exe`，没实测过；
   `checks`（`doctor --offline` 各项的 `name / ok / required / detail`，加上 maa-cli 和 MaaCore 版本）、
   `journal`（最近 40 条命令记录的骨架：`at / command / ok / exit / duration_s / error`；`command` 只留命令行定义里有的命令名（参数写错时记下的词可能是参数，认不出就是 `?`），`error` 只留错误代码或异常类型；**参数和结果摘要不带**）、
   `last_daily`（最近一次日常每一项的 `task / ok / code` 和状态）、`sources`（格式出了问题的外部数据源）。
-- `session.md`、`session-raw.txt`、`maa-log.txt`、`shots/<n>.png`：带了才有。
+- `session.md`、`session-raw.txt`、`maa-log.txt`、`shots/<n>.<扩展名>`：带了才有。
 
 不在里面的：命令的参数和结果（货币数量、干员名）、目标、用户偏好、配置、森空岛的任何东西。
 

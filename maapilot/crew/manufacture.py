@@ -238,7 +238,7 @@ def _restore(g, original: str | None, original_count: int | None) -> bool:
 
 
 def _restore_shot(g) -> str | None:
-    """没改回时的截图（maafw_debug/mfg_restore_fail.png），给接管的 agent 看；存不了就不给。"""
+    """没改回时的截图（maafw_debug/mfg_restore_fail.jpg），给接管的 agent 看；存不了就不给。"""
     try:
         return str(g.save("mfg_restore_fail"))
     except Exception:                                   # noqa: BLE001
