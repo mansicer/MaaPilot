@@ -3,8 +3,8 @@
 不拿锁：MAA 或别的命令正在操作模拟器时也能截图看看。连接用 Game(readonly=True)：MaaFramework 不在设备上起
 maatouch / minitouch，也不发任何点击，所以不会和正在跑的任务抢输入。
 
-截图按 1280×720 参考坐标系存成 PNG（MaaFramework 已把截图缩到短边 720；不是正好 1280×720 时再缩一次），
-放在 private/shots/<YYYYmmdd-HHMMSS>[-<名>].png，输出绝对路径给 agent 用读图工具看。
+截图按 1280×720 参考坐标系存成 JPEG（MaaFramework 已把截图缩到短边 720；不是正好 1280×720 时再缩一次），
+放在 private/shots/<YYYYmmdd-HHMMSS>[-<名>].jpg，输出绝对路径给 agent 用读图工具看。
 `screen ocr --image <图>` 不连模拟器，在已有的截图上跑同一套识别（core.ImageGame），排查识别错误、做回归样本用。
 """
 from __future__ import annotations
@@ -18,33 +18,23 @@ from maapilot.tools import common
 
 
 def shot_path(name: str | None) -> Path:
+    from maapilot.crew.screen import SHOT_SUFFIX
     stamp = common.now().strftime("%Y%m%d-%H%M%S")
     safe = re.sub(r"[^\w.-]+", "_", name).strip("_")[:40] if name else ""
-    p = paths.SHOTS / (f"{stamp}-{safe}.png" if safe else f"{stamp}.png")
+    p = paths.SHOTS / (f"{stamp}-{safe}{SHOT_SUFFIX}" if safe else f"{stamp}{SHOT_SUFFIX}")
     n = 2
     while p.exists():
-        p = p.with_name(f"{p.stem.rsplit('~', 1)[0]}~{n}.png")
+        p = p.with_name(f"{p.stem.rsplit('~', 1)[0]}~{n}{SHOT_SUFFIX}")
         n += 1
     return p
 
 
-def save_png(img, path: Path) -> tuple[int, int]:
-    """BGR 数组存成 1280×720 的 PNG，返回（宽, 高）。"""
-    from PIL import Image
-    from maapilot.crew.screen import REF_H, REF_W
-    im = Image.fromarray(img[:, :, ::-1])
-    if im.size != (REF_W, REF_H):
-        im = im.resize((REF_W, REF_H))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    im.save(path, "PNG")
-    return im.size
-
-
 def capture(game, name: str | None):
     """截一张、存下，返回 (img, {path, width, height, at})。"""
+    from maapilot.crew.screen import save_shot
     img = game.screencap()
     p = shot_path(name)
-    w, h = save_png(img, p)
+    w, h = save_shot(img, p)
     return img, {"path": common.rel(p), "width": w, "height": h, "at": common.iso()}
 
 

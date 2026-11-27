@@ -103,7 +103,7 @@ def test_input_home_reports_closed_sign_in_pages(device, capsys):
     assert d["home"] is True and g.page == "home"
     assert d["overlays"] == ["login_event", "sign_in"] and d["seen"] == ["login_event", "sign_in"]
     assert "活动签到页、月签到" in d["hint"] and "领" in d["hint"]
-    assert d["shot"].endswith("-home.png") and os.path.exists(d["shot"])
+    assert d["shot"].endswith("-home.jpg") and os.path.exists(d["shot"])
     assert lock.current() is None
 
 

@@ -31,7 +31,8 @@ from maa.toolkit import Toolkit
 from maapilot import paths
 from maapilot.crew import device
 from maapilot.crew.device import Connection
-from maapilot.crew.screen import ASPECT_TOLERANCE, FULL_ROI, REF_H, REF_W, check_aspect, png_size  # noqa: F401  (re-export)
+from maapilot.crew.screen import (ASPECT_TOLERANCE, FULL_ROI, REF_H, REF_W, SHOT_QUALITY, SHOT_SUFFIX,  # noqa: F401  (re-export)
+                                  check_aspect, png_size, save_shot)
 
 
 @dataclass
@@ -50,7 +51,7 @@ RECENT_OCR = 12        # 取证 .json 里记最近几次识别
 DEBUG_KEEP = 300       # private/debug 里带时间的取证截图最多留几张（连同 .json）
 DRAG_STEP_MS = 20      # 拖动时每隔多久挪一步
 DRAG_REST_MS = 100     # 拖到终点停多久再松开
-_STAMPED = re.compile(r"_\d{8}-\d{6}(-\d+)?\.png$")
+_STAMPED = re.compile(r"_\d{8}-\d{6}(-\d+)?\.(?:png|jpe?g)$", re.I)
 
 
 def _hit_json(h: OcrHit) -> dict:
@@ -60,7 +61,8 @@ def _hit_json(h: OcrHit) -> dict:
 def prune_debug(keep: int = DEBUG_KEEP) -> None:
     """只留最近 keep 张带时间的取证截图（和旁边的 .json）；别的文件（MaaFramework 日志等）不动。"""
     try:
-        shots = sorted((p for p in paths.DEBUG_DIR.glob("*.png") if _STAMPED.search(p.name)),
+        shots = sorted((p for p in [*paths.DEBUG_DIR.glob("*.jpg"), *paths.DEBUG_DIR.glob("*.png")]
+                        if _STAMPED.search(p.name)),
                        key=lambda p: p.stat().st_mtime)
         for p in shots[:-keep] if len(shots) > keep else []:
             p.unlink(missing_ok=True)
@@ -117,27 +119,26 @@ class Game:
         """The device's raw resolution (clicks are given in the reference space; MaaFramework maps them)."""
         return tuple(self.ctrl.resolution)
 
-    def save_to(self, path: Path, img: np.ndarray | None = None, *, quality: int = 90) -> Path:
-        """Save a screenshot (the last one unless `img` is given) as JPEG at `path`, creating its directory."""
+    def save_to(self, path: Path, img: np.ndarray | None = None, *, quality: int = SHOT_QUALITY) -> Path:
+        """Save a screenshot (the last one unless `img` is given) at `path`, creating its directory: JPEG for a
+        `.jpg` suffix, otherwise the format the suffix names."""
         img = img if img is not None else (self._shot if self._shot is not None else self.screencap())
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(img[:, :, ::-1]).save(path, "JPEG", quality=quality)
-        return path
+        save_shot(img, path, quality=quality)
+        return Path(path)
 
     def save(self, name: str) -> Path:
-        """失败取证：截图存成 private/debug/<name>_<时间>.png（带时间，同一个干员 / 物品再失败不会盖掉上一次的），
+        """失败取证：截图存成 private/debug/<name>_<时间>.jpg（带时间，同一个干员 / 物品再失败不会盖掉上一次的），
         旁边的同名 .json 是最近几次识别读到了什么（`recent`）和整张图的识别结果（`screen`）。
         只留最近 DEBUG_KEEP 张。"""
         img = self._shot if self._shot is not None else self.screencap()
         paths.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        p = paths.DEBUG_DIR / f"{name}_{stamp}.png"
+        p = paths.DEBUG_DIR / f"{name}_{stamp}{SHOT_SUFFIX}"
         n = 1
         while p.exists():                                  # 同一秒存了两张
             n += 1
-            p = paths.DEBUG_DIR / f"{name}_{stamp}-{n}.png"
-        Image.fromarray(img[:, :, ::-1]).save(p)
+            p = paths.DEBUG_DIR / f"{name}_{stamp}-{n}{SHOT_SUFFIX}"
+        self.save_to(p, img)
         try:
             self._save_hits(p.with_suffix(".json"), name, img)
         except Exception:                                  # noqa: BLE001 - 取证写不了不影响主流程
@@ -366,7 +367,7 @@ class ImageGame(Game):
 
     def save(self, name: str) -> Path:
         self.actions.append(("save", name))
-        return Path(f"{name}.png")
+        return Path(f"{name}{SHOT_SUFFIX}")
 
     def tap(self, x: int, y: int, delay: float = 0.8) -> None:
         self.actions.append(("tap", int(x), int(y)))

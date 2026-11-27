@@ -13,6 +13,14 @@ from maapilot.tools import common
 from tests.test_tools import FakeGame, cfg  # noqa: F401  复用假的 maa 与假的模拟器
 
 
+def png(path):
+    """真的 PNG（16×9）：转存成 JPEG 要走解码，假的字节解不开。"""
+    from PIL import Image
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (16, 9), "black").save(path, "PNG")
+    return path
+
+
 def run(capsys, *argv):
     code = cli.main(list(argv))
     return code, json.loads(capsys.readouterr().out)
@@ -33,8 +41,8 @@ def maa_dir(tmp_path, monkeypatch):
     (d / "other").mkdir()
     for name in ("2026.10.02-16.09.17.997_raw.png", "2026.10.02-15.57.29.422_raw.png",
                  "2026.10.02-16.30.10.1_raw.png"):
-        (d / "interface" / name).write_bytes(b"png")
-    (d / "other" / "2026.10.02-16.05.00.66_raw.png").write_bytes(b"png")
+        png(d / "interface" / name)
+    png(d / "other" / "2026.10.02-16.05.00.66_raw.png")
     (d / "interface" / "notes.txt").write_text("x", encoding="utf-8")
     monkeypatch.setenv(maalog.DIR_ENV, str(d))
     return d
@@ -55,12 +63,17 @@ def test_screenshots_in_window(maa_dir):
 def test_import_shots_copies_into_project(maa_dir, tmp_path):
     shots = maalog.screenshots(W0, W1 + timedelta(seconds=30), maa_dir)
     got = maalog.import_shots(shots, "infrast")
-    assert [os.path.basename(g["path"]) for g in got] == ["20261002-160500-maa-infrast-066.png",
-                                                         "20261002-160917-maa-infrast-997.png"]
+    assert [os.path.basename(g["path"]) for g in got] == ["20261002-160500-maa-infrast-066.jpg",
+                                                         "20261002-160917-maa-infrast-997.jpg"]
     assert all(g["path"].startswith(str(paths.SHOTS.resolve())) and os.path.exists(g["path"]) for g in got)
+    assert open(got[0]["path"], "rb").read(2) == bytes([0xFF, 0xD8])            # 存成 JPEG（比同样内容的 PNG 小）
     assert got[1]["source"] == shots[1]["path"] and got[1]["at"] == shots[1]["at"]
     again = maalog.import_shots(shots, "infrast")                         # 再来一次：用已有的副本，不重复
     assert [g["path"] for g in again] == [g["path"] for g in got] and len(list(paths.SHOTS.iterdir())) == 2
+    not_image = tmp_path / "2026.10.02-16.20.00.7_raw.png"
+    not_image.write_bytes(b"png")                                     # 解不开的（不是真的图片）：原样复制，留着 .png
+    (kept,) = maalog.import_shots([{"path": str(not_image)}], "x")
+    assert kept["path"].endswith(".png") and open(kept["path"], "rb").read() == b"png"
     missing = maalog.import_shots([{"path": str(tmp_path / "nope" / "2026.10.02-16.00.00.1_raw.png")}], "x")
     assert missing[0]["path"] is None and "复制不了" in missing[0]["error"]
 
@@ -69,21 +82,21 @@ def test_maa_failure_collects_evidence(cfg, game, maa_dir, capsys, monkeypatch):
     monkeypatch.setattr(lock, "external_maa_pids", lambda: [])
     now = datetime.now()
     recent = [f"{t:%Y.%m.%d-%H.%M.%S}.{t.microsecond // 1000}_raw.png" for t in (now - timedelta(seconds=1),)]
-    (maa_dir / "other" / recent[0]).write_bytes(b"png")                 # 这次任务里 MAA 存的
+    png(maa_dir / "other" / recent[0])                                  # 这次任务里 MAA 存的
     old = now - timedelta(minutes=5)
-    (maa_dir / "interface" / f"{old:%Y.%m.%d-%H.%M.%S}.1_raw.png").write_bytes(b"png")   # 任务开始前的，不要
+    png(maa_dir / "interface" / f"{old:%Y.%m.%d-%H.%M.%S}.1_raw.png")   # 任务开始前的，不要
     (cfg / "stdout.txt").write_text("Summary\n[infrast] 16:01:02 - 16:09:18 (8m) Error\n", encoding="utf-8")
     (cfg / "log.txt").write_text("[2026-10-02 16:09:18 ERROR] Infrast Error\n", encoding="utf-8")
     (cfg / "rc").write_text("1", encoding="utf-8")
     code, env = run(capsys, "maa", "infrast")
     assert code == 1 and env["error"]["code"] == "maa_failed"
     ev = env["data"]["evidence"]
-    assert ev["shot_now"].endswith("-fail-infrast.png") and os.path.exists(ev["shot_now"])
+    assert ev["shot_now"].endswith("-fail-infrast.jpg") and os.path.exists(ev["shot_now"])
     # MAA 的截图在项目外（无头 agent 读不了）：复制进 private/shots/，原来的位置在 source
     (shot,) = ev["maa_shots"]
     assert shot["source"].endswith(recent[0]) and shot["kind"] == "other"
     assert shot["path"].startswith(str(paths.SHOTS.resolve())) and "-maa-infrast-" in shot["path"]
-    assert open(shot["path"], "rb").read() == b"png"
+    assert open(shot["path"], "rb").read(2) == bytes([0xFF, 0xD8])              # 转存成 JPEG
     assert "missing" not in ev and ev["why"] == "maapilot maa why --task infrast"
     assert "_log" not in env["data"]
     rows = [json.loads(l) for l in next(paths.LOGS.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]

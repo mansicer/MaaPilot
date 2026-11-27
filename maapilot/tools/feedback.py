@@ -315,23 +315,31 @@ def _masks(values) -> list[str]:
     return out
 
 
+SHOT_SUFFIXES = (".png", ".jpg", ".jpeg")      # 截图（`screen shot`、失败时的取证）
+
+
 def _shot(path: str) -> Path:
-    """截图只收 private/ 下的 PNG（`screen shot` 存的、失败时留的证据）。"""
+    """截图只收 private/ 下的图片（`screen shot` 存的、失败时留的证据）。"""
     p = Path(path).expanduser().resolve()
     try:
         p.relative_to(paths.PRIVATE.resolve())
     except ValueError:
         raise CliError("bad_file", f"截图要是 private/ 下的文件：{path}", exit=BAD_REQUEST) from None
-    if p.suffix.lower() != ".png" or not p.is_file():
-        raise CliError("bad_file", f"不是 PNG 截图：{path}", exit=BAD_REQUEST)
+    if p.suffix.lower() not in SHOT_SUFFIXES or not p.is_file():
+        raise CliError("bad_file", f"不是图片：{path}", exit=BAD_REQUEST)
     return p
 
 
 def bundle_files(d: Path) -> list[Path]:
-    """要上传的文件：只有程序自己放进 bundle/ 的那几种名字（别的文件——.DS_Store、编辑器的临时文件——不算，也不上传）。"""
+    """要上传的文件：只有程序自己放进 bundle/ 的那几种名字（别的文件——.DS_Store、编辑器的临时文件——不算，也不上传）。
+    截图按编号顺序（`shots/1.png`、`shots/2.jpg`……），扩展名跟原图一样。"""
     b = d / "bundle"
-    names = [INFO, SESSION, RAW, MAA_LOG, *(f"{SHOT_DIR}/{i}.png" for i in range(1, MAX_SHOTS + 1))]
-    return [b / n for n in sorted(names) if (b / n).is_file() and not (b / n).is_symlink()]
+    shots = sorted((p for p in (b / SHOT_DIR).glob("*")
+                    if p.stem.isdigit() and 1 <= int(p.stem) <= MAX_SHOTS and p.suffix.lower() in SHOT_SUFFIXES
+                    and not p.is_symlink()),
+                   key=lambda p: int(p.stem))
+    names = [INFO, SESSION, RAW, MAA_LOG]
+    return [b / n for n in sorted(names) if (b / n).is_file() and not (b / n).is_symlink()] + shots
 
 
 def digest(d: Path) -> str:
@@ -454,7 +462,7 @@ def cmd_draft(args) -> dict:
         if shots:
             (d / "bundle" / SHOT_DIR).mkdir()
             for i, s in enumerate(shots, 1):
-                shutil.copyfile(s, d / "bundle" / SHOT_DIR / f"{i}.png")
+                shutil.copyfile(s, d / "bundle" / SHOT_DIR / f"{i}{s.suffix.lower()}")
         _save_state(d, {"id": fid, "status": "draft", "created_at": info["created_at"], "masks": masks,
                         "scrubbed": scrub.counts, "not_scrubbed": scrub.skipped})
     except BaseException:                               # 起草到一半出错：不留半截的草稿
@@ -651,7 +659,7 @@ def register(sub) -> None:
     p.add_argument("--category", default="other", help=" / ".join(CATEGORIES))
     p.add_argument("--contact", help="用户愿意留的联系方式（用户说了才带；原样上传，不脱敏）")
     p.add_argument("--raw-session-file", help="带工具调用细节的原始会话记录（用户同意才带；agent 自己整理、先脱敏）")
-    p.add_argument("--shot", action="append", help="截图（private/ 下的 PNG；用户同意才带；可以写几次）")
+    p.add_argument("--shot", action="append", help="截图（private/ 下的图片：PNG / JPEG；用户同意才带；可以写几次）")
     p.add_argument("--maa-log", action="store_true", help="带上最近一份 MAA 日志的末尾（用户同意才带）")
     p.add_argument("--mask", action="append", help="另外要隐去的字样（至少两个字；可以写几次）")
     p.add_argument("--no-checks", action="store_true", help="不跑环境检查")

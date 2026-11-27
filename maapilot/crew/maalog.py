@@ -106,12 +106,14 @@ def screenshots(start: datetime, end: datetime, root: Path | None = None, limit:
 
 
 def import_shots(shots: list[dict], label: str, dest: Path | None = None) -> list[dict]:
-    """把 MAA 的截图复制进项目的 private/shots/（`<YYYYmmdd-HHMMSS>-maa-<label>-<毫秒>.png`）：MAA 的日志目录在项目外，
-    无头 agent 读不了。返回的 `path` 是项目里的副本，`source` 是原来的位置；已经复制过的（同名同大小）直接用。
-    复制不了的那张 `path` 为 null、带 `error`。"""
+    """把 MAA 的截图转存进项目的 private/shots/（`<YYYYmmdd-HHMMSS>-maa-<label>-<毫秒>.jpg`，存成 JPEG；
+    读不出来的原样复制成 .png）：MAA 的日志目录在项目外，无头 agent 读不了。返回的 `path` 是项目里的副本，
+    `source` 是原来的位置；已经转存过的（同名）直接用。转存不了的那张 `path` 为 null、带 `error`。"""
     import re
     import shutil
     from maapilot import paths
+    from maapilot.crew.screen import SHOT_QUALITY
+    from maapilot.oscompat import fs
     dest = dest or paths.SHOTS
     safe = re.sub(r"[^\w.-]+", "_", label or "maa").strip("_") or "maa"
     out = []
@@ -119,12 +121,20 @@ def import_shots(shots: list[dict], label: str, dest: Path | None = None) -> lis
         src = Path(s["path"])
         t = shot_time(src.name)
         stamp = f"{t:%Y%m%d-%H%M%S}-maa-{safe}-{t.microsecond // 1000:03d}" if t else f"maa-{safe}-{src.stem}"
-        target = dest / f"{stamp}.png"
+        target = dest / f"{stamp}.jpg"
+        raw = dest / f"{stamp}{src.suffix or '.png'}"            # 不是图片时原样复制的那个
         item = {**s, "source": str(src)}
         try:
-            if not (target.exists() and target.stat().st_size == src.stat().st_size):
-                dest.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src, target)
+            if not target.exists():
+                if raw.exists():
+                    target = raw
+                else:
+                    dest.mkdir(parents=True, exist_ok=True)
+                    img = fs.imread(src)
+                    if img is None or not fs.imwrite(target, img, quality=SHOT_QUALITY):
+                        target.unlink(missing_ok=True)
+                        shutil.copyfile(src, raw)
+                        target = raw
             item["path"] = str(target.resolve())
         except OSError as e:
             item.update(path=None, error=f"复制不了：{e}")
