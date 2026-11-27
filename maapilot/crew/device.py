@@ -14,8 +14,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Connection:
-    address: str            # adb serial: host:port or a serial from `adb devices`
+    address: str = ""       # adb serial: host:port or a serial from `adb devices`（win32 时不用）
     adb: str = "adb"        # adb program (looked up on PATH unless absolute)
+    kind: str = "adb"       # "adb" = 模拟器；"win32" = 明日方舟 PC 客户端（Win32Controller）
+    window: str | None = None   # win32：窗口标题关键词（可选，默认按 UnityWndClass + Arknights.exe 找）
+    hwnd: int | None = None     # win32：已知窗口句柄（可选）
 
 
 class NotConfigured(RuntimeError):

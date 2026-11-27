@@ -21,6 +21,7 @@ def _run_group(cmd: list[str], *, env: dict, timeout_s: float | None, stdout=sub
     """跑一个子进程（自成进程组，见 procs.spawn）；超时 → 结束整棵进程树（procs.kill_tree：先 TERM 等 15 秒，再 KILL 等 5 秒）。
     input：写进子进程 stdin 的文字（不给就接空）。→ (退出码或 None, stdout 文本, 是否超时)。"""
     p = procs.spawn(cmd, cwd=str(cwd or paths.ROOT), env=env, stdout=stdout, stderr=None,
+                    creationflags=getattr(procs, 'CREATE_NO_WINDOW', 0),
                     stdin=subprocess.DEVNULL if input is None else subprocess.PIPE)
     try:
         out, _ = p.communicate(input, timeout=timeout_s)

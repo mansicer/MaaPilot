@@ -191,9 +191,17 @@ def hot_update() -> dict:
 def _resource(d: dict) -> dict:
     r = d.get("resource") or {}
     age = _age(r.get("at"))
-    return {"commit": r.get("commit"), "commit_at": r.get("commit_at"), "at": r.get("at"), "error": r.get("error"),
-            "age_days": None if age is None else age.days,
-            "lost": bool(r.get("error")) and (age is None or age.days >= CHECK_LOST_DAYS)}
+    out = {"commit": r.get("commit"), "commit_at": r.get("commit_at"), "at": r.get("at"), "error": r.get("error"),
+           "age_days": None if age is None else age.days,
+           "lost": bool(r.get("error")) and (age is None or age.days >= CHECK_LOST_DAYS)}
+    try:                                               # PC 客户端不跑 maa-cli 的资源热更新，别一直报"资源更新不了"
+        from maapilot import config
+        if config.connection().kind == "win32":
+            out["lost"] = False
+            out["note"] = "PC 客户端用本体资源，不做热更新"
+    except Exception:                                  # noqa: BLE001 - 没配置就按原来的算
+        pass
+    return out
 
 
 def maa_cli_latest(d: dict | None = None) -> str:

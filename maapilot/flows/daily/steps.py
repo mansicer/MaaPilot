@@ -21,6 +21,27 @@ from maapilot.flows import daily          # 测试替换的名字经包取（dai
 STALE_ALERT = "这次日常开始后超过 {h} 小时 agent 都没有收尾（daily done），下次日常开始时程序自动收尾了"
 
 
+def _require_clickable() -> None:
+    """PC 客户端：点了没反应时 MAA 任务照样报"完成"，所以开跑前先确认这个进程真的点得动。"""
+    try:
+        from maapilot import config
+        if config.connection().kind != "win32":
+            return
+        from maapilot.crew import win32
+        elevated, il = win32.token_state()
+        if win32.is_admin():
+            return
+        why = ("进程被降到了低完整性（Low），提权也白提" if elevated and il == "Low"
+               else f"不是管理员（完整性级别 {il}）")
+        raise CliError("not_elevated", f"日常没法跑：{why}，点击会被 UIPI 全部拦掉",
+                       exit=NEEDS_USER,
+                       hint="用管理员身份重开终端 / 重开 worker（右键 -> 以管理员身份运行），再跑 daily run")
+    except CliError:
+        raise
+    except Exception:                                # noqa: BLE001 - 判断不了就不拦
+        return
+
+
 def run(only: list[str] | None, trigger: str) -> dict:
     """跑一次日常。有没收尾的日常时：带 --only 接着写它（同一个运行编号、同一份汇报），不带 --only 拒绝；
     超过 OPEN_STALE_H 小时没收尾的算 agent 放弃了，先自动收尾再开新的。"""
@@ -32,6 +53,7 @@ def run(only: list[str] | None, trigger: str) -> dict:
         if unknown:
             raise CliError("bad_arguments", f"--only 里有不在 daily.tasks 里的项：{', '.join(unknown)}",
                            hint=f"能写的：{', '.join(tasks + [BOX, FARM])}", exit=BAD_REQUEST)
+    _require_clickable()                             # PC 客户端要提权：低权限下日常只会"跑完什么都没做"
     if (paths.GUARD / "stop.json").exists():
         raise CliError("guard_stop", "合成玉 / 源石对账停机中，日常不开始", exit=NEEDS_USER,
                        hint="先把停机的原因告诉用户（guard status），用户说明后再处理")
@@ -241,6 +263,9 @@ def _steps(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | Non
     read_box = dcfg.get("read_box", True) is not False
     order = ([t for t in tasks if t == "startup"] + [t for t in tasks if t not in ("award", "startup")]
              + ([BOX] if read_box else []) + [FARM] + [t for t in tasks if t == "award"])
+    farm_on = dcfg.get("farm", True) is not False  # 刷理智可以单独关掉（PC 端 MAA 的 Fight 识别还不稳）
+    if not farm_on:
+        order = [t for t in order if t != FARM]
     order = [t for t in order if want(t)]
 
     def handoff(row: dict) -> None:
@@ -278,7 +303,14 @@ def _steps(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | Non
                     r.data["tasks"].append(row)
                     continue
                 row = _maa_task(r, cfg, t, [t], env, lk)
-                handoff(row)                            # 剿灭没打成也一样交回：原因（不能代理、找不到入口、掉线）由 agent 判断
+                if t == "annihilation" and row.get("code") == "no_agent":
+                    row["ok"] = True                    # 没有代理指挥是游戏状态，不是这次的失败
+                    row["skipped"] = row.pop("error", "没有可用的代理指挥")
+                    r.event("task", **row)
+                    r.data["tasks"][-1] = row
+                    r.data["failed"] = [x for x in r.data.get("failed") or [] if x != t]
+                    continue
+                handoff(row)                            # 剿灭没打成也一样交回：原因（找不到入口、掉线）由 agent 判断
         if read_box and want(BOX):                     # 刷理智、目标部分之前：让它们看到今天的练度
             fresh = _box_fresh()
             if fresh:
@@ -288,7 +320,7 @@ def _steps(r: _Run, op: dict, cfg: dict, tasks: list[str], only: list[str] | Non
             elif not _box_from_skland(r, env):            # 接了森空岛就从那里读（快、不碰模拟器），不行再用 MAA 识别
                 bt = float(dcfg.get("box_timeout_min") or BOX_TIMEOUT_MIN) * 60
                 handoff(_maa_task(r, cfg, BOX, [], env, lk, timeout_s=bt, cli=["state", "box"]))
-        if want(FARM):
+        if farm_on and want(FARM):
             active = goalsmod.active_goals()
             r.data["goals_active"] = len(active)
             r.data["goals_pending"] = bool(active)      # 有目标：刷理智交给在场的 agent 做目标部分

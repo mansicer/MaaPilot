@@ -456,6 +456,14 @@ def _extract_json(log_text: str, tag: str) -> dict:
 
 def recognize(kind: str, timeout_s: float = 900) -> tuple[dict, MaaRun]:
     """跑 MAA 的 Depot / OperBox 识别，返回（日志里的结果 JSON, MaaRun）。失败抛 RuntimeError（消息带日志位置）。"""
+    win32 = False
+    try:
+        from maapilot import config
+        win32 = config.connection().kind == "win32"
+    except Exception:                                  # noqa: BLE001 - 没配置就走原来那条
+        win32 = False
+    if win32:                                          # 别把 _recognize_core 的错误也吞了、再退回 maa-cli
+        return _recognize_core(kind, timeout_s)
     run = run_tasks(kind.lower(), [{"name": kind, "type": kind, "params": {}}], timeout_s=timeout_s)
     if not run.ok:
         detail = run.error or " | ".join(error_lines(run))
@@ -465,6 +473,21 @@ def recognize(kind: str, timeout_s: float = 900) -> tuple[dict, MaaRun]:
         return _extract_json(text, kind), run
     except RuntimeError:
         return _extract_json(run.stdout, kind), run
+
+
+def _recognize_core(kind: str, timeout_s: float) -> tuple[dict, "object"]:
+    """PC 客户端：用 MaaCore 直接跑识别任务（`AsstAttachWindow`），结果从回调里取。
+    返回的形状和 maa-cli 那条一样：{"details": <MaaCore 的 details>}。"""
+    from maapilot.crew import maacore
+    cr = maacore.run_task(kind, {}, label=kind.lower(), timeout_s=timeout_s)
+    if not cr.ok:
+        raise RuntimeError(f"MAA {kind} 识别失败（日志 {cr.log}）" + (f"：{cr.error}" if cr.error else ""))
+    for what in (kind, f"{kind}Info"):                 # MaaCore 回报的名字：OperBox → "OperBoxInfo"
+        got = cr.extra(what)
+        if got:
+            return {"details": got[-1]}, cr
+    text = cr.log.read_text(encoding="utf-8", errors="ignore") if cr.log.exists() else ""
+    return _extract_json(text, kind), cr
 
 
 def operbox() -> dict:
