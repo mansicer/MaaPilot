@@ -43,6 +43,11 @@ def load(path: str):
     lib.AsstCreateEx.argtypes = [CALLBACK, ctypes.c_void_p]
     lib.AsstSetInstanceOption.argtypes = [ctypes.c_void_p, ctypes.c_int32, ctypes.c_char_p]
     lib.AsstConnect.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+    # Win32：PC 客户端用 AsstAttachWindow(handle, hwnd, screencap, mouse, keyboard)（头文件 include/AsstCaller.h）
+    if hasattr(lib, "AsstAttachWindow"):
+        lib.AsstAttachWindow.restype = ctypes.c_bool
+        lib.AsstAttachWindow.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                         ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64]
     lib.AsstAppendTask.restype = ctypes.c_int32
     lib.AsstAppendTask.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
     for f in ("AsstStart", "AsstStop", "AsstRunning"):
@@ -55,6 +60,10 @@ def main() -> int:
     for f in (sys.stdin, sys.stdout):                   # 父进程按 UTF-8 读写；Windows 上默认是系统代码页
         f.reconfigure(encoding="utf-8", errors="replace")
     spec = json.loads(sys.stdin.read())
+    # MaaCore 是用 LoadLibrary("MaaWin32ControlUnit.dll") 这种裸名字加载控制单元的，
+    # 默认搜索路径里没有 lib 目录（那是 python.exe 的目录、System32、PATH），所以先把它加进 PATH。
+    libdir = os.path.dirname(os.path.abspath(spec["lib"]))
+    os.environ["PATH"] = libdir + os.pathsep + os.environ.get("PATH", "")
     try:
         lib = load(spec["lib"])
     except OSError as e:
@@ -93,8 +102,16 @@ def main() -> int:
             signal.signal(sig, on_signal)
         for key, value in (spec.get("instance_options") or {}).items():
             lib.AsstSetInstanceOption(handle, INSTANCE_OPTION_KEYS[key], str(value).encode())
-        if not lib.AsstConnect(handle, spec["adb"].encode(), spec["address"].encode(), b"General"):
-            emit({"event": "error", "stage": "connect"})
+        if spec.get("hwnd"):
+            ok = lib.AsstAttachWindow(handle, ctypes.c_void_p(int(spec["hwnd"])),
+                                      int(spec.get("screencap_method", 32)),
+                                      int(spec.get("mouse_method", 1)),
+                                      int(spec.get("keyboard_method", 1)))
+        else:
+            ok = lib.AsstConnect(handle, spec.get("adb", "").encode(), spec.get("address", "").encode(),
+                                 (spec.get("config") or "General").encode())
+        if not ok:
+            emit({"event": "error", "stage": "connect", "mode": "win32" if spec.get("hwnd") else "adb"})
             return 11
         emit({"event": "connected"})
         params = json.dumps(spec["params"], ensure_ascii=False).encode()

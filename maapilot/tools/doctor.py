@@ -78,7 +78,13 @@ class Ctx:
         self.probe = probe
         self.cfg: dict | None = None
         self.adb: str | None = None          # adb 的可执行路径（adb 检查通过时）
-        self.online = False                  # 模拟器连上了
+        self.online = False                  # 模拟器连上了（win32：窗口找到了）
+        self.hwnd: int | None = None         # win32：游戏窗口句柄
+
+    @property
+    def kind(self) -> str:
+        """emulator.kind：adb（模拟器）或 win32（明日方舟 PC 客户端）。"""
+        return str(((self.cfg or {}).get("emulator") or {}).get("kind") or "adb").lower()
 
     @property
     def address(self) -> str | None:
@@ -93,12 +99,16 @@ def check_config(ctx: Ctx) -> dict:
         ctx.cfg = config.load()
     except CliError as e:
         return _item("config", False, e.message, "改正 private/config.yaml")
+    if ctx.kind == "win32":
+        return _item("config", True, f"明日方舟 PC 客户端（win32），服务器 {ctx.cfg.get('server')}")
     if not ctx.address:
         return _item("config", False, "config.yaml 里 emulator.address 还没填", "做 setup：找出模拟器的 adb 地址写进去")
     return _item("config", True, f"模拟器 {ctx.address}，服务器 {ctx.cfg.get('server')}")
 
 
 def check_adb(ctx: Ctx) -> dict:
+    if ctx.kind == "win32":
+        return _item("adb", True, "PC 客户端不走 adb（用 Win32 窗口）")
     from maapilot import config
     adb = config.adb_path(ctx.cfg or {})
     path = ctx.probe.which(adb)
@@ -136,7 +146,27 @@ def candidates(ctx: Ctx) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def check_win32_window(ctx: Ctx) -> dict:
+    """win32：找《明日方舟》PC 端窗口。"""
+    from maapilot.crew import win32
+    try:
+        d = win32.describe()
+    except Exception as e:                             # noqa: BLE001
+        return _item("emulator", False, f"查窗口出错：{type(e).__name__}: {e}", "这是 MaaPilot 的问题，带上这段输出反馈")
+    w = d.get("picked")
+    if not w:
+        return _item("emulator", False, "没找到《明日方舟》PC 端的窗口",
+                     "打开游戏（UnityWndClass + Arknights.exe）；最小化的也认，但要能还原")
+    ctx.online = True
+    ctx.hwnd = int(w["hwnd"])
+    cw, ch = w["client"]
+    extra = "" if cw >= 640 else "（最小化中，用之前会先还原）"
+    return _item("emulator", True, f"{w['title'] or '明日方舟'} {cw}x{ch} pid={w['pid']}{extra}", hwnd=ctx.hwnd)
+
+
 def check_emulator(ctx: Ctx) -> dict:
+    if ctx.kind == "win32":
+        return check_win32_window(ctx)
     if ctx.adb is None:
         return _item("emulator", False, "adb 不可用，没法检查", "先解决 adb")
     addr = ctx.address
@@ -158,6 +188,24 @@ def check_emulator(ctx: Ctx) -> dict:
 
 
 def check_screen(ctx: Ctx) -> dict:
+    if ctx.kind == "win32":
+        from maapilot.crew import win32
+        if not win32.is_admin():
+            return _item("screen", False, "要管理员权限才能截 PC 客户端（游戏是提权进程，UIPI）",
+                         "用管理员身份重开终端，或走 install-admin-task.bat 注册的计划任务")
+        if not ctx.online or not ctx.hwnd:
+            return _item("screen", False, "没找到窗口，没法截图", "先解决 emulator")
+        try:
+            ctrl = win32.make_controller(ctx.hwnd, readonly=True)
+            ctrl.post_connection().wait()
+            t0 = time.monotonic()
+            img = ctrl.post_screencap().wait().get()
+            took = time.monotonic() - t0
+            h, w = img.shape[:2]
+        except Exception as e:                         # noqa: BLE001
+            return _item("screen", False, f"截图失败：{type(e).__name__}: {e}",
+                         "确认窗口在前台、没被别的窗口挡住")
+        return _item("screen", True, f"{w}×{h}（Win32 ScreenDC，{took:.1f} 秒）", resolution=[int(w), int(h)])
     from maapilot.crew.screen import check_aspect, png_size
     if not ctx.online:
         return _item("screen", False, "模拟器没连上，没法截图", "先解决 emulator")
@@ -183,7 +231,16 @@ def check_screen(ctx: Ctx) -> dict:
 
 
 def check_input(ctx: Ctx) -> dict:
-    """只看模拟器里有没有 input 命令（点击靠它或 MaaTouch），不真的点。"""
+    """只看模拟器里有没有 input 命令（点击靠它或 MaaTouch），不真的点。win32：只看是不是管理员。"""
+    if ctx.kind == "win32":
+        from maapilot.crew import win32
+        if not win32.is_admin():
+            return _item("input", False, "不是管理员，点不动游戏窗口（UIPI，error=5）",
+                         "用管理员身份重开终端，或走 install-admin-task.bat 注册的计划任务")
+        ok, why = win32.input_selftest()
+        if not ok:
+            return _item("input", False, why, "重连远控 / 唤醒本机会话后再试；截图和识字不受影响")
+        return _item("input", True, f"管理员权限 + 合成点击有效（{why}）")
     if not ctx.online:
         return _item("input", False, "模拟器没连上", "先解决 emulator")
     r = ctx.probe.run([ctx.adb, "-s", ctx.address, "shell", "ls", "/system/bin/input"], timeout=8)
@@ -193,6 +250,10 @@ def check_input(ctx: Ctx) -> dict:
 
 
 def check_game(ctx: Ctx) -> dict:
+    if ctx.kind == "win32":
+        if ctx.online:
+            return _item("game", True, "游戏窗口在（win32）", required=False)
+        return _item("game", False, "游戏没开", "打开《明日方舟》PC 端", required=False)
     from maapilot import config
     pkg = config.package(ctx.cfg)
     if not ctx.online:

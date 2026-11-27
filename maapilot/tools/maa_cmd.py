@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
+from dataclasses import dataclass, field
+from pathlib import Path as _Path
+
 from maapilot import config
-from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, FAILED, CliError
+from maapilot.cliutil import BAD_REQUEST, ENVIRONMENT, FAILED, NEEDS_USER, CliError
 from maapilot.tools import common
 
 # 任务 → (MAA 任务类型, 超时秒数)
@@ -186,7 +190,8 @@ def output_problem(task: str, mrun):
     p = mrun.parsed
     if task != "copilot" and not p.get("tasks"):
         return UpstreamFormat("maa_cli", "标准输出里 Summary 的任务行", effect="分不出任务做没做成")
-    if task == "fight" and mrun.ok and not p.get("sanity_first") and not p.get("fights"):
+    if (getattr(mrun, "kind", "cli") == "cli" and task == "fight" and mrun.ok
+            and not p.get("sanity_first") and not p.get("fights")):
         return UpstreamFormat("maa_cli", "日志里的 Current sanity / Mission started 行", effect="刷图次数、理智、掉落都记不到")
     return None
 
@@ -201,6 +206,19 @@ def _note_output(task: str, mrun, data: dict) -> None:
         return
     sources.bad("maa_cli", e)
     data["upstream_format"] = sources.line({"message": e.message, "effect": e.effect})
+
+
+
+def _no_agent_record(mrun) -> bool:
+    """这次剿灭是不是因为"没有代理指挥"停下的（MaaCore 会点到 UnableToAgent 模板）。"""
+    try:
+        log = getattr(mrun, "log", None)
+        if log is None or not Path(log).exists():
+            return False
+        text = Path(log).read_text(encoding="utf-8", errors="ignore")
+        return "UnableToAgent" in text or "无法代理" in text
+    except Exception:                                  # noqa: BLE001
+        return False
 
 
 def result(task: str, mrun, info: dict) -> dict:
@@ -358,6 +376,7 @@ def _copilot_argv(opts: dict, fetch=fetch_plan) -> tuple[list[str], dict]:
         info["raid"] = opts["raid"]
     if opts.get("loop_times"):
         argv += ["--loop-times", str(int(opts["loop_times"]))]
+        info["loop_times"] = int(opts["loop_times"])
     # 不加 --use-sanity-potion：作业不用理智液
     return argv, info
 
@@ -436,6 +455,162 @@ def collect_evidence(task: str, started, ended) -> dict:
     return ev
 
 
+# --- PC 客户端：直接用 MaaCore（AsstAttachWindow），不走 maa-cli -------------------------------
+
+@dataclass
+class CoreMaaRun:
+    """把 CoreRun 包装成 MaaRun 的形状（result() 只认这几个属性）。"""
+    argv: list[str]
+    returncode: int | None
+    stdout: str
+    log: _Path
+    duration_s: float
+    timed_out: bool = False
+    error: str | None = None
+    parsed: dict = field(default_factory=dict)
+    kind: str = "core"                     # 不是 maa-cli 那条路：日志行格式不一样，别按它判上游格式
+
+    @property
+    def ok(self) -> bool:
+        tasks = self.parsed.get("tasks") or []
+        return (self.error is None and not self.timed_out and self.returncode == 0
+                and all(t["status"] == "Completed" for t in tasks))
+
+    @property
+    def offline(self) -> bool:
+        return bool(self.parsed.get("offline_seen"))
+
+
+
+def _fight_from_core(cr) -> dict:
+    """PC 客户端刷图/剿灭：maa-cli 那些日志行（Current sanity / Drops）是没有的，
+    改用 MaaCore 自己的回调算——`StageDrops`（每场一条）和 `SanityBeforeStage`（开打前的理智）。"""
+    out: dict = {}
+    try:
+        drops = cr.extra("StageDrops")
+        if drops:
+            out["fights"] = len(drops)
+            total: dict[str, int] = {}
+            for d in drops:
+                for st in (d.get("stats") or []):
+                    name = st.get("itemName") or st.get("itemId")
+                    if name and isinstance(st.get("addQuantity"), int):
+                        total[str(name)] = total.get(str(name), 0) + int(st["addQuantity"])
+            if total:
+                out["drops"] = total
+        sanity = cr.extra("SanityBeforeStage")
+        if sanity:
+            first, last = sanity[0], sanity[-1]
+            if isinstance(first.get("current"), int) and isinstance(first.get("max"), int):
+                out["sanity_first"] = (int(first["current"]), int(first["max"]))
+            if isinstance(last.get("current"), int) and isinstance(last.get("max"), int):
+                out["sanity_last"] = (int(last["current"]), int(last["max"]))
+    except Exception:                                   # noqa: BLE001 - 算不出来就是没有，不影响任务结果
+        return out
+    return out
+
+
+
+
+def _startup_shim() -> "CoreMaaRun":
+    """PC 客户端的 startup：游戏本来就在跑，这一项要的只是"回到首页"。
+    用 MaaPilot 自己的导航做（OCR + 点），比 MAA 的 StartUp 在 PC 端可靠得多。"""
+    from maapilot.crew import maa
+    log = maa.new_log("startup-win32")
+    log.write_text("# PC 客户端：startup 由 MaaPilot 自己回首页（不跑 MAA 的 StartUp）\n", encoding="utf-8")
+    t0 = time.monotonic()
+    _home_first_win32()
+    return CoreMaaRun(argv=["StartUp"], returncode=0, stdout="", log=log,
+                      duration_s=round(time.monotonic() - t0, 1),
+                      parsed={"tasks": [{"name": "startup", "status": "Completed"}]})
+
+
+
+def _copilot_params(info: dict, opts: dict) -> dict:
+    """PC 客户端跑作业：把作业 JSON 放进 MaaCore 的 userdir/copilot/，任务参数给 **绝对路径** 的 filename。
+
+    实测（2026-11-18，MaaCore 6.22.0）几种形状里只有绝对路径被接受：
+    `{"copilot": …}` / `{"copilot_list": […]}` / 相对路径 `{"filename": "copilot/x.json"}` 全部报
+    "CopilotTask set_params failed, stage_name or filename not found"，或者干脆抛 C++ 异常。
+    """
+    import shutil
+    from maapilot.crew import maacore
+    spot = maacore.root() / "userdir" / "copilot"
+    spot.mkdir(parents=True, exist_ok=True)
+    plan = Path(info.get("file") or info.get("uri") or "")
+    dest = spot / plan.name
+    if plan.resolve() != dest.resolve():
+        shutil.copyfile(plan, dest)
+    params = {"filename": str(dest.resolve()),
+              "add_trust": bool(opts.get("add_trust")),
+              "ignore_requirements": bool(opts.get("ignore_requirements"))}
+    if opts.get("formation"):
+        # MaaCore 认 `formation`（自动编队开关）；`formation_index` 是"用第几个编队"，
+        # 只给 index 会导致作业要求的干员不在队里，部署动作全部失败（1-10 实测 0 部署）。
+        params["formation"] = True
+    for option, param in (("formation_index", "formation_index"), ("support", "support_unit_usage"),
+                          ("support_name", "support_unit_name"), ("loop_times", "loop_times")):
+        if option in info:
+            params[param] = info[option]
+    return params
+
+
+def _home_first_win32() -> None:
+    """PC 客户端：先用 MaaPilot 自己的导航回首页，再交给 MAA 跑任务。
+    MAA 的 StartUp 在 PC 端经常认不出"上一条任务留下的界面"，导致任务链直接报错。"""
+    try:
+        from maapilot import config
+        if config.connection().kind != "win32":
+            return
+        from maapilot.crew import nav
+        game = common.connect(ocr=True)
+        nav.ensure_home(game)
+    except Exception:                                  # noqa: BLE001 - 回不去也让 MAA 自己试
+        pass
+
+
+def _run_core(task: str, ttype: str, params: dict, *, timeout_s: float) -> CoreMaaRun:
+    """在 PC 客户端上跑一个 MAA 任务：MaaCore + AsstAttachWindow（`crew.maacore.run_task`）。
+    结果形状和 maa-cli 那条路一样：`result()` / daily 都不用改。"""
+    from maapilot.crew import maa, maacore
+    cr = maacore.run_task(ttype, params, label=task, timeout_s=timeout_s)
+    parsed: dict = {}
+    try:
+        core = cr.core_log
+        if core is not None and core.exists():
+            with core.open("rb") as f:                 # 只取本次任务那一段（maa-cli 的输出就是代理这批行）
+                f.seek(cr.log_start)
+                text = f.read().decode("utf-8", "replace")
+            slice_path = cr.log.with_name(cr.log.stem + "-core.log")
+            slice_path.write_text(text, encoding="utf-8")
+            parsed = dict(maa.timeline(slice_path))
+    except Exception:                                   # noqa: BLE001 - 统计失败不影响任务结果
+        parsed = {}
+    if task in ("fight", "annihilation"):
+        parsed.update(_fight_from_core(cr))
+    chain_failed = cr.chain_failed         # 退出码 0 也算不了数：MaaCore 的错误只体现在回调里
+    completed = cr.ok and not chain_failed
+    parsed["tasks"] = [{"name": task, "status": "Completed" if completed else "Error"}]
+    if cr.task_errors:                     # 单个子步骤失败（MAA 通常照样跑完），当告警记着
+        parsed["subtask_errors"] = len(cr.task_errors)
+    if not completed and cr.ok and chain_failed:
+        chains = sorted({str((m.get("details") or {}).get("taskchain") or "") for m in chain_failed} - {""})
+        error = f"MAA 任务链报错（{', '.join(chains) or task}）"
+    else:
+        error = None
+    if not completed:
+        blob = "".join(str(m.get("details") or "") for m in cr.messages)
+        try:
+            blob += cr.log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+        if "GameOffline" in blob or "Offline" in blob:
+            parsed["offline_seen"] = True
+    return CoreMaaRun(argv=[ttype, json.dumps(params, ensure_ascii=False)], returncode=cr.returncode,
+                      stdout="", log=cr.log, duration_s=cr.duration_s, timed_out=cr.timed_out,
+                      error=cr.error or error, parsed=parsed)
+
+
 def run(task: str, **opts) -> dict:
     """跑一个 MAA 任务，不拿锁（调用方负责）。成功返回 data；失败抛 CliError（data 里是同样的结构）。
     opts：stage、times、medicine、expiring_medicine、params（JSON 文本或 dict）、uri、formation、loop_times、timeout_s。"""
@@ -448,13 +623,25 @@ def run(task: str, **opts) -> dict:
     else:
         ttype, params, info = build_params(task, opts, cfg)
     common.ensure_device()
-    maa.install_config()                               # 缺的配置补上，profile 的 adb_path 对上 emulator.adb
+    try:
+        win32 = config.connection().kind == "win32"
+    except Exception:                                  # 没配置也不拦着（下面 maa-cli 会报清楚）
+        win32 = False
+    if not win32:
+        maa.install_config()                           # 缺的配置补上，profile 的 adb_path 对上 emulator.adb
     if task == "copilot" and info.get("raid") == "raid":
         info["raid_check"] = check_raid_mode()
     timeout = opts.get("timeout_s") or TASKS[task][1]
     started = common.now()
-    if task == "copilot":
+    if task == "copilot" and win32:
+        mrun = _run_core("copilot", "Copilot", _copilot_params(info, opts), timeout_s=timeout)
+    elif task == "copilot":
         mrun = maa.execute(argv, label="copilot", timeout_s=timeout)
+    elif win32 and task == "startup":
+        mrun = _startup_shim()                     # PC 端不跑 MAA 的 StartUp（实测老是任务链报错）
+    elif win32:
+        _home_first_win32()                        # 别的任务之前先自己回首页
+        mrun = _run_core(task, ttype, params, timeout_s=timeout)
     else:
         mrun = maa.run_tasks(task, [{"name": task, "type": ttype, "params": params}], timeout_s=timeout)
     data = result(task, mrun, info)
@@ -472,6 +659,10 @@ def run(task: str, **opts) -> dict:
     data["evidence"] = collect_evidence(task, started, common.now())
     if data["evidence"].get("shot_now"):
         data["_log"] = {"shot_now": data["evidence"]["shot_now"]}   # 记进命令记录，maa why 也用
+    if task == "annihilation" and _no_agent_record(mrun):   # 先判：这条走的是"游戏状态"，不是失败
+        raise CliError("no_agent", "剿灭需要代理指挥：这个剿灭关卡还没有可用的代理作战记录",
+                       exit=NEEDS_USER, data=data,
+                       hint="在游戏里手动打过一次这个剿灭关卡（并且让游戏记住代理指挥），之后 MAA 就能自己刷")
     from maapilot import paths
     from maapilot.oscompat import integrity
     li = integrity.low_integrity(paths.ROOT)

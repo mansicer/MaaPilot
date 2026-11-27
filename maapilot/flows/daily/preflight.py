@@ -9,6 +9,14 @@ from maapilot.flows import daily          # 测试替换的名字经包取（dai
 
 # --- 开始前：目标到期、官方公告、游戏版本（都是尽力而为：出错记一条告警，日常照跑） ---------------------------------------
 
+def _win32() -> bool:
+    """PC 客户端（win32）下：读游戏版本、热更新 MAA 资源这两件事都是 adb / maa-cli 的路子，做不了。"""
+    try:
+        from maapilot import config
+        return config.connection().kind == "win32"
+    except Exception:                                    # noqa: BLE001
+        return False
+
 def expire_goals() -> list:
     """过期的限时目标挪到 goals-done.md（goals.expire_due；没有这个函数就什么都不做）。"""
     f = getattr(goalsmod, "expire_due", None)
@@ -98,8 +106,11 @@ def _preflight(r: _Run) -> bool:
     except Exception as e:                               # noqa: BLE001 - 查不到更新不影响日常
         r.event("update_check_failed", error=_err(e))
     try:
-        res = daily.refresh_resource()
-        if res:
+        if _win32():
+            r.event("resource_update_skipped", reason="win32")
+        else:
+            res = daily.refresh_resource()
+        if not _win32() and res:
             r.event("resource_updated", commit=res.get("commit"), error=res.get("error"))
     except Exception as e:                               # noqa: BLE001 - 资源更新不了：照跑，连着几天不成才告诉用户
         r.event("resource_update_failed", error=_err(e))
@@ -122,7 +133,11 @@ def _ver(v: dict | None) -> str:
 
 
 def _game_version(r: _Run, order: list[str]) -> None:
-    """游戏客户端旧了：停下交给在场的 agent 更新（handoff.task 是 game_update），更新好它再 --only 接着跑。"""
+    """游戏客户端旧了：停下交给在场的 agent 更新（handoff.task 是 game_update），更新好它再 --only 接着跑。
+    PC 客户端读不到"已安装版本"（那是 adb 查包名版本号的路子），跳过。"""
+    if _win32():
+        r.event("game_version_skipped", reason="win32")
+        return
     try:
         info = daily.version_info()
     except Exception as e:                               # noqa: BLE001

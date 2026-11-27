@@ -30,7 +30,8 @@ https://github.com/user-attachments/assets/d309322a-e263-4ddf-a098-02634295295e
 你需要：
 
 - 一台 Mac 或 Windows 电脑
-- 一个安卓模拟器（见 [MAA 文档里的模拟器支持](https://maa.plus/docs/zh-cn/manual/device/)）
+- 一个安卓模拟器（见 [MAA 文档里的模拟器支持](https://maa.plus/docs/zh-cn/manual/device/)），
+  或者《明日方舟》PC 客户端（不装模拟器，见 [`docs/pc-client.md`](docs/pc-client.md)）
 - 配置好账户和模型的 Agent Harness：[Claude Code](#claude-code)、[Codex](#codex)、[OpenClaw](#openclaw)、[pi-agent](#pi-agent)、[DSH](#dsh)、[Antigravity](#antigravity) 或 [ZCode](#zcode)
 
 安装步骤：

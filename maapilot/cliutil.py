@@ -97,13 +97,32 @@ def device(owner: str, *, wait_s: float = 0, job: str | None = None):
 
     conn = config.connection()          # 没配置 → CliError(ENVIRONMENT)
     dev.configure(conn)
-    with holding(owner, wait_s=wait_s, job=job) as lk:
+    occluders: list[dict] = []
+    if getattr(conn, "kind", "adb") == "win32":
+        # PC 客户端：ScreenDC 截的是屏幕区域，被别的窗口压住就截到别人。
+        # 拿锁期间把挡在前面的窗口（含 DSH 自己的界面）收起来，退出时还原。
         try:
-            from maapilot.tools import guard
-            guard.mark_dirty(owner)         # 可能花东西的命令：下次 guard snapshot 先对账
-        except Exception:
-            pass
-        yield lk
+            from maapilot.crew import win32
+            w = win32.pick_window(getattr(conn, "window", None))
+            if w:
+                occluders = win32.hide_occluders(w["hwnd"])
+        except Exception:                   # noqa: BLE001 - 收不起来也别拦着命令
+            occluders = []
+    try:
+        with holding(owner, wait_s=wait_s, job=job) as lk:
+            try:
+                from maapilot.tools import guard
+                guard.mark_dirty(owner)         # 可能花东西的命令：下次 guard snapshot 先对账
+            except Exception:
+                pass
+            yield lk
+    finally:
+        if occluders:
+            try:
+                from maapilot.crew import win32
+                win32.restore_occluders(occluders)
+            except Exception:
+                pass
 
 
 @contextmanager
@@ -113,6 +132,25 @@ def device_readonly():
     from maapilot import config
     from maapilot.crew import device as dev
 
-    dev.configure(config.connection())   # 没配置 → CliError(ENVIRONMENT)
-    yield
+    conn = config.connection()           # 没配置 → CliError(ENVIRONMENT)
+    dev.configure(conn)
+    occluders: list[dict] = []
+    if getattr(conn, "kind", "adb") == "win32":
+        # 截图也要先把挡在游戏上的窗口收起来：ScreenDC 截的是屏幕区域，DSH 自己的界面盖着就截到它
+        try:
+            from maapilot.crew import win32
+            w = win32.pick_window(getattr(conn, "window", None))
+            if w:
+                occluders = win32.hide_occluders(w["hwnd"])
+        except Exception:                # noqa: BLE001
+            occluders = []
+    try:
+        yield
+    finally:
+        if occluders:
+            try:
+                from maapilot.crew import win32
+                win32.restore_occluders(occluders)
+            except Exception:            # noqa: BLE001
+                pass
 

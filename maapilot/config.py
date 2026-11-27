@@ -12,7 +12,7 @@ from maapilot.cliutil import ENVIRONMENT, BAD_REQUEST, CliError
 from maapilot.oscompat import fs
 
 DEFAULTS = {
-    "emulator": {"address": None, "adb": "adb"},
+    "emulator": {"kind": "adb", "address": None, "adb": "adb", "window": None},
     "server": "Official",
     "tools": {"maa": "maa", "claude": "claude", "codex": "codex"},
     "schedule": ["04:40", "16:40"],
@@ -71,6 +71,10 @@ def connection():
     from maapilot.crew.device import Connection
     cfg = load()
     emu = cfg.get("emulator") or {}
+    kind = str(emu.get("kind") or "adb").lower()
+    if kind == "win32":                                 # 明日方舟 PC 客户端：没有 adb 地址
+        return Connection(address="", adb=adb_path(cfg), kind="win32",
+                          window=(emu.get("window") or None))
     if not emu.get("address"):
         raise CliError("no_emulator", "config.yaml 里没有模拟器地址（emulator.address）",
                        hint="跑 maapilot doctor 找地址，或重新做 setup", exit=ENVIRONMENT)

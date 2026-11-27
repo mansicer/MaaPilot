@@ -82,16 +82,36 @@ class Game:
         paths.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         Toolkit.init_option(str(paths.DEBUG_DIR))
         Tasker.set_stdout_level(LoggingLevelEnum.Off)   # MaaFramework 的日志只写进 DEBUG_DIR/maa.log，不刷到命令输出里
-        self.ctrl = AdbController(
-            conn.adb,
-            conn.address,
-            screencap_methods=MaaAdbScreencapMethodEnum.RawWithGzip | MaaAdbScreencapMethodEnum.Encode,
-            input_methods=(MaaAdbInputMethodEnum.Null if readonly
-                           else MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.AdbShell),
-        )
         self.readonly = readonly
-        self.ctrl.set_screenshot_target_short_side(REF_H)  # MaaFw scales screenshots and maps clicks back
-        if not self.ctrl.post_connection().wait().succeeded:
+        self.hwnd: int | None = None
+        self.window: dict | None = None
+        if getattr(conn, "kind", "adb") == "win32":
+            from maapilot.crew import win32
+            if not readonly:                            # 只读命令（截图、OCR）在低权限下也让它截
+                win32.require_admin()                   # 游戏是提权进程：不是管理员就点不动（UIPI）
+            self.window = win32.prepare(getattr(conn, "window", None),
+                                        need_input=not readonly and win32.is_admin())
+            self.hwnd = int(self.window["hwnd"])
+            self.ctrl = win32.make_controller(self.hwnd, readonly=readonly)
+        else:
+            self.ctrl = AdbController(
+                conn.adb,
+                conn.address,
+                screencap_methods=MaaAdbScreencapMethodEnum.RawWithGzip | MaaAdbScreencapMethodEnum.Encode,
+                input_methods=(MaaAdbInputMethodEnum.Null if readonly
+                               else MaaAdbInputMethodEnum.Maatouch | MaaAdbInputMethodEnum.AdbShell),
+            )
+        try:
+            self.ctrl.set_screenshot_target_short_side(REF_H)  # MaaFw scales screenshots and maps clicks back
+        except Exception:                               # Win32 控制器不认这个选项（1280x720 本来就不用缩）
+            pass
+        job = self.ctrl.post_connection()
+        job.wait()
+        if self.hwnd is not None:
+            # Win32 控制器的 connected 是"拿到窗口了"，不一定体现在 job.succeeded 上
+            if not getattr(self.ctrl, "connected", True):
+                raise RuntimeError("win32 connection failed：窗口不可用（最小化？被别的进程占用？）")
+        elif not job.succeeded:
             raise RuntimeError("adb connection failed")
         if self.ctrl.resolution == (0, 0):  # raw resolution is known only after a screenshot
             self.ctrl.post_screencap().wait()

@@ -284,10 +284,22 @@ class CoreRun:
     error: str | None = None                    # 子进程起不来、加载 / 连接 / 参数失败
     version: str | None = None
     warnings: list[str] = field(default_factory=list)  # 这次运行里 MaaCore 自己日志（debug/asst.log）的 WRN / ERR 行
+    core_log: Path | None = None                       # MaaCore 自己的 asst.log
+    log_start: int = 0                                 # 本次运行开始时它的字节数（取这一段就是这次任务的行）
 
     @property
     def ok(self) -> bool:
         return self.error is None and not self.timed_out and self.returncode == 0
+
+    @property
+    def task_errors(self) -> list[dict]:
+        """子任务报错（MaaCore 的退出码是 0，错误只体现在回调里）。单个子步骤失败不一定是整条任务失败。"""
+        return [m for m in self.messages if m.get("msg") == MSG_SUBTASK_ERROR]
+
+    @property
+    def chain_failed(self) -> list[dict]:
+        """整条任务链报错——这个才算真失败（子任务报错后链子常常照样跑完，会发 AllTasksCompleted）。"""
+        return [m for m in self.messages if m.get("msg") == MSG_TASKCHAIN_ERROR]
 
     def extra(self, what: str) -> list[dict]:
         """SubTaskExtraInfo 里 what 为指定值的 details。"""
@@ -315,14 +327,27 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
     conn = device.current()
     user_dir = root() / "userdir"
     user_dir.mkdir(parents=True, exist_ok=True)
+    if getattr(conn, "kind", "adb") == "win32":
+        # PC 客户端：MaaCore 6.x 的 AsstConnect 认一个 JSON，里面是 Win32 控制器的参数
+        # （MaaCore.dll 里的 "Cannot create controller proxy: {}" → hwnd / screencap_method / mouse_method / keyboard_method）
+        from maapilot.crew import win32
+        win32.require_admin()          # 低权限(尤其 Low)下点击会被 UIPI 吞掉，任务却照样报"完成"，必须拦住
+        w = win32.prepare(getattr(conn, "window", None))
+        # 截图只能用 ScreenDC（GDI 撕裂、PrintWindow 纯黑）；输入只能用 Seize
+        #（PostMessage 投给 Unity 的窗口没反应）。两者都要求窗口真的在前台、没被挡住 ——
+        # prepare() 抢前台，cliutil.device() 拿锁期间把挡着的窗口收起来。
+        connect = {"hwnd": int(w["hwnd"]), "screencap_method": 32,
+                   "mouse_method": 1, "keyboard_method": 1}
+    else:
+        connect = {"adb": shutil.which(conn.adb) or conn.adb, "address": conn.address, "config": "General"}
     spec = {"lib": str(lib), "resources": resources, "user_dir": str(user_dir),
-            "adb": shutil.which(conn.adb) or conn.adb, "address": conn.address,
-            "task": task, "params": params, "instance_options": INSTANCE_OPTIONS}
+            **connect, "task": task, "params": params, "instance_options": INSTANCE_OPTIONS}
     core_log = user_dir / "debug" / "asst.log"
     log_start = core_log.stat().st_size if core_log.exists() else 0
     t0 = time.monotonic()
     try:
         proc = procs.spawn(runner_argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           creationflags=getattr(procs, 'CREATE_NO_WINDOW', 0),
                            cwd=str(paths.ROOT))
     except OSError as e:
         return CoreRun(None, [], [], log, 0.0, error=f"起不来 MaaCore 子进程：{e}", version=version)
@@ -343,7 +368,7 @@ def run_task(task: str, params: dict, *, label: str, timeout_s: float) -> CoreRu
     events, messages = parse(stdout)
     run = CoreRun(proc.returncode, events, messages, log, round(time.monotonic() - t0, 1), timed_out=timed_out,
                   version=next((e["version"] for e in events if e.get("event") == "version"), version),
-                  warnings=_core_warnings(core_log, log_start))
+                  warnings=_core_warnings(core_log, log_start), core_log=core_log, log_start=log_start)
     if not timed_out and proc.returncode:
         run.error = RUNNER_EXIT.get(proc.returncode, f"MaaCore 子进程退出码 {proc.returncode}")
         if proc.returncode == 10 and WINDOWS:

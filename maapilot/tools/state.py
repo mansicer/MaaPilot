@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import time
+
 import re
 
 from maapilot import paths
@@ -57,8 +59,84 @@ def items_list(items: dict, only: list[str] | None = None) -> list[dict]:
 
 # --- 读（碰模拟器，不拿锁） -------------------------------------------------------------
 
+# PC 客户端顶栏的三块各在自己的 x 区间里：龙门币最左，源石最右。
+# 按位置排序比写死 x 区间稳：实测同一布局两次 OCR 的 x 会差十几个像素（939 / 955）。
+WIN32_X_ORUNDUM = 900          # 合成玉在 x≈939–990
+WIN32_X_ORIGINITE = 1100       # 源石在 x≈1108–1170
+WIN32_MIN_H = 20               # PC 顶栏的字高比手机小（实测 "0+" 只有 30）
+WIN32_TOPBAR_ROI = (690, 0, 600, 120)   # 顶栏三块钱都在这条窄带里；比 HOME_ROI 小，识字快一点
+def _win32_topbar(hits) -> dict:
+    """读 PC 端顶栏：龙门币（最左、六位数）、合成玉（中间）、源石（最右）。
+
+    **不能只认带加号的两个**：实测 OCR 会把 "240+" 认成 "3400"、"0+" 认成 "0"，
+    加号一丢就整条读不出来。改成按位置取，加号只用来加可信度。"""
+    items = []
+    for h in hits:
+        if h.box[1] >= TOPBAR_MAX_Y or h.box[3] < WIN32_MIN_H or ":" in h.text:
+            continue
+        n = _number(h.text)
+        if n is None:
+            continue
+        items.append({"x": h.box[0], "n": n, "plus": h.text.strip().endswith("+")})
+    items.sort(key=lambda i: i["x"])
+    big = [i for i in items if i["n"] >= 100 or i["plus"]]
+
+    originite = next((i for i in reversed(big) if i["x"] >= WIN32_X_ORIGINITE), None)
+    orundum = next((i for i in reversed(big) if i["x"] >= WIN32_X_ORUNDUM and i is not originite), None)
+    lmd = next((i for i in big if i["x"] < WIN32_X_ORUNDUM and i is not originite and i is not orundum), None)
+    return {"lmd": lmd["n"] if lmd else None,
+            "orundum": orundum["n"] if orundum else None,
+            "originite": originite["n"] if originite else None}
+
+
+def _read_depot_from_topbar() -> dict:
+    """PC 客户端没有 MAA 的 Depot 任务：首页顶栏那三个数就是精确值（龙门币/合成玉/源石），
+    直接当成仓库快照用。guard 的货币对账就靠它。
+
+    **必须连读两帧、两次完全一样才采信**：实测 OCR 会把 "340" 读成 "3400"（差一位），
+    单帧读数拿来对账会让 guard 误报"合成玉少了 3060"。"""
+    common.ensure_device()
+    game = common.connect(ocr=True)
+    from maapilot.crew import nav
+    try:
+        nav.ensure_home(game)
+    except Exception:
+        pass
+    seen: list[dict] = []
+    top: dict | None = None
+    for attempt in range(4):
+        if attempt:
+            time.sleep(0.3)
+        got = _win32_topbar(game.ocr(WIN32_TOPBAR_ROI, game.screencap()))
+        if got.get("orundum") is None or got.get("originite") is None:
+            continue
+        if seen and got == seen[-1]:          # 连续两帧一致 → 采信
+            top = got
+            break
+        seen.append(got)
+    if top is None:
+        tail = f"（读到过：{seen}）" if seen else ""
+        raise CliError("depot_failed", f"读不到首页顶栏的合成玉/源石，或者两次读数对不上{tail}",
+                       exit=FAILED, hint="先回到首页再试（maapilot screen shot 看现在在哪）")
+    items = {"4003": int(top["orundum"]), "4002": int(top["originite"])}
+    if top.get("lmd") is not None:
+        items["4001"] = int(top["lmd"])
+    prev = load("depot")
+    snap = {"at": common.iso(), "items": items, "source": "topbar"}
+    common.write_json(snap_path("depot"), snap)
+    return {**snap, "changed": diff((prev or {}).get("items"), items)}
+
+
 def read_depot() -> dict:
     """识别仓库、写快照，返回 {at, items: {id: n}, changed: [...]}。失败抛 CliError(depot_failed)。"""
+    from maapilot import config
+    try:
+        if config.connection().kind == "win32":
+            return _read_depot_from_topbar()
+    except CliError:
+        raise
+    except Exception:                                   # 没配置也不影响下面的正常路径
+        pass
     from maapilot.crew import maa
     common.ensure_device()
     maa.install_config()                    # 每次都同步：config.yaml 改了 adb 也能带给 maa-cli
@@ -73,9 +151,33 @@ def read_depot() -> dict:
     return {**snap, "changed": diff((prev or {}).get("items"), items)}
 
 
+# PC 客户端：干员入口在首页右侧（1280x720 参考系）。MAA 的 OperBox 任务在 PC 端不会自己走进去
+# （实测它点到了主界面编辑），所以先替它点开干员列表，再让它识别。
+WIN32_OPERATOR_BUTTON = (1002, 332)
+
+
+def _open_operator_list_win32() -> None:
+    """PC 客户端：先回首页、点开干员列表。失败了也不拦着（OperBox 会自己报认不出）。"""
+    try:
+        from maapilot import config
+        if config.connection().kind != "win32":
+            return
+        from maapilot.crew import nav
+        game = common.connect(ocr=True)
+        try:
+            nav.ensure_home(game)
+        except Exception:                              # noqa: BLE001 - 不在首页也试着点
+            pass
+        game.tap(*WIN32_OPERATOR_BUTTON)
+        time.sleep(1.5)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+
 def read_box() -> dict:
     from maapilot.crew import maa
     common.ensure_device()
+    _open_operator_list_win32()
     maa.install_config()                    # 每次都同步：config.yaml 改了 adb 也能带给 maa-cli
     try:
         ops = maa.operbox()
